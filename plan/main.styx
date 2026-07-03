@@ -160,6 +160,15 @@ children (
                 id w2-base-utils
                 title "Translate mem, utf8, int_stack, stringhash, trie, sigma"
                 deps (w2-scaffold)
+                sealed true
+                log (
+                    {
+                        at 2026-07-03T15:46:11.763013Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
+                    }
+                )
             }
 
             {
