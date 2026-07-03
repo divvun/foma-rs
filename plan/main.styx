@@ -190,6 +190,15 @@ children (
                 id w2-graph-algorithms
                 title "Translate determinize, minimize, topsort, reverse, coaccessible, extract"
                 deps (w2-structures-dynarray)
+                sealed true
+                log (
+                    {
+                        at 2026-07-03T18:37:06.984988Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
+                    }
+                )
             }
 
             {
