@@ -1,0 +1,59 @@
+name foma
+
+source {
+    url "git@github.com:mhulden/foma.git"
+    ref master
+}
+
+children (
+    {
+        id wave-1-markup
+        title "Wave 1: markup — author sem rules for all 947 C functions"
+        children (
+            {
+                id w1-fomalib-api
+                title "sem pass: fomalib.md (199 public API functions)"
+            }
+
+            {
+                id w1-core-headers
+                title "sem pass: foma.md + fomalibconf.md (188 internal API functions)"
+            }
+
+            {
+                id w1-iface
+                title "sem pass: iface.md (108 CLI interface functions)"
+            }
+
+            {
+                id w1-constructions
+                title "sem pass: constructions.md (71 FSM construction functions)"
+            }
+
+            {
+                id w1-apply-spelling
+                title "sem pass: apply.md + spelling.md (73 runtime apply/spellcheck functions)"
+            }
+
+            {
+                id w1-structures
+                title "sem pass: structures/dynarray/stack/int_stack/stringhash/trie/mem (120 data-structure functions)"
+            }
+
+            {
+                id w1-algorithms
+                title "sem pass: determinize/minimize/sigma/utf8/topsort/reverse/coaccessible/extract (72 algorithm functions)"
+            }
+
+            {
+                id w1-io-lexc
+                title "sem pass: io/lexcread/lexc/flookup/cgflookup (76 IO and lexc functions)"
+            }
+
+            {
+                id w1-rewrite-flags-define
+                title "sem pass: rewrite/flags/define (40 rewrite-rule and flag functions)"
+            }
+        )
+    }
+)
