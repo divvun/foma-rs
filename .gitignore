@@ -18,3 +18,5 @@ Makefile
 *.cmake
 CMake*
 __pycache__/
+target/
+.nplan/

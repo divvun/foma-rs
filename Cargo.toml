@@ -1,0 +1,16 @@
+[workspace]
+resolver = "3"
+members = ["crates/foma"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+# NOTE: absolute paths because nplan worktrees live outside the repo tree;
+# switch to relative/published deps when the port stabilizes (Wave 4).
+[workspace.dependencies]
+nfst-xre = { path = "/Users/brendan/git/necessary/nfst/crates/nfst-xre" }
+nfst-lexc = { path = "/Users/brendan/git/necessary/nfst/crates/nfst-lexc" }
+nfst-xfst = { path = "/Users/brendan/git/necessary/nfst/crates/nfst-xfst" }
+flate2 = "1"
