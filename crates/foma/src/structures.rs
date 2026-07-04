@@ -1517,3 +1517,686 @@ pub fn fsm_find_ambiguous(_net: Box<Fsm>) -> Box<Fsm> {
 pub fn fsm_mark_ambiguous(_net: Box<Fsm>) -> Box<Fsm> {
     panic!("fsm_mark_ambiguous: dead prototype in C foma (declared, never defined; link error)");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::constructions::fsm_count;
+
+    /* Build a fresh, minimized net from a regex (the Wave-2 pipeline). */
+    fn parse(rx: &str) -> Box<Fsm> {
+        crate::regex::fsm_parse_regex(rx, None, None).expect("regex should compile")
+    }
+
+    fn st(state_no: i32, i: i16, o: i16, target: i32, fin: i8, start: i8) -> FsmState {
+        FsmState {
+            state_no,
+            r#in: i,
+            out: o,
+            target,
+            final_state: fin,
+            start_state: start,
+        }
+    }
+
+    fn raw_fsm(states: Vec<FsmState>, arity: i32) -> Box<Fsm> {
+        let mut net = fsm_create("");
+        net.states = states;
+        net.arity = arity;
+        net
+    }
+
+    // [spec:foma:sem:structures.fsm-get-library-version-string-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-library-version-string-fn/test]
+    #[test]
+    fn library_version_string() {
+        assert_eq!(fsm_get_library_version_string(), "0.10.0alpha");
+    }
+
+    // [spec:foma:sem:structures.fsm-set-option-fn/test]
+    // [spec:foma:sem:fomalib.fsm-set-option-fn/test]
+    // [spec:foma:sem:structures.fsm-get-option-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-option-fn/test]
+    #[test]
+    fn set_and_get_option() {
+        let skip = crate::types::FSM_OPTIONS::FSMO_SKIP_WORD_BOUNDARY_MARKER as u64;
+        let unknown = crate::types::FSM_OPTIONS::FSMO_NUM_OPTIONS as u64;
+
+        // set known option -> true, then get reflects the stored value
+        assert!(fsm_set_option(skip, &true));
+        assert_eq!(fsm_get_option(skip), Some(true));
+        assert!(fsm_set_option(skip, &false));
+        assert_eq!(fsm_get_option(skip), Some(false));
+
+        // any other option: set does nothing and returns false; get is None
+        assert!(!fsm_set_option(unknown, &true));
+        assert_eq!(fsm_get_option(unknown), None);
+        assert_eq!(fsm_get_option(9999), None);
+    }
+
+    // [spec:foma:sem:structures.linesortcompin-fn/test]
+    // [spec:foma:sem:structures.linesortcompout-fn/test]
+    #[test]
+    fn line_comparators() {
+        let a = st(0, 5, 7, 1, 0, 1);
+        let b = st(0, 2, 1, 1, 0, 1);
+        // int subtraction of the short fields
+        assert_eq!(linesortcompin(&a, &b), 3);
+        assert_eq!(linesortcompin(&b, &a), -3);
+        assert_eq!(linesortcompin(&a, &a), 0);
+        assert_eq!(linesortcompout(&a, &b), 6);
+        assert_eq!(linesortcompout(&b, &a), -6);
+    }
+
+    // [spec:foma:sem:structures.fsm-sort-arcs-fn/test]
+    // [spec:foma:sem:fomalib.fsm-sort-arcs-fn/test]
+    #[test]
+    fn sort_arcs_by_in_direction_1() {
+        let mut net = raw_fsm(
+            vec![
+                st(0, 5, 0, 1, 0, 1),
+                st(0, 2, 0, 1, 0, 1),
+                st(0, 8, 0, 1, 0, 1),
+                st(1, -1, -1, -1, 1, 0),
+                st(-1, -1, -1, -1, -1, -1),
+            ],
+            2,
+        );
+        fsm_sort_arcs(&mut net, 1);
+        assert_eq!(net.states[0].r#in, 2);
+        assert_eq!(net.states[1].r#in, 5);
+        assert_eq!(net.states[2].r#in, 8);
+        // arity != 1, direction 1: in sorted, out flag cleared
+        assert_eq!(net.arcs_sorted_in, 1);
+        assert_eq!(net.arcs_sorted_out, 0);
+    }
+
+    // [spec:foma:sem:structures.fsm-sort-arcs-fn/test]
+    // [spec:foma:sem:fomalib.fsm-sort-arcs-fn/test]
+    #[test]
+    fn sort_arcs_by_out_direction_2() {
+        let mut net = raw_fsm(
+            vec![
+                st(0, 0, 7, 1, 0, 1),
+                st(0, 0, 1, 1, 0, 1),
+                st(0, 0, 4, 1, 0, 1),
+                st(1, -1, -1, -1, 1, 0),
+                st(-1, -1, -1, -1, -1, -1),
+            ],
+            2,
+        );
+        fsm_sort_arcs(&mut net, 2);
+        assert_eq!(net.states[0].out, 1);
+        assert_eq!(net.states[1].out, 4);
+        assert_eq!(net.states[2].out, 7);
+        assert_eq!(net.arcs_sorted_out, 1);
+        assert_eq!(net.arcs_sorted_in, 0);
+    }
+
+    // [spec:foma:sem:structures.fsm-sort-arcs-fn/test]
+    // [spec:foma:sem:fomalib.fsm-sort-arcs-fn/test]
+    #[test]
+    fn sort_arcs_arity_1_sets_both_flags() {
+        let mut net = raw_fsm(
+            vec![
+                st(0, 5, 0, 1, 0, 1),
+                st(0, 2, 0, 1, 0, 1),
+                st(1, -1, -1, -1, 1, 0),
+                st(-1, -1, -1, -1, -1, -1),
+            ],
+            1,
+        );
+        fsm_sort_arcs(&mut net, 1);
+        assert_eq!(net.arcs_sorted_in, 1);
+        assert_eq!(net.arcs_sorted_out, 1);
+    }
+
+    // [spec:foma:sem:structures.map-firstlines-fn/test]
+    // [spec:foma:sem:fomalibconf.map-firstlines-fn/test]
+    #[test]
+    fn map_firstlines_indexes_first_line_per_state() {
+        let net = fsm_identity(); // state 0 at line 0, state 1 at line 1, statecount 2
+        let sa = map_firstlines(&net);
+        assert_eq!(sa.len(), (net.statecount + 1) as usize);
+        assert_eq!(sa[0].transitions, 0);
+        assert_eq!(sa[1].transitions, 1);
+    }
+
+    // [spec:foma:sem:structures.fsm-boolean-fn/test]
+    // [spec:foma:sem:fomalib.fsm-boolean-fn/test]
+    #[test]
+    fn boolean_maps_to_empty_set_or_string() {
+        // value 0 -> empty set (accepts nothing)
+        let zero = fsm_boolean(0);
+        assert_eq!(zero.finalcount, 0);
+        assert_eq!(zero.pathcount, 0);
+        // any nonzero -> empty string (accepts only "")
+        for v in [1, 5, -3] {
+            let net = fsm_boolean(v);
+            assert_eq!(net.finalcount, 1);
+            assert_eq!(net.pathcount, 1);
+        }
+    }
+
+    // [spec:foma:sem:structures.fsm-empty-set-fn/test]
+    // [spec:foma:sem:fomalib.fsm-empty-set-fn/test]
+    #[test]
+    fn empty_set_shape() {
+        let net = fsm_empty_set();
+        assert_eq!(net.states.len(), 2);
+        // lone non-final arcless start state
+        assert_eq!(net.states[0].state_no, 0);
+        assert_eq!(net.states[0].target, -1);
+        assert_eq!(net.states[0].final_state, 0);
+        assert_eq!(net.states[0].start_state, 1);
+        assert_eq!(net.states[0].r#in, -1);
+        assert_eq!(net.states[0].out, -1);
+        assert_eq!(net.states[1].state_no, -1); // sentinel
+        assert_eq!(net.statecount, 1);
+        assert_eq!(net.finalcount, 0);
+        assert_eq!(net.arccount, 0);
+        assert_eq!(net.linecount, 2);
+        assert_eq!(net.pathcount, 0);
+        // flags: det/pru/min/eps/loop YES, completed NO, sort flags cleared
+        assert_eq!(net.is_deterministic, YES);
+        assert_eq!(net.is_minimized, YES);
+        assert_eq!(net.is_loop_free, YES);
+        assert_eq!(net.is_completed, NO);
+        assert_eq!(net.arcs_sorted_in, NO);
+    }
+
+    // [spec:foma:sem:structures.fsm-empty-string-fn/test]
+    // [spec:foma:sem:fomalib.fsm-empty-string-fn/test]
+    #[test]
+    fn empty_string_shape() {
+        let net = fsm_empty_string();
+        assert_eq!(net.states.len(), 2);
+        assert_eq!(net.states[0].state_no, 0);
+        assert_eq!(net.states[0].target, -1);
+        assert_eq!(net.states[0].final_state, 1); // final start state
+        assert_eq!(net.states[0].start_state, 1);
+        assert_eq!(net.states[1].state_no, -1); // sentinel
+        assert_eq!(net.statecount, 1);
+        assert_eq!(net.finalcount, 1);
+        assert_eq!(net.arccount, 0);
+        assert_eq!(net.linecount, 2);
+        assert_eq!(net.pathcount, 1);
+    }
+
+    // [spec:foma:sem:structures.fsm-identity-fn/test]
+    // [spec:foma:sem:fomalib.fsm-identity-fn/test]
+    #[test]
+    fn identity_shape() {
+        let net = fsm_identity();
+        assert_eq!(net.states.len(), 3);
+        // line 0: IDENTITY:IDENTITY arc 0 -> 1
+        assert_eq!(net.states[0].state_no, 0);
+        assert_eq!(net.states[0].r#in as i32, IDENTITY);
+        assert_eq!(net.states[0].out as i32, IDENTITY);
+        assert_eq!(net.states[0].target, 1);
+        assert_eq!(net.states[0].final_state, 0);
+        assert_eq!(net.states[0].start_state, 1);
+        // line 1: final non-start
+        assert_eq!(net.states[1].state_no, 1);
+        assert_eq!(net.states[1].target, -1);
+        assert_eq!(net.states[1].final_state, 1);
+        assert_eq!(net.states[2].state_no, -1); // sentinel
+        // single sigma node = IDENTITY symbol
+        let sig = net.sigma.as_deref().unwrap();
+        assert_eq!(sig.number, IDENTITY);
+        assert_eq!(sig.symbol.as_deref(), Some("@_IDENTITY_SYMBOL_@"));
+        assert!(sig.next.is_none());
+        assert_eq!(net.statecount, 2);
+        assert_eq!(net.finalcount, 1);
+        assert_eq!(net.arccount, 1);
+        assert_eq!(net.linecount, 3);
+        assert_eq!(net.pathcount, 1);
+    }
+
+    // [spec:foma:sem:structures.fsm-empty-fn/test]
+    // [spec:foma:sem:fomalib.fsm-empty-fn/test]
+    #[test]
+    fn empty_state_table() {
+        let t = fsm_empty();
+        assert_eq!(t.len(), 2);
+        assert_eq!(t[0].state_no, 0);
+        assert_eq!(t[0].r#in, -1);
+        assert_eq!(t[0].out, -1);
+        assert_eq!(t[0].target, -1);
+        assert_eq!(t[0].final_state, 0);
+        assert_eq!(t[0].start_state, 1);
+        assert_eq!(t[1].state_no, -1); // sentinel
+    }
+
+    // [spec:foma:sem:structures.fsm-create-fn/test]
+    // [spec:foma:sem:fomalib.fsm-create-fn/test]
+    #[test]
+    fn create_defaults_and_name_truncation() {
+        let net = fsm_create("mynet");
+        assert_eq!(net.name, "mynet");
+        assert_eq!(net.arity, 1);
+        assert_eq!(net.arccount, 0);
+        assert_eq!(net.is_deterministic, NO);
+        assert_eq!(net.is_minimized, NO);
+        assert_eq!(net.arcs_sorted_in, NO);
+        // sigma = single empty node
+        let sig = net.sigma.as_deref().unwrap();
+        assert_eq!(sig.number, -1);
+        assert!(sig.symbol.is_none());
+        assert!(sig.next.is_none());
+        assert!(net.states.is_empty());
+
+        // name > 40 bytes is truncated to exactly 40 bytes (strncpy quirk)
+        let long: String = "a".repeat(45);
+        let net2 = fsm_create(&long);
+        assert_eq!(net2.name.len(), FSM_NAME_LEN);
+        assert_eq!(net2.name, "a".repeat(40));
+    }
+
+    // [spec:foma:sem:structures.fsm-sigma-destroy-fn/test]
+    // [spec:foma:sem:fomalib.fsm-sigma-destroy-fn/test]
+    #[test]
+    fn sigma_destroy_always_returns_1() {
+        assert_eq!(fsm_sigma_destroy(None), 1);
+        let list = Some(Box::new(Sigma {
+            number: 3,
+            symbol: Some("a".to_string()),
+            next: Some(Box::new(Sigma {
+                number: 4,
+                symbol: Some("b".to_string()),
+                next: None,
+            })),
+        }));
+        assert_eq!(fsm_sigma_destroy(list), 1);
+    }
+
+    // [spec:foma:sem:structures.fsm-destroy-fn/test]
+    // [spec:foma:sem:fomalib.fsm-destroy-fn/test]
+    #[test]
+    fn destroy_returns_1() {
+        assert_eq!(fsm_destroy(fsm_empty_set()), 1);
+        let mut net = fsm_empty_set();
+        net.medlookup = Some(Box::new(crate::types::Medlookup {
+            confusion_matrix: vec![1, 2, 3],
+        }));
+        assert_eq!(fsm_destroy(net), 1);
+    }
+
+    // [spec:foma:sem:structures.fsm-isuniversal-fn/test]
+    // [spec:foma:sem:fomalib.fsm-isuniversal-fn/test]
+    #[test]
+    fn isuniversal_always_zero() {
+        // a genuinely universal net ?* STILL returns 0 (mutually-exclusive
+        // conjuncts line1.state_no==0 && line1.state_no==-1, ported literally)
+        assert_eq!(fsm_isuniversal(parse("?*")), 0);
+        assert_eq!(fsm_isuniversal(fsm_empty_set()), 0);
+        assert_eq!(fsm_isuniversal(parse("a")), 0);
+    }
+
+    // [spec:foma:sem:structures.fsm-isempty-fn/test]
+    // [spec:foma:sem:fomalib.fsm-isempty-fn/test]
+    #[test]
+    fn isempty_predicate() {
+        assert_eq!(fsm_isempty(&mut fsm_empty_set()), 1);
+        assert_eq!(fsm_isempty(&mut fsm_empty_string()), 0); // {""} is not empty
+        assert_eq!(fsm_isempty(&mut parse("a")), 0);
+    }
+
+    // [spec:foma:sem:structures.fsm-issequential-fn/test]
+    // [spec:foma:sem:fomalib.fsm-issequential-fn/test]
+    #[test]
+    fn issequential_predicate() {
+        assert_eq!(fsm_issequential(&parse("a b c")), 1);
+        assert_eq!(fsm_issequential(&parse("a")), 1);
+        // two arcs with the same input symbol at one state -> not sequential
+        assert_eq!(fsm_issequential(&parse("a:b | a:c")), 0);
+    }
+
+    // [spec:foma:sem:structures.fsm-isfunctional-fn/test]
+    // [spec:foma:sem:fomalib.fsm-isfunctional-fn/test]
+    #[test]
+    fn isfunctional_predicate() {
+        assert_eq!(fsm_isfunctional(&mut parse("a:b")), 1);
+        assert_eq!(fsm_isfunctional(&mut parse("a:b | a:c")), 0);
+    }
+
+    // [spec:foma:sem:structures.fsm-isunambiguous-fn/test]
+    // [spec:foma:sem:fomalib.fsm-isunambiguous-fn/test]
+    #[test]
+    fn isunambiguous_predicate() {
+        assert_eq!(fsm_isunambiguous(&mut parse("a:b")), 1);
+        assert_eq!(fsm_isunambiguous(&mut parse("a:b | a:c")), 0);
+    }
+
+    // [spec:foma:sem:structures.fsm-isidentity-fn/test]
+    // [spec:foma:sem:fomalib.fsm-isidentity-fn/test]
+    #[test]
+    fn isidentity_predicate() {
+        assert_eq!(fsm_isidentity(&mut fsm_identity()), 1); // ? maps x->x
+        assert_eq!(fsm_isidentity(&mut parse("a")), 1); // a:a is identity
+        assert_eq!(fsm_isidentity(&mut parse("a:b")), 0);
+    }
+
+    // [spec:foma:sem:structures.fsm-extract-ambiguous-domain-fn/test]
+    // [spec:foma:sem:fomalib.fsm-extract-ambiguous-domain-fn/test]
+    #[test]
+    fn extract_ambiguous_domain_predicate() {
+        // ambiguously-mapped inputs of a:b|a:c = {a} -> non-empty
+        let mut d = fsm_extract_ambiguous_domain(parse("a:b | a:c"));
+        assert_eq!(fsm_isempty(&mut d), 0);
+        // functional net -> no ambiguous domain
+        let mut d2 = fsm_extract_ambiguous_domain(parse("a:b"));
+        assert_eq!(fsm_isempty(&mut d2), 1);
+    }
+
+    // [spec:foma:sem:structures.fsm-extract-ambiguous-fn/test]
+    // [spec:foma:sem:fomalib.fsm-extract-ambiguous-fn/test]
+    #[test]
+    fn extract_ambiguous_predicate() {
+        let mut a = fsm_extract_ambiguous(parse("a:b | a:c"));
+        assert_eq!(fsm_isempty(&mut a), 0);
+        let mut a2 = fsm_extract_ambiguous(parse("a:b"));
+        assert_eq!(fsm_isempty(&mut a2), 1);
+    }
+
+    // [spec:foma:sem:structures.fsm-extract-unambiguous-fn/test]
+    // [spec:foma:sem:fomalib.fsm-extract-unambiguous-fn/test]
+    #[test]
+    fn extract_unambiguous_predicate() {
+        // only input "a" and it is ambiguous -> unambiguous part empty
+        let mut u = fsm_extract_unambiguous(parse("a:b | a:c"));
+        assert_eq!(fsm_isempty(&mut u), 1);
+        // functional net -> whole thing is unambiguous
+        let mut u2 = fsm_extract_unambiguous(parse("a:b"));
+        assert_eq!(fsm_isempty(&mut u2), 0);
+    }
+
+    // [spec:foma:sem:structures.fsm-extract-nonidentity-fn/test]
+    // [spec:foma:sem:fomalib.fsm-extract-nonidentity-fn/test]
+    #[test]
+    fn extract_nonidentity_predicate() {
+        // a:b violates identity -> upper side {a} non-empty
+        let mut n = fsm_extract_nonidentity(parse("a:b"));
+        assert_eq!(fsm_isempty(&mut n), 0);
+        // a:a is an identity relation -> no violating paths
+        let mut n2 = fsm_extract_nonidentity(parse("a"));
+        assert_eq!(fsm_isempty(&mut n2), 1);
+    }
+
+    // [spec:foma:sem:structures.fsm-markallfinal-fn/test]
+    // [spec:foma:sem:fomalib.fsm-markallfinal-fn/test]
+    #[test]
+    fn markallfinal_sets_every_line_final() {
+        let net = fsm_markallfinal(fsm_identity());
+        assert_eq!(net.states[0].final_state, YES as i8); // was 0
+        assert_eq!(net.states[1].final_state, YES as i8);
+        assert_eq!(net.states[2].state_no, -1); // sentinel untouched
+    }
+
+    // [spec:foma:sem:structures.fsm-lowerdet-fn/test]
+    // [spec:foma:sem:fomalib.fsm-lowerdet-fn/test]
+    #[test]
+    fn lowerdet_relabels_outputs_uniquely() {
+        // a:b|a:c: state 0's two arcs get distinct outputs 3,4 (3+k, k=arc index)
+        let net = fsm_lowerdet(parse("a:b | a:c"));
+        let mut outs: Vec<i16> = net
+            .states
+            .iter()
+            .filter(|s| s.state_no == 0 && s.target != -1)
+            .map(|s| s.out)
+            .collect();
+        outs.sort();
+        assert_eq!(outs, vec![3, 4]);
+
+        // IDENTITY input is rewritten to UNKNOWN, output relabeled to 3
+        let idnet = fsm_lowerdet(fsm_identity());
+        let arc = idnet
+            .states
+            .iter()
+            .find(|s| s.state_no == 0 && s.target != -1)
+            .unwrap();
+        assert_eq!(arc.out, 3);
+        assert_eq!(arc.r#in as i32, UNKNOWN);
+    }
+
+    // [spec:foma:sem:structures.fsm-lowerdeteps-fn/test]
+    // [spec:foma:sem:fomalib.fsm-lowerdeteps-fn/test]
+    #[test]
+    fn lowerdeteps_leaves_epsilon_output_untouched() {
+        // a:0 has an epsilon-output arc: lowerdet -> out 3, lowerdeteps -> out 0
+        let det = fsm_lowerdet(parse("a:0"));
+        let a1 = det
+            .states
+            .iter()
+            .find(|s| s.state_no == 0 && s.target != -1)
+            .unwrap();
+        assert_eq!(a1.out, 3);
+
+        let eps = fsm_lowerdeteps(parse("a:0"));
+        let a2 = eps
+            .states
+            .iter()
+            .find(|s| s.state_no == 0 && s.target != -1)
+            .unwrap();
+        assert_eq!(a2.out as i32, EPSILON); // untouched
+    }
+
+    // [spec:foma:sem:structures.fsm-copy-fn/test]
+    // [spec:foma:sem:fomalib.fsm-copy-fn/test]
+    #[test]
+    fn copy_is_deep_and_refreshes_source_counts() {
+        let mut net = fsm_identity();
+        // deliberately staled scalar counts on the source
+        net.statecount = 999;
+        net.finalcount = 888;
+        let mut copy = fsm_copy(&mut net);
+        // copy captured the STALE scalar counts (before fsm_count refresh)
+        assert_eq!(copy.statecount, 999);
+        assert_eq!(copy.finalcount, 888);
+        // the SOURCE was refreshed by fsm_count(net)
+        assert_eq!(net.statecount, 2);
+        assert_eq!(net.finalcount, 1);
+        // full table duplicated (linecount includes the sentinel)
+        assert_eq!(copy.states.len(), net.linecount as usize);
+        // deep copy: mutating the copy does not touch the source buffer
+        let src0 = net.states[0].r#in;
+        copy.states[0].r#in = 77;
+        assert_eq!(net.states[0].r#in, src0);
+    }
+
+    // [spec:foma:sem:structures.fsm-state-copy-fn/test]
+    // [spec:foma:sem:fomalibconf.fsm-state-copy-fn/test]
+    #[test]
+    fn state_copy_duplicates_n_lines() {
+        let net = fsm_identity(); // 3 lines incl. sentinel
+        let full = fsm_state_copy(&net.states, 3);
+        assert_eq!(full.len(), 3);
+        assert_eq!(full[0].state_no, net.states[0].state_no);
+        assert_eq!(full[2].state_no, -1);
+        // partial copy of just 2 lines
+        let partial = fsm_state_copy(&net.states, 2);
+        assert_eq!(partial.len(), 2);
+    }
+
+    // [spec:foma:sem:structures.find-arccount-fn/test]
+    // [spec:foma:sem:fomalibconf.find-arccount-fn/test]
+    #[test]
+    fn find_arccount_counts_lines_before_sentinel() {
+        // includes arcless marker lines, excludes the sentinel
+        assert_eq!(find_arccount(&fsm_identity().states), 2);
+        assert_eq!(find_arccount(&fsm_empty()), 1);
+    }
+
+    // [spec:foma:sem:structures.clear-quantifiers-fn/test]
+    // [spec:foma:sem:foma.clear-quantifiers-fn/test]
+    // [spec:foma:sem:structures.count-quantifiers-fn/test]
+    // [spec:foma:sem:foma.count-quantifiers-fn/test]
+    // [spec:foma:sem:structures.add-quantifier-fn/test]
+    // [spec:foma:sem:foma.add-quantifier-fn/test]
+    // [spec:foma:sem:structures.find-quantifier-fn/test]
+    // [spec:foma:sem:foma.find-quantifier-fn/test]
+    #[test]
+    fn quantifier_list_add_count_find_clear() {
+        clear_quantifiers();
+        assert_eq!(count_quantifiers(), 0);
+        add_quantifier("x");
+        add_quantifier("y");
+        assert_eq!(count_quantifiers(), 2);
+        assert_eq!(find_quantifier("x").as_deref(), Some("x"));
+        assert_eq!(find_quantifier("y").as_deref(), Some("y"));
+        assert_eq!(find_quantifier("z"), None);
+        // no duplicate check: adding "x" again makes a second node
+        add_quantifier("x");
+        assert_eq!(count_quantifiers(), 3);
+        // clear drops the whole list
+        clear_quantifiers();
+        assert_eq!(count_quantifiers(), 0);
+        assert_eq!(find_quantifier("x"), None);
+    }
+
+    // [spec:foma:sem:structures.purge-quantifier-fn/test]
+    // [spec:foma:sem:foma.purge-quantifier-fn/test]
+    #[test]
+    fn purge_quantifier_consecutive_match_quirk() {
+        clear_quantifiers();
+        // two CONSECUTIVE matches then a non-match: only the FIRST match is
+        // unlinked (the prev cursor advances onto the just-removed node)
+        add_quantifier("a");
+        add_quantifier("a");
+        add_quantifier("b");
+        purge_quantifier("a");
+        assert_eq!(count_quantifiers(), 2); // one "a" survives, plus "b"
+        assert_eq!(find_quantifier("a").as_deref(), Some("a"));
+        assert_eq!(find_quantifier("b").as_deref(), Some("b"));
+
+        // non-consecutive matches are both removed
+        clear_quantifiers();
+        add_quantifier("a");
+        add_quantifier("b");
+        add_quantifier("a");
+        purge_quantifier("a");
+        assert_eq!(count_quantifiers(), 1);
+        assert_eq!(find_quantifier("a"), None);
+        assert_eq!(find_quantifier("b").as_deref(), Some("b"));
+        clear_quantifiers();
+    }
+
+    // [spec:foma:sem:structures.union-quantifiers-fn/test]
+    // [spec:foma:sem:foma.union-quantifiers-fn/test]
+    #[test]
+    fn union_quantifiers_shape_and_linecount_quirk() {
+        clear_quantifiers();
+        add_quantifier("x");
+        add_quantifier("y");
+        let net = union_quantifiers();
+        // syms == 2: table has syms+1 = 3 lines but linecount EXCLUDES sentinel
+        assert_eq!(net.states.len(), 3);
+        assert_eq!(net.linecount, 2);
+        assert_eq!(net.arccount, 2);
+        assert_eq!(net.statecount, 1);
+        assert_eq!(net.finalcount, 1);
+        // each arc is a self-loop, final+start, consecutive symbol numbers
+        assert_eq!(net.states[0].state_no, 0);
+        assert_eq!(net.states[0].target, 0);
+        assert_eq!(net.states[0].final_state, 1);
+        assert_eq!(net.states[0].start_state, 1);
+        assert_eq!(net.states[0].r#in, net.states[0].out);
+        assert_eq!(net.states[1].r#in, net.states[0].r#in + 1);
+        assert_eq!(net.states[2].state_no, -1); // sentinel
+
+        // empty list: table is just the sentinel (no state 0), linecount 0
+        clear_quantifiers();
+        let empty = union_quantifiers();
+        assert_eq!(empty.states.len(), 1);
+        assert_eq!(empty.states[0].state_no, -1);
+        assert_eq!(empty.linecount, 0);
+        assert_eq!(empty.arccount, 0);
+        clear_quantifiers();
+    }
+
+    // [spec:foma:sem:structures.fsm-sigma-net-fn/test]
+    // [spec:foma:sem:fomalib.fsm-sigma-net-fn/test]
+    #[test]
+    fn sigma_net_shape() {
+        // one arc per alphabet symbol (a,b,c) from state 0 -> final state 1
+        let net = fsm_sigma_net(parse("a | b | c"));
+        assert_eq!(net.pathcount, 3);
+        assert_eq!(net.statecount, 2);
+        assert_eq!(net.is_minimized, YES);
+        assert_eq!(net.is_loop_free, YES);
+
+        // sigma_size == 0 (sigma == NULL) -> destroy and return empty set
+        let mut bare = fsm_create("");
+        bare.sigma = None;
+        let res = fsm_sigma_net(bare);
+        assert_eq!(res.statecount, 1);
+        assert_eq!(res.finalcount, 0);
+        assert_eq!(res.pathcount, 0);
+    }
+
+    // [spec:foma:sem:structures.fsm-sigma-pairs-net-fn/test]
+    // [spec:foma:sem:fomalib.fsm-sigma-pairs-net-fn/test]
+    #[test]
+    fn sigma_pairs_net_shape() {
+        // distinct (in,out) pairs of a:b|a:c = {(a,b),(a,c)} -> 2 arcs
+        let net = fsm_sigma_pairs_net(parse("a:b | a:c"));
+        assert_eq!(net.pathcount, 2);
+        assert_eq!(net.statecount, 2);
+        assert_eq!(net.is_minimized, YES);
+
+        // no arcs in source -> pathcount 0 -> destroy and return empty set
+        let res = fsm_sigma_pairs_net(fsm_empty_string());
+        assert_eq!(res.statecount, 1);
+        assert_eq!(res.finalcount, 0);
+        assert_eq!(res.pathcount, 0);
+    }
+
+    // [spec:foma:sem:structures.fsm-quantifier-fn/test]
+    // [spec:foma:sem:fomalib.fsm-quantifier-fn/test]
+    #[test]
+    fn quantifier_builds_nonempty_net() {
+        // \x* x \x* x \x*  (strings with exactly two x's) -> non-empty language
+        let mut net = fsm_quantifier("x");
+        assert_eq!(fsm_isempty(&mut net), 0);
+    }
+
+    // [spec:foma:sem:structures.fsm-logical-precedence-fn/test]
+    // [spec:foma:sem:fomalib.fsm-logical-precedence-fn/test]
+    #[test]
+    fn logical_precedence_builds_net() {
+        clear_quantifiers();
+        add_quantifier("Q");
+        let mut net = fsm_logical_precedence("x", "y");
+        fsm_count(&mut net);
+        assert!(net.statecount >= 1);
+        assert!(!net.states.is_empty());
+        clear_quantifiers();
+    }
+
+    // [spec:foma:sem:structures.fsm-logical-eq-fn/test]
+    // [spec:foma:sem:fomalib.fsm-logical-eq-fn/test]
+    #[test]
+    fn logical_eq_builds_net() {
+        clear_quantifiers();
+        add_quantifier("Q");
+        let mut net = fsm_logical_eq("x", "y");
+        fsm_count(&mut net);
+        assert!(net.statecount >= 1);
+        assert!(!net.states.is_empty());
+        clear_quantifiers();
+    }
+
+    // [spec:foma:sem:fomalib.fsm-find-ambiguous-fn/test]
+    #[test]
+    #[should_panic]
+    fn find_ambiguous_dead_prototype_panics() {
+        let _ = fsm_find_ambiguous(fsm_empty_set());
+    }
+
+    // [spec:foma:sem:fomalib.fsm-mark-ambiguous-fn/test]
+    #[test]
+    #[should_panic]
+    fn mark_ambiguous_dead_prototype_panics() {
+        let _ = fsm_mark_ambiguous(fsm_empty_set());
+    }
+}

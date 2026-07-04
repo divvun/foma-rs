@@ -1134,3 +1134,687 @@ pub fn fsm_read_done(handle: Box<FsmReadHandle>) -> Box<Fsm> {
     let mut handle = handle;
     handle.net.take().unwrap()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Fsm, FsmState, Sigma};
+
+    /* FsmState has no PartialEq (types.rs is out of scope); compare the six
+    fields as a tuple, which does. */
+    fn line(l: &FsmState) -> (i32, i16, i16, i32, i8, i8) {
+        (
+            l.state_no,
+            l.r#in,
+            l.out,
+            l.target,
+            l.final_state,
+            l.start_state,
+        )
+    }
+
+    /* ---- module-static builder family ------------------------------- */
+
+    // [spec:foma:sem:dynarray.fsm-state-init-fn/test]
+    // [spec:foma:sem:dynarray.fsm-state-set-current-state-fn/test]
+    // [spec:foma:sem:dynarray.fsm-state-add-arc-fn/test]
+    // [spec:foma:sem:dynarray.fsm-state-end-state-fn/test]
+    // [spec:foma:sem:dynarray.fsm-state-close-fn/test]
+    #[test]
+    fn fsm_state_build_line_table_and_sentinel() {
+        /* state 0: initial, one arc 0 -3:3-> 1; state 1: final, no arcs. */
+        fsm_state_init(4);
+        fsm_state_set_current_state(0, 0, 1);
+        fsm_state_add_arc(0, 3, 3, 1, 0, 1);
+        fsm_state_end_state();
+        fsm_state_set_current_state(1, 1, 0);
+        /* no arc emitted -> end_state must synthesize a placeholder line */
+        fsm_state_end_state();
+        let mut net = fsm_create("");
+        fsm_state_close(&mut net);
+
+        /* exact line table incl. the sentinel terminator */
+        assert_eq!(net.states.len(), 3);
+        assert_eq!(line(&net.states[0]), (0, 3, 3, 1, 0, 1));
+        assert_eq!(line(&net.states[1]), (1, -1, -1, -1, 1, 0));
+        assert_eq!(line(&net.states[2]), (-1, -1, -1, -1, -1, -1));
+
+        /* counts and heuristic flags copied out by fsm_state_close */
+        assert_eq!(net.arity, 1);
+        assert_eq!(net.arccount, 1);
+        assert_eq!(net.statecount, 2);
+        assert_eq!(net.linecount, 3);
+        assert_eq!(net.finalcount, 1);
+        assert_eq!(net.pathcount, PATHCOUNT_UNKNOWN);
+        assert_eq!(net.is_deterministic, 1);
+        assert_eq!(net.is_epsilon_free, 1);
+        assert_eq!(net.is_pruned, UNK);
+        assert_eq!(net.is_minimized, UNK);
+        assert_eq!(net.is_loop_free, UNK);
+        assert_eq!(net.is_completed, UNK);
+        assert_eq!(net.arcs_sorted_in, 0);
+        assert_eq!(net.arcs_sorted_out, 0);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-state-set-current-state-fn/test]
+    #[test]
+    fn fsm_state_set_current_state_counts_only_exact_one() {
+        fsm_state_init(4);
+        /* final/start flags of 2 and 5 are nonzero but not exactly 1 */
+        fsm_state_set_current_state(0, 2, 5);
+        assert_eq!(super::NUM_FINALS.with(|c| c.get()), 0);
+        assert_eq!(super::NUM_INITIALS.with(|c| c.get()), 0);
+        fsm_state_set_current_state(1, 1, 1);
+        assert_eq!(super::NUM_FINALS.with(|c| c.get()), 1);
+        assert_eq!(super::NUM_INITIALS.with(|c| c.get()), 1);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-state-add-arc-fn/test]
+    #[test]
+    fn fsm_state_add_arc_sets_arity_on_asymmetric_label() {
+        fsm_state_init(4);
+        fsm_state_set_current_state(0, 0, 1);
+        assert_eq!(super::ARITY.with(|c| c.get()), 1);
+        fsm_state_add_arc(0, 3, 4, 1, 0, 1); /* in != out */
+        assert_eq!(super::ARITY.with(|c| c.get()), 2);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-state-add-arc-fn/test]
+    #[test]
+    fn fsm_state_add_arc_epsilon_self_loop_dropped() {
+        fsm_state_init(4);
+        fsm_state_set_current_state(0, 0, 1);
+        /* EPSILON:EPSILON self-loop -> nothing appended, flags untouched */
+        fsm_state_add_arc(0, EPSILON, EPSILON, 0, 0, 1);
+        assert_eq!(super::CURRENT_FSM_LINECOUNT.with(|c| c.get()), 0);
+        assert!(super::IS_EPSILON_FREE.with(|c| c.get()));
+        assert!(super::IS_DETERMINISTIC.with(|c| c.get()));
+        /* EPSILON:EPSILON to a different target -> emitted, clears both flags */
+        fsm_state_add_arc(0, EPSILON, EPSILON, 1, 0, 1);
+        assert_eq!(super::CURRENT_FSM_LINECOUNT.with(|c| c.get()), 1);
+        assert!(!super::IS_EPSILON_FREE.with(|c| c.get()));
+        assert!(!super::IS_DETERMINISTIC.with(|c| c.get()));
+    }
+
+    // [spec:foma:sem:dynarray.fsm-state-add-arc-fn/test]
+    // [spec:foma:sem:dynarray.fsm-state-end-state-fn/test]
+    #[test]
+    fn fsm_state_add_arc_slookup_dedup_quirks() {
+        fsm_state_init(4);
+        fsm_state_set_current_state(0, 0, 1);
+        /* 1: first (3,3)->1 emitted */
+        fsm_state_add_arc(0, 3, 3, 1, 0, 1);
+        /* 2: exact duplicate (3,3)->1 silently dropped */
+        fsm_state_add_arc(0, 3, 3, 1, 0, 1);
+        assert_eq!(super::CURRENT_FSM_LINECOUNT.with(|c| c.get()), 1);
+        assert_eq!(super::ARCCOUNT.with(|c| c.get()), 1);
+        assert!(super::IS_DETERMINISTIC.with(|c| c.get()));
+        /* 3: same label, different target -> emitted, clears determinism,
+        overwrites the cell's recorded target to 2 */
+        fsm_state_add_arc(0, 3, 3, 2, 0, 1);
+        assert!(!super::IS_DETERMINISTIC.with(|c| c.get()));
+        /* 4: repeats the FIRST target (1); the cell now records 2, so this is
+        no longer seen as a duplicate and is emitted a second time (the quirk) */
+        fsm_state_add_arc(0, 3, 3, 1, 0, 1);
+
+        assert_eq!(super::CURRENT_FSM_LINECOUNT.with(|c| c.get()), 3);
+        assert_eq!(super::ARCCOUNT.with(|c| c.get()), 3);
+        let targets: Vec<i32> =
+            super::CURRENT_FSM_HEAD.with(|h| h.borrow().iter().map(|l| l.target).collect());
+        assert_eq!(targets, vec![1, 2, 1]);
+
+        /* end_state bumps mainloop, invalidating the stamps for the next state */
+        let before = super::MAINLOOP.with(|c| c.get());
+        fsm_state_end_state();
+        assert_eq!(super::MAINLOOP.with(|c| c.get()), before + 1);
+        assert_eq!(super::STATECOUNT.with(|c| c.get()), 1);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-state-close-fn/test]
+    #[test]
+    fn fsm_state_close_multiple_initials_clears_determinism() {
+        fsm_state_init(4);
+        fsm_state_set_current_state(0, 0, 1);
+        fsm_state_end_state();
+        fsm_state_set_current_state(1, 1, 1); /* second initial state */
+        fsm_state_end_state();
+        let mut net = fsm_create("");
+        fsm_state_close(&mut net);
+        /* num_initials > 1 forces is_deterministic = 0 even with no dup arcs */
+        assert_eq!(net.is_deterministic, 0);
+        /* and slookup is freed */
+        assert!(super::SLOOKUP.with(|s| s.borrow().is_empty()));
+    }
+
+    /* ---- construction family ---------------------------------------- */
+
+    // [spec:foma:sem:dynarray.fsm-construct-init-fn/test]
+    // [spec:foma:sem:fomalib.fsm-construct-init-fn/test]
+    #[test]
+    fn fsm_construct_init_shape() {
+        let h = fsm_construct_init("mynet");
+        assert_eq!(h.fsm_state_list.len(), 1024);
+        assert_eq!(h.fsm_state_list_size, 1024);
+        assert_eq!(h.fsm_sigma_list.len(), 1024);
+        assert_eq!(h.fsm_sigma_list_size, 1024);
+        assert_eq!(h.fsm_sigma_hash.len(), SIGMA_HASH_SIZE as usize);
+        /* C never initializes fsm_sigma_hash_size; the port pins it to 0 */
+        assert_eq!(h.fsm_sigma_hash_size, 0);
+        assert_eq!(h.maxstate, -1);
+        assert_eq!(h.maxsigma, -1);
+        assert_eq!(h.numfinals, 0);
+        assert_eq!(h.hasinitial, 0);
+        assert_eq!(h.name.as_deref(), Some("mynet"));
+        /* zeroed state slot */
+        let s = &h.fsm_state_list[0];
+        assert!(!s.used && !s.is_final && !s.is_initial);
+        assert_eq!(s.num_trans, 0);
+        assert!(s.fsm_trans_list.is_none());
+        /* empty sigma-hash bucket head */
+        assert!(h.fsm_sigma_hash[0].symbol.is_none());
+    }
+
+    // [spec:foma:sem:dynarray.fsm-construct-hash-sym-fn/test]
+    #[test]
+    fn fsm_construct_hash_sym_signed_char() {
+        assert_eq!(fsm_construct_hash_sym(""), 0);
+        assert_eq!(fsm_construct_hash_sym("a"), 97);
+        assert_eq!(fsm_construct_hash_sym("01"), 97);
+        /* "é" is UTF-8 0xC3 0xA9; as signed chars -61 + -87 = -148, which
+        wraps to 0xFFFFFF6C before % 1021 = 981 (unsigned chars would give
+        364, so this pins the signed-char sign extension). */
+        assert_eq!(fsm_construct_hash_sym("é"), 981);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-construct-check-size-fn/test]
+    #[test]
+    fn fsm_construct_check_size_grows_to_next_power_of_two() {
+        let mut h = fsm_construct_init("n");
+        fsm_construct_check_size(&mut h, 2000);
+        assert_eq!(h.fsm_state_list_size, 2048);
+        assert_eq!(h.fsm_state_list.len(), 2048);
+        /* new slots default-initialized; maxstate untouched by check_size */
+        assert!(!h.fsm_state_list[2000].used);
+        assert_eq!(h.maxstate, -1);
+        /* a no-op when already big enough */
+        fsm_construct_check_size(&mut h, 10);
+        assert_eq!(h.fsm_state_list_size, 2048);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-construct-add-symbol-fn/test]
+    // [spec:foma:sem:fomalib.fsm-construct-add-symbol-fn/test]
+    // [spec:foma:sem:dynarray.fsm-construct-check-symbol-fn/test]
+    // [spec:foma:sem:fomalib.fsm-construct-check-symbol-fn/test]
+    #[test]
+    fn fsm_construct_add_and_check_symbol_numbering() {
+        let mut h = fsm_construct_init("n");
+        assert_eq!(fsm_construct_check_symbol(&h, "cat"), -1);
+        /* first non-reserved symbol is floored to MINSIGMA = 3 */
+        assert_eq!(fsm_construct_add_symbol(&mut h, "cat"), 3);
+        assert_eq!(h.maxsigma, 3);
+        assert_eq!(fsm_construct_add_symbol(&mut h, "dog"), 4);
+        /* reserved symbols keep their fixed numbers, maxsigma not lowered */
+        assert_eq!(fsm_construct_add_symbol(&mut h, "@_EPSILON_SYMBOL_@"), EPSILON);
+        assert_eq!(fsm_construct_add_symbol(&mut h, "@_IDENTITY_SYMBOL_@"), IDENTITY);
+        assert_eq!(h.maxsigma, 4);
+        /* now findable via the hash */
+        assert_eq!(fsm_construct_check_symbol(&h, "cat"), 3);
+        assert_eq!(fsm_construct_check_symbol(&h, "dog"), 4);
+        assert_eq!(fsm_construct_check_symbol(&h, "missing"), -1);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-construct-add-symbol-fn/test]
+    // [spec:foma:sem:fomalib.fsm-construct-add-symbol-fn/test]
+    #[test]
+    fn fsm_construct_add_symbol_hash_bucket_chain() {
+        let mut h = fsm_construct_init("n");
+        /* "a" and "01" both sum to 97 -> same signed-char bucket 97 */
+        assert_eq!(fsm_construct_add_symbol(&mut h, "a"), 3);
+        assert_eq!(fsm_construct_add_symbol(&mut h, "01"), 4);
+        let head = &h.fsm_sigma_hash[97];
+        assert_eq!(head.symbol.as_deref(), Some("a"));
+        assert_eq!(head.sym, 3);
+        /* second colliding symbol spliced directly after the head */
+        let next = head.next.as_deref().unwrap();
+        assert_eq!(next.symbol.as_deref(), Some("01"));
+        assert_eq!(next.sym, 4);
+        assert!(next.next.is_none());
+    }
+
+    // [spec:foma:sem:dynarray.fsm-construct-set-final-fn/test]
+    // [spec:foma:sem:fomalib.fsm-construct-set-final-fn/test]
+    #[test]
+    fn fsm_construct_set_final_idempotent() {
+        let mut h = fsm_construct_init("n");
+        fsm_construct_set_final(&mut h, 5);
+        assert_eq!(h.maxstate, 5);
+        assert_eq!(h.numfinals, 1);
+        assert!(h.fsm_state_list[5].is_final);
+        /* does not set `used` */
+        assert!(!h.fsm_state_list[5].used);
+        /* repeated call does not recount */
+        fsm_construct_set_final(&mut h, 5);
+        assert_eq!(h.numfinals, 1);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-construct-set-initial-fn/test]
+    // [spec:foma:sem:fomalib.fsm-construct-set-initial-fn/test]
+    #[test]
+    fn fsm_construct_set_initial_sets_hasinitial() {
+        let mut h = fsm_construct_init("n");
+        fsm_construct_set_initial(&mut h, 2);
+        assert_eq!(h.maxstate, 2);
+        assert_eq!(h.hasinitial, 1);
+        assert!(h.fsm_state_list[2].is_initial);
+        assert!(!h.fsm_state_list[2].used);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-construct-add-arc-fn/test]
+    // [spec:foma:sem:fomalib.fsm-construct-add-arc-fn/test]
+    #[test]
+    fn fsm_construct_add_arc_prepends_and_interns() {
+        let mut h = fsm_construct_init("n");
+        fsm_construct_add_arc(&mut h, 0, 1, "a", "a");
+        fsm_construct_add_arc(&mut h, 0, 2, "b", "c");
+        assert_eq!(h.maxstate, 2);
+        assert!(h.fsm_state_list[0].used);
+        assert!(h.fsm_state_list[1].used);
+        assert!(h.fsm_state_list[2].used);
+        /* num_trans is not maintained */
+        assert_eq!(h.fsm_state_list[0].num_trans, 0);
+        /* newest-first: (b,c)->2 then (a,a)->1 */
+        let head = h.fsm_state_list[0].fsm_trans_list.as_deref().unwrap();
+        assert_eq!((head.r#in, head.out, head.target), (4, 5, 2));
+        let next = head.next.as_deref().unwrap();
+        assert_eq!((next.r#in, next.out, next.target), (3, 3, 1));
+        assert!(next.next.is_none());
+    }
+
+    // [spec:foma:sem:dynarray.fsm-construct-add-arc-nums-fn/test]
+    // [spec:foma:sem:fomalib.fsm-construct-add-arc-nums-fn/test]
+    #[test]
+    fn fsm_construct_add_arc_nums_no_sigma_touch() {
+        let mut h = fsm_construct_init("n");
+        fsm_construct_add_arc_nums(&mut h, 0, 1, 7, 8);
+        assert_eq!(h.maxstate, 1);
+        assert_eq!(h.maxsigma, -1); /* untouched */
+        assert!(h.fsm_state_list[0].used && h.fsm_state_list[1].used);
+        assert_eq!(h.fsm_state_list[0].num_trans, 0);
+        let head = h.fsm_state_list[0].fsm_trans_list.as_deref().unwrap();
+        assert_eq!((head.r#in, head.out, head.target), (7, 8, 1));
+    }
+
+    // [spec:foma:sem:dynarray.fsm-construct-copy-sigma-fn/test]
+    // [spec:foma:sem:fomalib.fsm-construct-copy-sigma-fn/test]
+    #[test]
+    fn fsm_construct_copy_sigma_bulk_loads() {
+        let sigma = Sigma {
+            number: 3,
+            symbol: Some("x".to_string()),
+            next: Some(Box::new(Sigma {
+                number: 5,
+                symbol: Some("y".to_string()),
+                next: Some(Box::new(Sigma {
+                    number: -1, /* terminates the walk */
+                    symbol: Some("z".to_string()),
+                    next: None,
+                })),
+            })),
+        };
+        let mut h = fsm_construct_init("n");
+        fsm_construct_copy_sigma(&mut h, Some(&sigma));
+        assert_eq!(h.maxsigma, 5);
+        assert_eq!(h.fsm_sigma_list[3].symbol.as_deref(), Some("x"));
+        assert_eq!(h.fsm_sigma_list[5].symbol.as_deref(), Some("y"));
+        /* the -1 node was not copied */
+        assert_eq!(fsm_construct_check_symbol(&h, "x"), 3);
+        assert_eq!(fsm_construct_check_symbol(&h, "y"), 5);
+        assert_eq!(fsm_construct_check_symbol(&h, "z"), -1);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-construct-convert-sigma-fn/test]
+    #[test]
+    fn fsm_construct_convert_sigma_ascending() {
+        let mut h = fsm_construct_init("n");
+        fsm_construct_add_symbol(&mut h, "@_EPSILON_SYMBOL_@"); /* 0 */
+        fsm_construct_add_symbol(&mut h, "cat"); /* 3 */
+        fsm_construct_add_symbol(&mut h, "dog"); /* 4 */
+        let sigma = fsm_construct_convert_sigma(&h);
+        let mut seen: Vec<(i32, String)> = Vec::new();
+        let mut cur = sigma.as_deref();
+        while let Some(s) = cur {
+            seen.push((s.number, s.symbol.clone().unwrap()));
+            cur = s.next.as_deref();
+        }
+        assert_eq!(
+            seen,
+            vec![
+                (0, "@_EPSILON_SYMBOL_@".to_string()),
+                (3, "cat".to_string()),
+                (4, "dog".to_string()),
+            ]
+        );
+    }
+
+    // [spec:foma:sem:dynarray.fsm-construct-done-fn/test]
+    // [spec:foma:sem:fomalib.fsm-construct-done-fn/test]
+    #[test]
+    fn fsm_construct_done_builds_net() {
+        let mut h = fsm_construct_init("mynet");
+        fsm_construct_set_initial(&mut h, 0);
+        fsm_construct_set_final(&mut h, 1);
+        fsm_construct_add_arc(&mut h, 0, 1, "a", "a");
+        let net = fsm_construct_done(h);
+
+        assert_eq!(net.name, "mynet");
+        assert_eq!(net.statecount, 2);
+        assert_eq!(net.finalcount, 1);
+        assert_eq!(net.arccount, 1);
+        assert_eq!(net.linecount, 3);
+        assert_eq!(net.pathcount, PATHCOUNT_UNKNOWN);
+        assert_eq!(net.arity, 1);
+        assert_eq!(net.is_deterministic, 1);
+        assert_eq!(net.is_epsilon_free, 1);
+        /* line table: arc line, state-1 placeholder, sentinel */
+        assert_eq!(line(&net.states[0]), (0, 3, 3, 1, 0, 1));
+        assert_eq!(line(&net.states[1]), (1, -1, -1, -1, 1, 0));
+        assert_eq!(line(&net.states[2]), (-1, -1, -1, -1, -1, -1));
+        /* sigma survived (single symbol, number 3 after sigma_sort) */
+        let s = net.sigma.as_deref().unwrap();
+        assert_eq!(s.number, 3);
+        assert_eq!(s.symbol.as_deref(), Some("a"));
+        assert!(s.next.is_none());
+    }
+
+    // [spec:foma:sem:dynarray.fsm-construct-done-fn/test]
+    // [spec:foma:sem:fomalib.fsm-construct-done-fn/test]
+    #[test]
+    fn fsm_construct_done_early_empty_set_when_no_final() {
+        let mut h = fsm_construct_init("x");
+        fsm_construct_set_initial(&mut h, 0);
+        fsm_construct_add_arc(&mut h, 0, 0, "a", "a");
+        /* numfinals == 0 -> immediate fsm_empty_set() */
+        let net = fsm_construct_done(h);
+        assert_eq!(net.statecount, 1);
+        assert_eq!(net.finalcount, 0);
+        assert_eq!(net.linecount, 2);
+        assert_eq!(net.pathcount, 0);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-construct-done-fn/test]
+    // [spec:foma:sem:fomalib.fsm-construct-done-fn/test]
+    #[test]
+    fn fsm_construct_done_emptyfsm_detection_returns_empty_set() {
+        /* valid handle (initial+final present) but no initial state has an
+        outgoing arc and none is both initial and final -> emptyfsm path */
+        let mut h = fsm_construct_init("x");
+        fsm_construct_set_initial(&mut h, 0);
+        fsm_construct_set_final(&mut h, 1);
+        let net = fsm_construct_done(h);
+        assert_eq!(net.statecount, 1);
+        assert_eq!(net.finalcount, 0);
+        assert_eq!(net.linecount, 2);
+        assert_eq!(net.pathcount, 0);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-construct-done-fn/test]
+    // [spec:foma:sem:fomalib.fsm-construct-done-fn/test]
+    #[test]
+    fn fsm_construct_done_name_truncated_at_40() {
+        let longname: String = "a".repeat(50);
+        let mut h = fsm_construct_init(&longname);
+        fsm_construct_set_initial(&mut h, 0);
+        fsm_construct_set_final(&mut h, 1);
+        fsm_construct_add_arc(&mut h, 0, 1, "a", "a");
+        let net = fsm_construct_done(h);
+        assert_eq!(net.name.len(), FSM_NAME_LEN);
+        assert_eq!(net.name, "a".repeat(FSM_NAME_LEN));
+    }
+
+    /* ---- reading family --------------------------------------------- */
+
+    /* Builds a 3-state net directly: state 0 initial with arcs 0-3:3->1 and
+    0-4:4->2; states 1 and 2 final. sigma: 3="a", 4="b". */
+    fn build_read_net() -> Box<Fsm> {
+        fsm_state_init(4);
+        fsm_state_set_current_state(0, 0, 1);
+        fsm_state_add_arc(0, 3, 3, 1, 0, 1);
+        fsm_state_add_arc(0, 4, 4, 2, 0, 1);
+        fsm_state_end_state();
+        fsm_state_set_current_state(1, 1, 0);
+        fsm_state_end_state();
+        fsm_state_set_current_state(2, 1, 0);
+        fsm_state_end_state();
+        let mut net = fsm_create("read");
+        net.sigma = None;
+        fsm_state_close(&mut net);
+        net.sigma = Some(Box::new(Sigma {
+            number: 3,
+            symbol: Some("a".to_string()),
+            next: Some(Box::new(Sigma {
+                number: 4,
+                symbol: Some("b".to_string()),
+                next: None,
+            })),
+        }));
+        net
+    }
+
+    // [spec:foma:sem:dynarray.fsm-read-init-fn/test]
+    // [spec:foma:sem:fomalib.fsm-read-init-fn/test]
+    // [spec:foma:sem:dynarray.fsm-read-is-final-fn/test]
+    // [spec:foma:sem:fomalib.fsm-read-is-final-fn/test]
+    // [spec:foma:sem:dynarray.fsm-read-is-initial-fn/test]
+    // [spec:foma:sem:fomalib.fsm-read-is-initial-fn/test]
+    // [spec:foma:sem:dynarray.fsm-get-num-states-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-num-states-fn/test]
+    // [spec:foma:sem:dynarray.fsm-get-has-unknowns-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-has-unknowns-fn/test]
+    #[test]
+    fn fsm_read_init_and_lookup_tables() {
+        let h = fsm_read_init(Some(build_read_net())).unwrap();
+        assert_eq!(fsm_get_num_states(&h), 3);
+        assert_eq!(fsm_get_has_unknowns(&h), 0);
+        /* is_initial returns bit 0 (1), is_final returns bit 1 (the value 2) */
+        assert_eq!(fsm_read_is_initial(&h, 0), 1);
+        assert_eq!(fsm_read_is_initial(&h, 1), 0);
+        assert_eq!(fsm_read_is_final(&h, 0), 0);
+        assert_eq!(fsm_read_is_final(&h, 1), 2);
+        assert_eq!(fsm_read_is_final(&h, 2), 2);
+        /* the -1-terminated finals/initials arrays */
+        assert_eq!(h.initials_head, vec![0, -1]);
+        assert_eq!(h.finals_head, vec![1, 2, -1]);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-read-init-fn/test]
+    // [spec:foma:sem:fomalib.fsm-read-init-fn/test]
+    #[test]
+    fn fsm_read_init_none_returns_none() {
+        assert!(fsm_read_init(None).is_none());
+    }
+
+    // [spec:foma:sem:dynarray.fsm-get-has-unknowns-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-has-unknowns-fn/test]
+    #[test]
+    fn fsm_read_detects_identity_label_as_unknown() {
+        fsm_state_init(4);
+        fsm_state_set_current_state(0, 1, 1);
+        fsm_state_add_arc(0, IDENTITY, IDENTITY, 0, 1, 1);
+        fsm_state_end_state();
+        let mut net = fsm_create("id");
+        net.sigma = None;
+        fsm_state_close(&mut net);
+        net.sigma = Some(Box::new(Sigma {
+            number: IDENTITY,
+            symbol: Some("@_IDENTITY_SYMBOL_@".to_string()),
+            next: None,
+        }));
+        let h = fsm_read_init(Some(net)).unwrap();
+        assert_eq!(fsm_get_has_unknowns(&h), 1);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-get-next-initial-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-next-initial-fn/test]
+    // [spec:foma:sem:dynarray.fsm-get-next-final-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-next-final-fn/test]
+    // [spec:foma:sem:dynarray.fsm-read-reset-fn/test]
+    // [spec:foma:sem:fomalib.fsm-read-reset-fn/test]
+    #[test]
+    fn fsm_read_initials_finals_iterators_and_reset() {
+        let mut h = fsm_read_init(Some(build_read_net())).unwrap();
+        /* initials: 0 then sticky -1 */
+        assert_eq!(fsm_get_next_initial(&mut h), 0);
+        assert_eq!(fsm_get_next_initial(&mut h), -1);
+        assert_eq!(fsm_get_next_initial(&mut h), -1);
+        /* finals: 1, 2 then sticky -1 */
+        assert_eq!(fsm_get_next_final(&mut h), 1);
+        assert_eq!(fsm_get_next_final(&mut h), 2);
+        assert_eq!(fsm_get_next_final(&mut h), -1);
+        assert_eq!(fsm_get_next_final(&mut h), -1);
+        /* reset restarts every iterator */
+        fsm_read_reset(Some(&mut *h));
+        assert_eq!(fsm_get_next_initial(&mut h), 0);
+        assert_eq!(fsm_get_next_final(&mut h), 1);
+        /* reset(None) is a no-op, not a crash */
+        fsm_read_reset(None);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-get-next-state-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-next-state-fn/test]
+    // [spec:foma:sem:dynarray.fsm-get-next-state-arc-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-next-state-arc-fn/test]
+    // [spec:foma:sem:dynarray.fsm-get-arc-source-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-arc-source-fn/test]
+    // [spec:foma:sem:dynarray.fsm-get-arc-target-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-arc-target-fn/test]
+    // [spec:foma:sem:dynarray.fsm-get-arc-num-in-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-arc-num-in-fn/test]
+    // [spec:foma:sem:dynarray.fsm-get-arc-num-out-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-arc-num-out-fn/test]
+    // [spec:foma:sem:dynarray.fsm-get-arc-in-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-arc-in-fn/test]
+    // [spec:foma:sem:dynarray.fsm-get-arc-out-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-arc-out-fn/test]
+    #[test]
+    fn fsm_get_next_state_and_arc_walk() {
+        let mut h = fsm_read_init(Some(build_read_net())).unwrap();
+        /* state 0 */
+        assert_eq!(fsm_get_next_state(&mut h), 0);
+        /* first arc 0 -3:3-> 1 (cursor parked one before, pre-incremented) */
+        assert_eq!(fsm_get_next_state_arc(&mut h), 1);
+        assert_eq!(fsm_get_arc_source(&h), 0);
+        assert_eq!(fsm_get_arc_target(&h), 1);
+        assert_eq!(fsm_get_arc_num_in(&h), 3);
+        assert_eq!(fsm_get_arc_num_out(&h), 3);
+        assert_eq!(fsm_get_arc_in(&h), Some("a"));
+        assert_eq!(fsm_get_arc_out(&h), Some("a"));
+        /* second arc 0 -4:4-> 2 */
+        assert_eq!(fsm_get_next_state_arc(&mut h), 1);
+        assert_eq!(fsm_get_arc_target(&h), 2);
+        assert_eq!(fsm_get_arc_in(&h), Some("b"));
+        /* no more arcs for state 0 */
+        assert_eq!(fsm_get_next_state_arc(&mut h), 0);
+        /* state 1: final, placeholder line has target == -1 -> zero arcs */
+        assert_eq!(fsm_get_next_state(&mut h), 1);
+        assert_eq!(fsm_get_next_state_arc(&mut h), 0);
+        /* state 2, then exhaustion */
+        assert_eq!(fsm_get_next_state(&mut h), 2);
+        assert_eq!(fsm_get_next_state(&mut h), -1);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-get-next-arc-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-next-arc-fn/test]
+    #[test]
+    fn fsm_get_next_arc_skips_sentinels_and_sticks() {
+        let mut h = fsm_read_init(Some(build_read_net())).unwrap();
+        /* whole-machine walk visits only the two real arcs, skipping the
+        placeholder lines of states 1 and 2, then sticks at 0 */
+        assert_eq!(fsm_get_next_arc(&mut h), 1);
+        assert_eq!(fsm_get_arc_target(&h), 1);
+        assert_eq!(fsm_get_next_arc(&mut h), 1);
+        assert_eq!(fsm_get_arc_target(&h), 2);
+        assert_eq!(fsm_get_next_arc(&mut h), 0);
+        assert_eq!(fsm_get_next_arc(&mut h), 0);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-get-symbol-number-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-symbol-number-fn/test]
+    #[test]
+    fn fsm_get_symbol_number_linear_scan() {
+        let h = fsm_read_init(Some(build_read_net())).unwrap();
+        assert_eq!(fsm_get_symbol_number(&h, "a"), 3);
+        assert_eq!(fsm_get_symbol_number(&h, "b"), 4);
+        assert_eq!(fsm_get_symbol_number(&h, "z"), -1);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-get-arc-source-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-arc-source-fn/test]
+    // [spec:foma:sem:dynarray.fsm-get-arc-target-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-arc-target-fn/test]
+    // [spec:foma:sem:dynarray.fsm-get-arc-num-in-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-arc-num-in-fn/test]
+    // [spec:foma:sem:dynarray.fsm-get-arc-num-out-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-arc-num-out-fn/test]
+    // [spec:foma:sem:dynarray.fsm-get-arc-in-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-arc-in-fn/test]
+    // [spec:foma:sem:dynarray.fsm-get-arc-out-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-arc-out-fn/test]
+    #[test]
+    fn fsm_get_arc_accessors_null_cursor() {
+        /* fresh handle: arcs_cursor is NULL -> the documented sentinel values */
+        let h = fsm_read_init(Some(build_read_net())).unwrap();
+        assert_eq!(fsm_get_arc_source(&h), -1);
+        assert_eq!(fsm_get_arc_target(&h), -1);
+        assert_eq!(fsm_get_arc_num_in(&h), -1);
+        assert_eq!(fsm_get_arc_num_out(&h), -1);
+        assert_eq!(fsm_get_arc_in(&h), None);
+        assert_eq!(fsm_get_arc_out(&h), None);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-get-next-state-arc-fn/test]
+    // [spec:foma:sem:fomalib.fsm-get-next-state-arc-fn/test]
+    #[test]
+    #[should_panic]
+    fn fsm_get_next_state_arc_null_cursor_panics() {
+        /* C dereferences a NULL cursor (crash); the port unwraps and panics */
+        let mut h = fsm_read_init(Some(build_read_net())).unwrap();
+        fsm_get_next_state_arc(&mut h);
+    }
+
+    // [spec:foma:sem:dynarray.fsm-read-done-fn/test]
+    // [spec:foma:sem:fomalib.fsm-read-done-fn/test]
+    #[test]
+    fn fsm_read_done_returns_net() {
+        let h = fsm_read_init(Some(build_read_net())).unwrap();
+        /* the Rust handle owns the net and hands it back on done */
+        let net = fsm_read_done(h);
+        assert_eq!(net.statecount, 3);
+    }
+
+    /* ---- module types ----------------------------------------------- */
+
+    // [spec:foma:def:dynarray.foma-reserved-symbols/test]
+    #[test]
+    fn foma_reserved_symbols_table() {
+        assert_eq!(FOMA_RESERVED_SYMBOLS[0].symbol, Some("@_EPSILON_SYMBOL_@"));
+        assert_eq!(FOMA_RESERVED_SYMBOLS[0].number, EPSILON);
+        assert_eq!(FOMA_RESERVED_SYMBOLS[0].prints_as, Some("0"));
+        assert_eq!(FOMA_RESERVED_SYMBOLS[1].number, UNKNOWN);
+        assert_eq!(FOMA_RESERVED_SYMBOLS[2].number, IDENTITY);
+        /* NULL-terminator entry */
+        assert!(FOMA_RESERVED_SYMBOLS[3].symbol.is_none());
+    }
+
+    // [spec:foma:def:dynarray.sigma-lookup/test]
+    #[test]
+    fn sigma_lookup_zeroed_by_init() {
+        fsm_state_init(2);
+        /* fsm_state_init callocs ssize*ssize zeroed sigma_lookup cells */
+        super::SLOOKUP.with(|s| {
+            let s = s.borrow();
+            assert_eq!(s.len(), 9); /* ssize = sigma_size+1 = 3; 3*3 */
+            assert_eq!(s[0].target, 0);
+            assert_eq!(s[0].mainloop, 0);
+        });
+    }
+}
