@@ -426,3 +426,401 @@ pub(crate) fn hexstrtoint(str: &[u8]) -> i32 {
     }
     hex
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // utf8skip: lead-byte classification, empty slice → 0 (NUL), stray
+    // continuation bytes and invalid 0xF8-0xFF → -1.
+    // [spec:foma:sem:utf8.utf8skip-fn/test]
+    // [spec:foma:sem:fomalibconf.utf8skip-fn/test]
+    #[test]
+    fn test_utf8skip() {
+        assert_eq!(utf8skip(&[]), 0); // empty stands in for the NUL (byte 0, ASCII)
+        assert_eq!(utf8skip(&[0x00]), 0);
+        assert_eq!(utf8skip(&[0x41]), 0); // 'A'
+        assert_eq!(utf8skip(&[0x7f]), 0); // last ASCII
+        // continuation bytes 0x80-0xBF are stray leads → -1
+        assert_eq!(utf8skip(&[0x80]), -1);
+        assert_eq!(utf8skip(&[0xbf]), -1);
+        // 2-byte leads 0xC0-0xDF → 1
+        assert_eq!(utf8skip(&[0xc0]), 1);
+        assert_eq!(utf8skip(&[0xc3]), 1);
+        assert_eq!(utf8skip(&[0xdf]), 1);
+        // 3-byte leads 0xE0-0xEF → 2
+        assert_eq!(utf8skip(&[0xe0]), 2);
+        assert_eq!(utf8skip(&[0xef]), 2);
+        // 4-byte leads 0xF0-0xF7 → 3
+        assert_eq!(utf8skip(&[0xf0]), 3);
+        assert_eq!(utf8skip(&[0xf7]), 3);
+        // invalid 0xF8-0xFF → -1
+        assert_eq!(utf8skip(&[0xf8]), -1);
+        assert_eq!(utf8skip(&[0xff]), -1);
+    }
+
+    // utf8iscombining: exact range boundaries per Unicode 7.0; fast reject,
+    // NUL guards, 2-byte (return 2) and 3-byte (return 3) blocks.
+    // [spec:foma:sem:utf8.utf8iscombining-fn/test]
+    // [spec:foma:sem:fomalibconf.utf8iscombining-fn/test]
+    #[test]
+    fn test_utf8iscombining() {
+        // NUL / short guards
+        assert_eq!(utf8iscombining(&[]), 0);
+        assert_eq!(utf8iscombining(&[0xcc]), 0); // s1 == 0 (NUL)
+        // fast reject: lead not in {CC,CD,E1,E2,EF}
+        assert_eq!(utf8iscombining(&[b'a', b'b']), 0);
+        assert_eq!(utf8iscombining(&[0xce, 0x80]), 0);
+        // U+0300-036F: 0xCC + 0x80..=0xBF → 2
+        assert_eq!(utf8iscombining(&[0xcc, 0x80]), 2);
+        assert_eq!(utf8iscombining(&[0xcc, 0xbf]), 2);
+        assert_eq!(utf8iscombining(&[0xcc, 0x7f]), 0); // below range
+        assert_eq!(utf8iscombining(&[0xcc, 0xc0]), 0); // above range
+        // 0xCD + 0x80..=0xAF → 2
+        assert_eq!(utf8iscombining(&[0xcd, 0x80]), 2);
+        assert_eq!(utf8iscombining(&[0xcd, 0xaf]), 2);
+        assert_eq!(utf8iscombining(&[0xcd, 0xb0]), 0); // above range
+        // U+1AB0-1ABE: 0xE1 0xAA + 0xB0..=0xBE → 3
+        assert_eq!(utf8iscombining(&[0xe1, 0xaa, 0xb0]), 3);
+        assert_eq!(utf8iscombining(&[0xe1, 0xaa, 0xbe]), 3);
+        assert_eq!(utf8iscombining(&[0xe1, 0xaa, 0xaf]), 0);
+        assert_eq!(utf8iscombining(&[0xe1, 0xaa, 0xbf]), 0);
+        // U+1DC0-1DFF: 0xE1 0xB7 + 0x80..=0xBF → 3
+        assert_eq!(utf8iscombining(&[0xe1, 0xb7, 0x80]), 3);
+        assert_eq!(utf8iscombining(&[0xe1, 0xb7, 0xbf]), 3);
+        // U+20D0-20F0: 0xE2 0x83 + 0x90..=0xB0 → 3
+        assert_eq!(utf8iscombining(&[0xe2, 0x83, 0x90]), 3);
+        assert_eq!(utf8iscombining(&[0xe2, 0x83, 0xb0]), 3);
+        assert_eq!(utf8iscombining(&[0xe2, 0x83, 0x8f]), 0);
+        assert_eq!(utf8iscombining(&[0xe2, 0x83, 0xb1]), 0);
+        // U+FE20-FE2D: 0xEF 0xB8 + 0xA0..=0xAD → 3
+        assert_eq!(utf8iscombining(&[0xef, 0xb8, 0xa0]), 3);
+        assert_eq!(utf8iscombining(&[0xef, 0xb8, 0xad]), 3);
+        assert_eq!(utf8iscombining(&[0xef, 0xb8, 0x9f]), 0);
+        assert_eq!(utf8iscombining(&[0xef, 0xb8, 0xae]), 0);
+        // three-byte lead but s2 == 0 (NUL) → 0
+        assert_eq!(utf8iscombining(&[0xe1, 0xaa]), 0);
+    }
+
+    // utf8strlen: counts UTF-8 chars for WELL-FORMED input only. The
+    // documented infinite loop on an invalid lead byte (utf8skip == -1 →
+    // advance 0) is pinned by code inspection at src/utf8.rs (the `i = i +
+    // utf8skip(..) + 1` step); it is NOT exercised here (running it hangs).
+    // [spec:foma:sem:utf8.utf8strlen-fn/test]
+    // [spec:foma:sem:fomalibconf.utf8strlen-fn/test]
+    #[test]
+    fn test_utf8strlen() {
+        assert_eq!(utf8strlen(b""), 0);
+        assert_eq!(utf8strlen(b"abc"), 3);
+        assert_eq!(utf8strlen(&[0xc3, 0xa9]), 1); // é (2-byte)
+        assert_eq!(utf8strlen(&[0xe2, 0x82, 0xac]), 1); // € (3-byte)
+        assert_eq!(utf8strlen(&[0xf0, 0x90, 0x8d, 0x88]), 1); // 𐍈 (4-byte)
+        // mixed: 'a' + é + €
+        assert_eq!(utf8strlen(&[0x61, 0xc3, 0xa9, 0xe2, 0x82, 0xac]), 3);
+    }
+
+    // escape_string: backslash-escapes each `chr`; identity (owned copy) when
+    // no occurrences; the escape char can itself be escaped.
+    // [spec:foma:sem:utf8.escape-string-fn/test]
+    // [spec:foma:sem:fomalibconf.escape-string-fn/test]
+    #[test]
+    fn test_escape_string() {
+        // identity path (j == 0): content preserved
+        assert_eq!(escape_string(b"abc", b'"'), b"abc".to_vec());
+        // single occurrence: a " c → a \ " c
+        assert_eq!(
+            escape_string(&[0x61, 0x22, 0x63], b'"'),
+            vec![0x61, 0x5c, 0x22, 0x63]
+        );
+        // two occurrences: a " b " c
+        assert_eq!(
+            escape_string(&[0x61, 0x22, 0x62, 0x22, 0x63], b'"'),
+            vec![0x61, 0x5c, 0x22, 0x62, 0x5c, 0x22, 0x63]
+        );
+        // escaping the backslash itself: a \ b → a \ \ b
+        assert_eq!(
+            escape_string(&[0x61, 0x5c, 0x62], b'\\'),
+            vec![0x61, 0x5c, 0x5c, 0x62]
+        );
+    }
+
+    // dequote_string: strips matching leading/trailing '"' then decodes; lone
+    // '"' (same byte satisfies both tests) → empty; non-quoted → untouched.
+    // [spec:foma:sem:utf8.dequote-string-fn/test]
+    // [spec:foma:sem:fomalibconf.dequote-string-fn/test]
+    #[test]
+    fn test_dequote_string() {
+        // not quoted on both ends → untouched
+        let mut s = b"abc".to_vec();
+        dequote_string(&mut s);
+        assert_eq!(s, b"abc".to_vec());
+        // "abc" → abc
+        let mut s = vec![0x22, 0x61, 0x62, 0x63, 0x22];
+        dequote_string(&mut s);
+        assert_eq!(s, b"abc".to_vec());
+        // lone '"' → empty (same byte is both first and last)
+        let mut s = vec![0x22];
+        dequote_string(&mut s);
+        assert_eq!(s, Vec::<u8>::new());
+        // empty stays empty (len == 0 fails the *s NUL read)
+        let mut s = Vec::<u8>::new();
+        dequote_string(&mut s);
+        assert_eq!(s, Vec::<u8>::new());
+        // interior \u escape is decoded: "A" → A
+        let mut s = vec![0x22, 0x5c, 0x75, 0x30, 0x30, 0x34, 0x31, 0x22];
+        dequote_string(&mut s);
+        assert_eq!(s, vec![0x41]);
+    }
+
+    // decode_quoted: backslash-u XXXX decoding, U+0000 deletion, surrogate CESU-8,
+    // and the ">5 bytes remaining" gate. The infinite loop on a malformed lead
+    // byte (utf8skip == -1) is pinned by inspection at the `skip = utf8skip(..)
+    // + 1` else-branch; not exercised (would hang).
+    // [spec:foma:sem:utf8.decode-quoted-fn/test]
+    // [spec:foma:sem:fomalibconf.decode-quoted-fn/test]
+    #[test]
+    fn test_decode_quoted() {
+        // no escapes → unchanged
+        let mut s = b"hello".to_vec();
+        decode_quoted(&mut s);
+        assert_eq!(s, b"hello".to_vec());
+        // A → A
+        let mut s = vec![0x5c, 0x75, 0x30, 0x30, 0x34, 0x31];
+        decode_quoted(&mut s);
+        assert_eq!(s, vec![0x41]);
+        // mixed: a A b → aAb
+        let mut s = vec![0x61, 0x5c, 0x75, 0x30, 0x30, 0x34, 0x31, 0x62];
+        decode_quoted(&mut s);
+        assert_eq!(s, vec![0x61, 0x41, 0x62]);
+        // U+0000 escape -> deleted (leading NUL terminates conversion)
+        let mut s = vec![0x5c, 0x75, 0x30, 0x30, 0x30, 0x30];
+        decode_quoted(&mut s);
+        assert_eq!(s, Vec::<u8>::new());
+        // surrogate half \uD800 → CESU-8-like 3 bytes, encoded as-is
+        let mut s = vec![0x5c, 0x75, 0x44, 0x38, 0x30, 0x30];
+        decode_quoted(&mut s);
+        assert_eq!(s, vec![0xed, 0xa0, 0x80]);
+        // only 5 bytes remain (len-i == 5, not > 5) → NOT decoded, copied raw
+        let mut s = vec![0x5c, 0x75, 0x30, 0x34, 0x31];
+        decode_quoted(&mut s);
+        assert_eq!(s, vec![0x5c, 0x75, 0x30, 0x34, 0x31]);
+    }
+
+    // streqrep: equal-length replacement of every match; no-match identity.
+    // The non-terminating case (replacement still matches oldstring, e.g.
+    // old == new) is pinned by inspection at the restart-from-0 loop; not run.
+    // [spec:foma:sem:utf8.streqrep-fn/test]
+    // [spec:foma:sem:fomalibconf.streqrep-fn/test]
+    #[test]
+    fn test_streqrep() {
+        // no match → identity
+        let mut s = b"hello".to_vec();
+        streqrep(&mut s, b"xy", b"za");
+        assert_eq!(s, b"hello".to_vec());
+        // single replacement
+        let mut s = b"cat".to_vec();
+        streqrep(&mut s, b"a", b"o");
+        assert_eq!(s, b"cot".to_vec());
+        // all occurrences replaced (new text does not re-match old)
+        let mut s = b"abcabc".to_vec();
+        streqrep(&mut s, b"bc", b"XY");
+        assert_eq!(s, b"aXYaXY".to_vec());
+    }
+
+    // streqrep DEVIATION: a newstring shorter than oldstring makes the C memcpy
+    // read past newstring's end; the Rust slice index panics instead.
+    // [spec:foma:sem:utf8.streqrep-fn/test]
+    // [spec:foma:sem:fomalibconf.streqrep-fn/test]
+    #[test]
+    #[should_panic]
+    fn test_streqrep_short_newstring_panics() {
+        let mut s = b"abc".to_vec();
+        streqrep(&mut s, b"ab", b"x"); // len(new)=1 < len(old)=2 → slice panic
+    }
+
+    // ishexstr: 1 iff four bytes are ASCII hex digits; short input fails at the
+    // stand-in NUL; signed-char compare rejects bytes >= 0x80.
+    // [spec:foma:sem:utf8.ishexstr-fn/test]
+    // [spec:foma:sem:fomalibconf.ishexstr-fn/test]
+    #[test]
+    fn test_ishexstr() {
+        assert_eq!(ishexstr(b"0041"), 1);
+        assert_eq!(ishexstr(b"DEAD"), 1);
+        assert_eq!(ishexstr(b"beef"), 1);
+        assert_eq!(ishexstr(b"09af"), 1);
+        // boundaries just outside each range
+        assert_eq!(ishexstr(b"123:"), 0); // ':' == 0x3a, above '9'
+        assert_eq!(ishexstr(b"12G4"), 0); // 'G' == 0x47, above 'F'
+        assert_eq!(ishexstr(b"aaag"), 0); // 'g' == 0x67, above 'f'
+        assert_eq!(ishexstr(b"aa`a"), 0); // '`' == 0x60, below 'a'
+        // short input: index >= len stands in for NUL (byte 0) → fail
+        assert_eq!(ishexstr(b"12"), 0);
+        // byte >= 0x80 is negative as signed char → fails
+        assert_eq!(ishexstr(&[0x30, 0x30, 0x30, 0xff]), 0);
+    }
+
+    // hexstrtoint: two hex bytes → 0..255; signed-char sign-extension yields
+    // garbage (negative) results for bytes >= 0x80.
+    // [spec:foma:sem:utf8.hexstrtoint-fn/test]
+    #[test]
+    fn test_hexstrtoint() {
+        assert_eq!(hexstrtoint(b"41"), 0x41);
+        assert_eq!(hexstrtoint(b"ff"), 0xff);
+        assert_eq!(hexstrtoint(b"FF"), 0xff);
+        assert_eq!(hexstrtoint(b"A0"), 0xa0);
+        assert_eq!(hexstrtoint(b"00"), 0x00);
+        // signed-char: 0x80 as i8 == -128 → (-128 - 0x30) << 4 == -2816
+        assert_eq!(hexstrtoint(&[0x80, 0x30]), -2816);
+    }
+
+    // int2utf8str: 1/2/3-byte encodings; None for codepoints >= 0x10000;
+    // negative codepoints fall into the <0x80 branch producing a garbage byte.
+    // [spec:foma:sem:utf8.int2utf8str-fn/test]
+    #[test]
+    fn test_int2utf8str() {
+        assert_eq!(int2utf8str(0x41), Some(vec![0x41]));
+        assert_eq!(int2utf8str(0x00), Some(vec![0x00]));
+        assert_eq!(int2utf8str(0x7f), Some(vec![0x7f]));
+        // 2-byte range boundaries
+        assert_eq!(int2utf8str(0x80), Some(vec![0xc2, 0x80]));
+        assert_eq!(int2utf8str(0xe9), Some(vec![0xc3, 0xa9])); // é
+        assert_eq!(int2utf8str(0x7ff), Some(vec![0xdf, 0xbf]));
+        // 3-byte range boundaries
+        assert_eq!(int2utf8str(0x800), Some(vec![0xe0, 0xa0, 0x80]));
+        assert_eq!(int2utf8str(0x20ac), Some(vec![0xe2, 0x82, 0xac])); // €
+        assert_eq!(int2utf8str(0xffff), Some(vec![0xef, 0xbf, 0xbf]));
+        // >= 0x10000 → None (no 4-byte support)
+        assert_eq!(int2utf8str(0x10000), None);
+        assert_eq!(int2utf8str(0x10348), None);
+        // negative → <0x80 branch, truncated garbage byte
+        assert_eq!(int2utf8str(-1), Some(vec![0xff]));
+    }
+
+    // utf8code16tostr: four hex digits → BMP codepoint → UTF-8; surrogates are
+    // NOT special-cased (CESU-8-like output); never None (max 0xFFFF < 0x10000).
+    // [spec:foma:sem:utf8.utf8code16tostr-fn/test]
+    // [spec:foma:sem:fomalibconf.utf8code16tostr-fn/test]
+    #[test]
+    fn test_utf8code16tostr() {
+        assert_eq!(utf8code16tostr(b"0041"), Some(vec![0x41])); // 'A'
+        assert_eq!(utf8code16tostr(b"00E9"), Some(vec![0xc3, 0xa9])); // é
+        assert_eq!(utf8code16tostr(b"20AC"), Some(vec![0xe2, 0x82, 0xac])); // €
+        assert_eq!(utf8code16tostr(b"FFFF"), Some(vec![0xef, 0xbf, 0xbf]));
+        // surrogate half encoded as-is (CESU-8-like), not rejected
+        assert_eq!(utf8code16tostr(b"D800"), Some(vec![0xed, 0xa0, 0x80]));
+    }
+
+    // xstrrev: byte-wise reversal; multi-byte UTF-8 is corrupted (assert the
+    // corrupted bytes); None/empty/single are no-ops.
+    // [spec:foma:sem:utf8.xstrrev-fn/test]
+    // [spec:foma:sem:fomalibconf.xstrrev-fn/test]
+    #[test]
+    fn test_xstrrev() {
+        xstrrev(None); // NULL → no-op, no panic
+        let mut s = Vec::<u8>::new();
+        xstrrev(Some(&mut s));
+        assert_eq!(s, Vec::<u8>::new());
+        let mut s = b"a".to_vec();
+        xstrrev(Some(&mut s));
+        assert_eq!(s, b"a".to_vec());
+        let mut s = b"abc".to_vec();
+        xstrrev(Some(&mut s));
+        assert_eq!(s, b"cba".to_vec());
+        let mut s = b"abcd".to_vec();
+        xstrrev(Some(&mut s));
+        assert_eq!(s, b"dcba".to_vec());
+        // é = [0xc3, 0xa9] → byte-reversed [0xa9, 0xc3] (corrupt UTF-8)
+        let mut s = vec![0xc3, 0xa9];
+        xstrrev(Some(&mut s));
+        assert_eq!(s, vec![0xa9, 0xc3]);
+        // 'a' + é → [0x61,0xc3,0xa9] → [0xa9,0xc3,0x61] (corrupt)
+        let mut s = vec![0x61, 0xc3, 0xa9];
+        xstrrev(Some(&mut s));
+        assert_eq!(s, vec![0xa9, 0xc3, 0x61]);
+    }
+
+    // remove_trailing: strips trailing `c`, ' ', and '\t' from the end,
+    // stopping at the first other byte; empty is a no-op.
+    // [spec:foma:sem:utf8.remove-trailing-fn/test]
+    // [spec:foma:sem:fomalibconf.remove-trailing-fn/test]
+    #[test]
+    fn test_remove_trailing() {
+        // strips spaces even when c never matches
+        let mut s = b"abc  ".to_vec();
+        remove_trailing(&mut s, b'x');
+        assert_eq!(s, b"abc".to_vec());
+        // strips the target char c
+        let mut s = b"abcxx".to_vec();
+        remove_trailing(&mut s, b'x');
+        assert_eq!(s, b"abc".to_vec());
+        // mixed c/space/tab run stops at 'c'
+        let mut s = vec![0x61, 0x62, 0x63, 0x78, 0x20, 0x78, 0x09]; // abcx x\t
+        remove_trailing(&mut s, b'x');
+        assert_eq!(s, b"abc".to_vec());
+        // interior tab is preserved (loop breaks at 'c')
+        let mut s = vec![0x61, 0x62, 0x09, 0x63]; // ab\tc
+        remove_trailing(&mut s, b'x');
+        assert_eq!(s, vec![0x61, 0x62, 0x09, 0x63]);
+        // empty → no-op
+        let mut s = Vec::<u8>::new();
+        remove_trailing(&mut s, b'x');
+        assert_eq!(s, Vec::<u8>::new());
+        // all-matching → empty
+        let mut s = b"xxx".to_vec();
+        remove_trailing(&mut s, b'x');
+        assert_eq!(s, Vec::<u8>::new());
+    }
+
+    // trim: NULL-safe; strips trailing ' ' and '\t' only (no char param);
+    // leading whitespace and other trailing bytes are preserved.
+    // [spec:foma:sem:utf8.trim-fn/test]
+    // [spec:foma:sem:fomalibconf.trim-fn/test]
+    #[test]
+    fn test_trim() {
+        trim(None); // NULL → no-op, no panic
+        let mut s = b"abc  ".to_vec();
+        trim(Some(&mut s));
+        assert_eq!(s, b"abc".to_vec());
+        let mut s = vec![0x61, 0x62, 0x63, 0x09, 0x20, 0x09]; // abc\t \t
+        trim(Some(&mut s));
+        assert_eq!(s, b"abc".to_vec());
+        // does not strip non-whitespace (unlike remove_trailing with c)
+        let mut s = b"abcc".to_vec();
+        trim(Some(&mut s));
+        assert_eq!(s, b"abcc".to_vec());
+        // leading whitespace preserved
+        let mut s = b"  abc".to_vec();
+        trim(Some(&mut s));
+        assert_eq!(s, b"  abc".to_vec());
+        // all-whitespace → empty
+        let mut s = b"  ".to_vec();
+        trim(Some(&mut s));
+        assert_eq!(s, Vec::<u8>::new());
+    }
+
+    // strip_newline: truncates at the FIRST '\n'; no-op when none present.
+    // [spec:foma:sem:utf8.strip-newline-fn/test]
+    // [spec:foma:sem:fomalibconf.strip-newline-fn/test]
+    #[test]
+    fn test_strip_newline() {
+        let mut s = b"abc\ndef".to_vec();
+        strip_newline(&mut s);
+        assert_eq!(s, b"abc".to_vec());
+        // first newline only
+        let mut s = b"a\nb\nc".to_vec();
+        strip_newline(&mut s);
+        assert_eq!(s, b"a".to_vec());
+        // leading newline → empty
+        let mut s = b"\nabc".to_vec();
+        strip_newline(&mut s);
+        assert_eq!(s, Vec::<u8>::new());
+        // no newline → unchanged
+        let mut s = b"abc".to_vec();
+        strip_newline(&mut s);
+        assert_eq!(s, b"abc".to_vec());
+        // empty → no-op
+        let mut s = Vec::<u8>::new();
+        strip_newline(&mut s);
+        assert_eq!(s, Vec::<u8>::new());
+    }
+}

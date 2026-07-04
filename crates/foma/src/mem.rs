@@ -100,3 +100,53 @@ pub fn round_up_to_power_of_two(v: u32) -> u32 {
     v = v.wrapping_add(1);
     v
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // [spec:foma:sem:mem.xxstrndup-fn/test]
+    // [spec:foma:sem:fomalibconf.xxstrndup-fn/test]
+    #[test]
+    fn xxstrndup_copies_min_n_strlen_bytes() {
+        // Effective length = min(n, strlen(s)).
+        assert_eq!(xxstrndup("hello", 3), "hel"); // n < strlen → cut to n
+        assert_eq!(xxstrndup("hello", 5), "hello"); // n == strlen
+        assert_eq!(xxstrndup("hello", 10), "hello"); // n > strlen → whole string
+        // n == 0 or empty s yields an (allocated) empty string.
+        assert_eq!(xxstrndup("hello", 0), "");
+        assert_eq!(xxstrndup("", 5), "");
+        assert_eq!(xxstrndup("", 0), "");
+    }
+
+    // [spec:foma:sem:mem.next-power-of-two-fn/test]
+    // [spec:foma:sem:fomalibconf.next-power-of-two-fn/test]
+    #[test]
+    fn next_power_of_two_smallest_strictly_greater_power() {
+        assert_eq!(next_power_of_two(7), 8);
+        assert_eq!(next_power_of_two(8), 16); // exact power is doubled
+        assert_eq!(next_power_of_two(32), 64);
+        assert_eq!(next_power_of_two(32768), 65536);
+        assert_eq!(next_power_of_two(1), 2);
+        // v <= 0: the loop runs zero times → 1 << 0 == 1.
+        assert_eq!(next_power_of_two(0), 1);
+        assert_eq!(next_power_of_two(-5), 1);
+        // Documented overflow: highest bit at position 30 → i == 31, and
+        // `1 << 31` (UB in C) yields i32::MIN in Rust.
+        assert_eq!(next_power_of_two(1 << 30), i32::MIN);
+    }
+
+    // [spec:foma:sem:mem.round-up-to-power-of-two-fn/test]
+    // [spec:foma:sem:fomalibconf.round-up-to-power-of-two-fn/test]
+    #[test]
+    fn round_up_to_power_of_two_ceils_exact_powers_unchanged() {
+        assert_eq!(round_up_to_power_of_two(3), 4);
+        assert_eq!(round_up_to_power_of_two(7), 8);
+        assert_eq!(round_up_to_power_of_two(8), 8); // exact power unchanged
+        assert_eq!(round_up_to_power_of_two(1), 1);
+        assert_eq!(round_up_to_power_of_two(32768), 32768);
+        // Wrapping-unsigned quirks: v == 0 → 0, any v > 2^31 → 0.
+        assert_eq!(round_up_to_power_of_two(0), 0);
+        assert_eq!(round_up_to_power_of_two(0x8000_0001), 0);
+    }
+}

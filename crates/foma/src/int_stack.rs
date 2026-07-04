@@ -183,3 +183,127 @@ preserve the never-callable contract). */
 pub fn int_stack_status() -> i32 {
     panic!("int_stack_status: dead prototype in C foma (declared, never defined; link error)");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // [spec:foma:sem:int-stack.int-stack-isempty-fn/test]
+    // [spec:foma:sem:fomalibconf.int-stack-isempty-fn/test]
+    // [spec:foma:sem:int-stack.int-stack-size-fn/test]
+    // [spec:foma:sem:fomalibconf.int-stack-size-fn/test]
+    // [spec:foma:sem:int-stack.int-stack-push-fn/test]
+    // [spec:foma:sem:fomalibconf.int-stack-push-fn/test]
+    // [spec:foma:sem:int-stack.int-stack-pop-fn/test]
+    // [spec:foma:sem:fomalibconf.int-stack-pop-fn/test]
+    // [spec:foma:sem:int-stack.int-stack-clear-fn/test]
+    // [spec:foma:sem:fomalibconf.int-stack-clear-fn/test]
+    #[test]
+    fn int_stack_push_pop_lifo_size_empty_clear() {
+        // Fresh (thread-local) stack starts empty: top == -1.
+        assert_eq!(int_stack_isempty(), 1);
+        assert_eq!(int_stack_size(), 0);
+        int_stack_push(10);
+        int_stack_push(20);
+        int_stack_push(30);
+        assert_eq!(int_stack_isempty(), 0);
+        assert_eq!(int_stack_size(), 3); // top + 1
+        // LIFO pop with post-decrement of top.
+        assert_eq!(int_stack_pop(), 30);
+        assert_eq!(int_stack_pop(), 20);
+        assert_eq!(int_stack_size(), 1);
+        // clear resets top to -1 without touching storage.
+        int_stack_clear();
+        assert_eq!(int_stack_isempty(), 1);
+        assert_eq!(int_stack_size(), 0);
+    }
+
+    // [spec:foma:sem:int-stack.int-stack-find-fn/test]
+    // [spec:foma:sem:fomalibconf.int-stack-find-fn/test]
+    #[test]
+    fn int_stack_find_scans_bottom_through_top_inclusive() {
+        // Empty stack short-circuits (via int_stack_isempty) to 0.
+        assert_eq!(int_stack_find(5), 0);
+        int_stack_push(5); // bottom (index 0)
+        int_stack_push(7);
+        int_stack_push(9); // top
+        assert_eq!(int_stack_find(5), 1); // bottom found
+        assert_eq!(int_stack_find(9), 1); // top found
+        assert_eq!(int_stack_find(8), 0); // absent
+    }
+
+    // [spec:foma:sem:int-stack.int-stack-isfull-fn/test]
+    // [spec:foma:sem:fomalibconf.int-stack-isfull-fn/test]
+    #[test]
+    fn int_stack_isfull_threshold_at_max_stack_minus_one() {
+        // Non-exit paths only: drive `top` directly to the isfull boundary
+        // (pushing MAX_STACK items would hit the exit(1) path).
+        assert_eq!(int_stack_isfull(), 0); // empty
+        TOP.with(|t| t.set(MAX_STACK as i32 - 2));
+        assert_eq!(int_stack_isfull(), 0);
+        TOP.with(|t| t.set(MAX_STACK as i32 - 1)); // == 2097151
+        assert_eq!(int_stack_isfull(), 1);
+        int_stack_clear();
+    }
+
+    // [spec:foma:sem:int-stack.int-stack-pop-fn/test]
+    // [spec:foma:sem:fomalibconf.int-stack-pop-fn/test]
+    #[test]
+    #[should_panic]
+    fn int_stack_pop_empty_panics_deviation() {
+        // C reads a[-1] (OOB, UB); the port panics on the OOB index instead.
+        int_stack_pop();
+    }
+
+    // [spec:foma:sem:int-stack.ptr-stack-isempty-fn/test]
+    // [spec:foma:sem:fomalibconf.ptr-stack-isempty-fn/test]
+    // [spec:foma:sem:int-stack.ptr-stack-push-fn/test]
+    // [spec:foma:sem:fomalibconf.ptr-stack-push-fn/test]
+    // [spec:foma:sem:int-stack.ptr-stack-pop-fn/test]
+    // [spec:foma:sem:fomalibconf.ptr-stack-pop-fn/test]
+    // [spec:foma:sem:int-stack.ptr-stack-clear-fn/test]
+    // [spec:foma:sem:fomalibconf.ptr-stack-clear-fn/test]
+    #[test]
+    fn ptr_stack_push_pop_isempty_clear() {
+        assert_eq!(ptr_stack_isempty(), 1);
+        ptr_stack_push(42);
+        ptr_stack_push(7);
+        assert_eq!(ptr_stack_isempty(), 0);
+        assert_eq!(ptr_stack_pop(), 7); // LIFO
+        assert_eq!(ptr_stack_pop(), 42);
+        assert_eq!(ptr_stack_isempty(), 1);
+        ptr_stack_push(99);
+        ptr_stack_clear(); // resets ptr_stack_top to -1
+        assert_eq!(ptr_stack_isempty(), 1);
+    }
+
+    // [spec:foma:sem:int-stack.ptr-stack-isfull-fn/test]
+    // [spec:foma:sem:fomalibconf.ptr-stack-isfull-fn/test]
+    #[test]
+    fn ptr_stack_isfull_threshold_at_max_ptr_stack_minus_one() {
+        assert_eq!(ptr_stack_isfull(), 0);
+        PTR_STACK_TOP.with(|t| t.set(MAX_PTR_STACK as i32 - 2));
+        assert_eq!(ptr_stack_isfull(), 0);
+        PTR_STACK_TOP.with(|t| t.set(MAX_PTR_STACK as i32 - 1)); // == 2097151
+        assert_eq!(ptr_stack_isfull(), 1);
+        ptr_stack_clear();
+    }
+
+    // [spec:foma:sem:int-stack.ptr-stack-pop-fn/test]
+    // [spec:foma:sem:fomalibconf.ptr-stack-pop-fn/test]
+    #[test]
+    #[should_panic]
+    fn ptr_stack_pop_empty_panics_deviation() {
+        // C reads ptr_stack[-1] (OOB, UB); the port panics instead.
+        ptr_stack_pop();
+    }
+
+    // Dead prototype: declared in fomalibconf.h, never defined in C (link
+    // error if called); the port pins the never-callable contract via panic.
+    // [spec:foma:sem:fomalibconf.int-stack-status-fn/test]
+    #[test]
+    #[should_panic]
+    fn int_stack_status_dead_prototype_panics() {
+        int_stack_status();
+    }
+}

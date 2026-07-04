@@ -20,4 +20,5 @@ assertions (
     {id w2-apply-spelling, kind @complete, author "brendan@necessary.nu", at 2026-07-04T11:46:02.073469Z}
     {id w2-io, kind @complete, author "brendan@necessary.nu", at 2026-07-04T11:46:02.101408Z}
     {id w2-cli, kind @complete, author "brendan@necessary.nu", at 2026-07-04T18:47:20.274291Z}
+    {id w3-base-utils, kind @doing, author "brendan@necessary.nu", at 2026-07-04T22:52:21.48639Z}
 )

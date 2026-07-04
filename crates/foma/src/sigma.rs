@@ -650,3 +650,799 @@ pub fn sigma_create() -> Box<Sigma> {
         symbol: None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::structures::fsm_create;
+    use crate::types::FsmState;
+
+    /* ---- scaffolding (no facets) ---- */
+
+    fn node(number: i32, symbol: Option<&str>, next: Option<Box<Sigma>>) -> Box<Sigma> {
+        Box::new(Sigma {
+            number,
+            symbol: symbol.map(|s| s.to_string()),
+            next,
+        })
+    }
+
+    /// Walk the whole list (sentinels included) into (number, symbol) pairs.
+    fn syms(sigma: Option<&Sigma>) -> Vec<(i32, Option<String>)> {
+        let mut out = Vec::new();
+        let mut s = sigma;
+        while let Some(n) = s {
+            out.push((n.number, n.symbol.clone()));
+            s = n.next.as_deref();
+        }
+        out
+    }
+
+    fn pair(number: i32, symbol: &str) -> (i32, Option<String>) {
+        (number, Some(symbol.to_string()))
+    }
+
+    fn line(state_no: i32, r#in: i16, out: i16, target: i32) -> FsmState {
+        FsmState {
+            state_no,
+            r#in,
+            out,
+            target,
+            final_state: 1,
+            start_state: 1,
+        }
+    }
+
+    fn sentinel_line() -> FsmState {
+        FsmState {
+            state_no: -1,
+            r#in: -1,
+            out: -1,
+            target: -1,
+            final_state: -1,
+            start_state: -1,
+        }
+    }
+
+    /* ---- sigma_create ---- */
+
+    // [spec:foma:sem:sigma.sigma-create-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-create-fn/test]
+    #[test]
+    fn sigma_create_returns_single_empty_sentinel() {
+        let s = sigma_create();
+        assert_eq!(s.number, -1);
+        assert_eq!(s.symbol, None);
+        assert!(s.next.is_none());
+    }
+
+    /* ---- sigma_add ---- */
+
+    // [spec:foma:sem:sigma.sigma-add-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-fn/test]
+    #[test]
+    fn sigma_add_nonspecial_overwrites_empty_sentinel_with_3() {
+        let mut s = sigma_create();
+        assert_eq!(sigma_add("a", &mut s), 3);
+        assert_eq!(syms(Some(&s)), vec![pair(3, "a")]);
+    }
+
+    // [spec:foma:sem:sigma.sigma-add-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-fn/test]
+    #[test]
+    fn sigma_add_nonspecial_appends_tail_number_plus_one() {
+        let mut s = sigma_create();
+        assert_eq!(sigma_add("a", &mut s), 3);
+        assert_eq!(sigma_add("b", &mut s), 4);
+        assert_eq!(sigma_add("c", &mut s), 5);
+        assert_eq!(syms(Some(&s)), vec![pair(3, "a"), pair(4, "b"), pair(5, "c")]);
+    }
+
+    // [spec:foma:sem:sigma.sigma-add-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-fn/test]
+    #[test]
+    fn sigma_add_nonspecial_clamps_number_up_to_3() {
+        /* tail is EPSILON (0): 0+1 < 3 forces the new number to 3 */
+        let mut s = sigma_create();
+        assert_eq!(sigma_add("@_EPSILON_SYMBOL_@", &mut s), EPSILON);
+        assert_eq!(sigma_add("x", &mut s), 3);
+        assert_eq!(
+            syms(Some(&s)),
+            vec![pair(0, "@_EPSILON_SYMBOL_@"), pair(3, "x")]
+        );
+    }
+
+    // [spec:foma:sem:sigma.sigma-add-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-fn/test]
+    #[test]
+    fn sigma_add_nonspecial_numbers_from_tail_not_list_maximum() {
+        /* unsorted list: head number 10, tail number 5 → new number is 6, not 11 */
+        let mut s = sigma_create();
+        sigma_add_number(&mut s, "hi", 10);
+        sigma_add_number(&mut s, "lo", 5);
+        assert_eq!(sigma_add("x", &mut s), 6);
+        assert_eq!(
+            syms(Some(&s)),
+            vec![pair(10, "hi"), pair(5, "lo"), pair(6, "x")]
+        );
+    }
+
+    // [spec:foma:sem:sigma.sigma-add-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-fn/test]
+    #[test]
+    fn sigma_add_has_no_duplicate_check() {
+        let mut s = sigma_create();
+        assert_eq!(sigma_add("a", &mut s), 3);
+        assert_eq!(sigma_add("a", &mut s), 4);
+        assert_eq!(syms(Some(&s)), vec![pair(3, "a"), pair(4, "a")]);
+    }
+
+    // [spec:foma:sem:sigma.sigma-add-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-fn/test]
+    #[test]
+    fn sigma_add_special_names_map_to_reserved_codes_on_empty() {
+        let mut s = sigma_create();
+        assert_eq!(sigma_add("@_UNKNOWN_SYMBOL_@", &mut s), UNKNOWN);
+        assert_eq!(syms(Some(&s)), vec![pair(1, "@_UNKNOWN_SYMBOL_@")]);
+
+        let mut s = sigma_create();
+        assert_eq!(sigma_add("@_IDENTITY_SYMBOL_@", &mut s), IDENTITY);
+        assert_eq!(syms(Some(&s)), vec![pair(2, "@_IDENTITY_SYMBOL_@")]);
+    }
+
+    // [spec:foma:sem:sigma.sigma-add-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-fn/test]
+    #[test]
+    fn sigma_add_special_name_head_insert_overwrites_head_in_place() {
+        let mut s = sigma_create();
+        sigma_add("a", &mut s);
+        assert_eq!(sigma_add("@_EPSILON_SYMBOL_@", &mut s), EPSILON);
+        assert_eq!(
+            syms(Some(&s)),
+            vec![pair(0, "@_EPSILON_SYMBOL_@"), pair(3, "a")]
+        );
+    }
+
+    // [spec:foma:sem:sigma.sigma-add-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-fn/test]
+    #[test]
+    fn sigma_add_special_splices_sorted_between_nodes() {
+        let mut s = sigma_create();
+        sigma_add("@_EPSILON_SYMBOL_@", &mut s);
+        sigma_add("a", &mut s);
+        assert_eq!(sigma_add("@_IDENTITY_SYMBOL_@", &mut s), IDENTITY);
+        assert_eq!(
+            syms(Some(&s)),
+            vec![
+                pair(0, "@_EPSILON_SYMBOL_@"),
+                pair(2, "@_IDENTITY_SYMBOL_@"),
+                pair(3, "a"),
+            ]
+        );
+    }
+
+    // [spec:foma:sem:sigma.sigma-add-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-fn/test]
+    #[test]
+    fn sigma_add_special_duplicate_inserted_before_equal_numbered_node() {
+        let mut s = sigma_create();
+        sigma_add("@_EPSILON_SYMBOL_@", &mut s);
+        assert_eq!(sigma_add("@_EPSILON_SYMBOL_@", &mut s), EPSILON);
+        assert_eq!(
+            syms(Some(&s)),
+            vec![pair(0, "@_EPSILON_SYMBOL_@"), pair(0, "@_EPSILON_SYMBOL_@")]
+        );
+    }
+
+    /* ---- sigma_add_number ---- */
+
+    // [spec:foma:sem:sigma.sigma-add-number-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-number-fn/test]
+    #[test]
+    fn sigma_add_number_fills_empty_sentinel_in_place() {
+        let mut s = sigma_create();
+        assert_eq!(sigma_add_number(&mut s, "a", 7), 1);
+        assert_eq!(syms(Some(&s)), vec![pair(7, "a")]);
+    }
+
+    // [spec:foma:sem:sigma.sigma-add-number-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-number-fn/test]
+    #[test]
+    fn sigma_add_number_appends_unsorted_no_dedup() {
+        let mut s = sigma_create();
+        assert_eq!(sigma_add_number(&mut s, "a", 9), 1);
+        assert_eq!(sigma_add_number(&mut s, "b", 4), 1);
+        assert_eq!(sigma_add_number(&mut s, "a", 9), 1);
+        assert_eq!(
+            syms(Some(&s)),
+            vec![pair(9, "a"), pair(4, "b"), pair(9, "a")]
+        );
+    }
+
+    /* ---- sigma_add_special ---- */
+
+    // [spec:foma:sem:sigma.sigma-add-special-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-special-fn/test]
+    #[test]
+    fn sigma_add_special_maps_codes_to_canonical_strings_on_empty() {
+        let mut s = sigma_create();
+        assert_eq!(sigma_add_special(EPSILON, &mut s), 0);
+        assert_eq!(syms(Some(&s)), vec![pair(0, "@_EPSILON_SYMBOL_@")]);
+
+        let mut s = sigma_create();
+        assert_eq!(sigma_add_special(UNKNOWN, &mut s), 1);
+        assert_eq!(syms(Some(&s)), vec![pair(1, "@_UNKNOWN_SYMBOL_@")]);
+
+        let mut s = sigma_create();
+        assert_eq!(sigma_add_special(IDENTITY, &mut s), 2);
+        assert_eq!(syms(Some(&s)), vec![pair(2, "@_IDENTITY_SYMBOL_@")]);
+    }
+
+    // [spec:foma:sem:sigma.sigma-add-special-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-special-fn/test]
+    #[test]
+    fn sigma_add_special_nonreserved_code_inserts_null_symbol_node() {
+        /* latent C bug kept: any code other than 0/1/2 gets a NULL symbol */
+        let mut s = sigma_create();
+        sigma_add("a", &mut s); /* number 3 */
+        assert_eq!(sigma_add_special(5, &mut s), 5);
+        assert_eq!(syms(Some(&s)), vec![pair(3, "a"), (5, None)]);
+
+        /* empty-sentinel head fill also leaves the symbol NULL */
+        let mut s = sigma_create();
+        assert_eq!(sigma_add_special(9, &mut s), 9);
+        assert_eq!(syms(Some(&s)), vec![(9, None)]);
+    }
+
+    // [spec:foma:sem:sigma.sigma-add-special-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-special-fn/test]
+    #[test]
+    fn sigma_add_special_head_insert_overwrites_head_in_place() {
+        let mut s = sigma_create();
+        sigma_add_special(IDENTITY, &mut s);
+        assert_eq!(sigma_add_special(EPSILON, &mut s), 0);
+        assert_eq!(
+            syms(Some(&s)),
+            vec![pair(0, "@_EPSILON_SYMBOL_@"), pair(2, "@_IDENTITY_SYMBOL_@")]
+        );
+    }
+
+    // [spec:foma:sem:sigma.sigma-add-special-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-special-fn/test]
+    #[test]
+    fn sigma_add_special_splices_pre_sorted_between_nodes() {
+        let mut s = sigma_create();
+        sigma_add_special(EPSILON, &mut s);
+        sigma_add_special(IDENTITY, &mut s);
+        assert_eq!(sigma_add_special(UNKNOWN, &mut s), 1);
+        assert_eq!(
+            syms(Some(&s)),
+            vec![
+                pair(0, "@_EPSILON_SYMBOL_@"),
+                pair(1, "@_UNKNOWN_SYMBOL_@"),
+                pair(2, "@_IDENTITY_SYMBOL_@"),
+            ]
+        );
+    }
+
+    // [spec:foma:sem:sigma.sigma-add-special-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-add-special-fn/test]
+    #[test]
+    fn sigma_add_special_duplicate_code_inserted_before_existing() {
+        let mut s = sigma_create();
+        sigma_add_special(EPSILON, &mut s);
+        sigma_add_special(IDENTITY, &mut s);
+        assert_eq!(sigma_add_special(IDENTITY, &mut s), 2);
+        assert_eq!(
+            syms(Some(&s)),
+            vec![
+                pair(0, "@_EPSILON_SYMBOL_@"),
+                pair(2, "@_IDENTITY_SYMBOL_@"),
+                pair(2, "@_IDENTITY_SYMBOL_@"),
+            ]
+        );
+    }
+
+    /* ---- sigma_find ---- */
+
+    // [spec:foma:sem:sigma.sigma-find-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-find-fn/test]
+    #[test]
+    fn sigma_find_returns_number_of_first_match_or_minus_one() {
+        let mut s = sigma_create();
+        sigma_add("a", &mut s);
+        sigma_add("b", &mut s);
+        sigma_add("a", &mut s); /* duplicate: first wins */
+        assert_eq!(sigma_find("a", Some(&s)), 3);
+        assert_eq!(sigma_find("b", Some(&s)), 4);
+        assert_eq!(sigma_find("z", Some(&s)), -1);
+    }
+
+    // [spec:foma:sem:sigma.sigma-find-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-find-fn/test]
+    #[test]
+    fn sigma_find_null_empty_and_sentinel_stop() {
+        assert_eq!(sigma_find("a", None), -1);
+        let s = sigma_create();
+        assert_eq!(sigma_find("a", Some(&s)), -1);
+        /* scanning stops at an interior number==-1 node */
+        let s = node(3, Some("a"), Some(node(-1, None, Some(node(4, Some("b"), None)))));
+        assert_eq!(sigma_find("b", Some(&s)), -1);
+    }
+
+    /* ---- sigma_find_number ---- */
+
+    // [spec:foma:sem:sigma.sigma-find-number-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-find-number-fn/test]
+    #[test]
+    fn sigma_find_number_returns_number_if_present_else_minus_one() {
+        let mut s = sigma_create();
+        sigma_add("@_EPSILON_SYMBOL_@", &mut s);
+        sigma_add("a", &mut s);
+        sigma_add("b", &mut s);
+        assert_eq!(sigma_find_number(0, Some(&s)), 0);
+        assert_eq!(sigma_find_number(4, Some(&s)), 4);
+        assert_eq!(sigma_find_number(1, Some(&s)), -1);
+        assert_eq!(sigma_find_number(9, Some(&s)), -1);
+    }
+
+    // [spec:foma:sem:sigma.sigma-find-number-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-find-number-fn/test]
+    #[test]
+    fn sigma_find_number_null_and_empty_sentinel_give_minus_one() {
+        assert_eq!(sigma_find_number(3, None), -1);
+        let s = sigma_create();
+        assert_eq!(sigma_find_number(3, Some(&s)), -1);
+        /* the sentinel's own -1 is never findable */
+        assert_eq!(sigma_find_number(-1, Some(&s)), -1);
+    }
+
+    /* ---- sigma_string ---- */
+
+    // [spec:foma:sem:sigma.sigma-string-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-string-fn/test]
+    #[test]
+    fn sigma_string_returns_symbol_of_first_matching_number() {
+        let mut s = sigma_create();
+        sigma_add("@_EPSILON_SYMBOL_@", &mut s);
+        sigma_add("a", &mut s);
+        assert_eq!(sigma_string(0, Some(&s)), Some("@_EPSILON_SYMBOL_@"));
+        assert_eq!(sigma_string(3, Some(&s)), Some("a"));
+        assert_eq!(sigma_string(9, Some(&s)), None);
+    }
+
+    // [spec:foma:sem:sigma.sigma-string-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-string-fn/test]
+    #[test]
+    fn sigma_string_null_and_empty_give_none() {
+        assert_eq!(sigma_string(0, None), None);
+        let s = sigma_create();
+        assert_eq!(sigma_string(0, Some(&s)), None);
+    }
+
+    /* ---- sigma_substitute ---- */
+
+    // [spec:foma:sem:sigma.sigma-substitute-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-substitute-fn/test]
+    #[test]
+    fn sigma_substitute_renames_first_match_and_returns_number() {
+        let mut s = sigma_create();
+        sigma_add("a", &mut s);
+        sigma_add("a", &mut s);
+        assert_eq!(sigma_substitute("a", "z", &mut s), 3);
+        /* only the first duplicate is renamed */
+        assert_eq!(syms(Some(&s)), vec![pair(3, "z"), pair(4, "a")]);
+    }
+
+    // [spec:foma:sem:sigma.sigma-substitute-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-substitute-fn/test]
+    #[test]
+    fn sigma_substitute_no_duplicate_check_can_create_same_string_twice() {
+        let mut s = sigma_create();
+        sigma_add("a", &mut s);
+        sigma_add("b", &mut s);
+        assert_eq!(sigma_substitute("a", "b", &mut s), 3);
+        assert_eq!(syms(Some(&s)), vec![pair(3, "b"), pair(4, "b")]);
+    }
+
+    // [spec:foma:sem:sigma.sigma-substitute-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-substitute-fn/test]
+    #[test]
+    fn sigma_substitute_empty_sentinel_or_miss_returns_minus_one() {
+        let mut s = sigma_create();
+        assert_eq!(sigma_substitute("a", "b", &mut s), -1);
+        sigma_add("a", &mut s);
+        assert_eq!(sigma_substitute("z", "b", &mut s), -1);
+        assert_eq!(syms(Some(&s)), vec![pair(3, "a")]);
+    }
+
+    /* ---- sigma_remove ---- */
+
+    // [spec:foma:sem:sigma.sigma-remove-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-remove-fn/test]
+    #[test]
+    fn sigma_remove_head_returns_next_as_new_head() {
+        let mut s = sigma_create();
+        sigma_add("a", &mut s);
+        sigma_add("b", &mut s);
+        let s = sigma_remove("a", Some(s));
+        assert_eq!(syms(s.as_deref()), vec![pair(4, "b")]);
+    }
+
+    // [spec:foma:sem:sigma.sigma-remove-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-remove-fn/test]
+    #[test]
+    fn sigma_remove_interior_unlinks_only_first_match() {
+        let mut s = sigma_create();
+        sigma_add("a", &mut s);
+        sigma_add("b", &mut s);
+        sigma_add("b", &mut s);
+        sigma_add("c", &mut s);
+        let s = sigma_remove("b", Some(s));
+        assert_eq!(
+            syms(s.as_deref()),
+            vec![pair(3, "a"), pair(5, "b"), pair(6, "c")]
+        );
+    }
+
+    // [spec:foma:sem:sigma.sigma-remove-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-remove-fn/test]
+    #[test]
+    fn sigma_remove_miss_null_and_empty_sentinel_unchanged() {
+        assert!(sigma_remove("a", None).is_none());
+        let s = sigma_remove("a", Some(sigma_create()));
+        assert_eq!(syms(s.as_deref()), vec![(-1, None)]);
+        let mut s = sigma_create();
+        sigma_add("a", &mut s);
+        let s = sigma_remove("z", Some(s));
+        assert_eq!(syms(s.as_deref()), vec![pair(3, "a")]);
+    }
+
+    /* ---- sigma_remove_num ---- */
+
+    // [spec:foma:sem:sigma.sigma-remove-num-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-remove-num-fn/test]
+    #[test]
+    fn sigma_remove_num_head_and_interior() {
+        let mut s = sigma_create();
+        sigma_add("a", &mut s);
+        sigma_add("b", &mut s);
+        sigma_add("c", &mut s);
+        let s = sigma_remove_num(3, Some(s));
+        assert_eq!(syms(s.as_deref()), vec![pair(4, "b"), pair(5, "c")]);
+        let s = sigma_remove_num(5, s);
+        assert_eq!(syms(s.as_deref()), vec![pair(4, "b")]);
+    }
+
+    // [spec:foma:sem:sigma.sigma-remove-num-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-remove-num-fn/test]
+    #[test]
+    fn sigma_remove_num_miss_null_and_sentinel_never_removed() {
+        assert!(sigma_remove_num(3, None).is_none());
+        /* the empty sentinel is not removable, not even by its own -1 */
+        let s = sigma_remove_num(-1, Some(sigma_create()));
+        assert_eq!(syms(s.as_deref()), vec![(-1, None)]);
+        let mut s = sigma_create();
+        sigma_add("a", &mut s);
+        let s = sigma_remove_num(9, Some(s));
+        assert_eq!(syms(s.as_deref()), vec![pair(3, "a")]);
+    }
+
+    /* ---- sigma_size ---- */
+
+    // [spec:foma:sem:sigma.sigma-size-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-size-fn/test]
+    #[test]
+    fn sigma_size_counts_raw_nodes_including_sentinel() {
+        assert_eq!(sigma_size(None), 0);
+        /* fresh sigma_create: the sentinel itself counts → 1 */
+        let s = sigma_create();
+        assert_eq!(sigma_size(Some(&s)), 1);
+        let mut s = sigma_create();
+        sigma_add("a", &mut s);
+        sigma_add("a", &mut s); /* duplicates both count */
+        assert_eq!(sigma_size(Some(&s)), 2);
+    }
+
+    /* ---- sigma_max ---- */
+
+    // [spec:foma:sem:sigma.sigma-max-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-max-fn/test]
+    #[test]
+    fn sigma_max_null_and_empty_give_minus_one() {
+        assert_eq!(sigma_max(None), -1);
+        let s = sigma_create();
+        assert_eq!(sigma_max(Some(&s)), -1);
+    }
+
+    // [spec:foma:sem:sigma.sigma-max-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-max-fn/test]
+    #[test]
+    fn sigma_max_visits_every_node_including_sentinels() {
+        let mut s = sigma_create();
+        sigma_add_number(&mut s, "a", 3);
+        sigma_add_number(&mut s, "b", 7);
+        sigma_add_number(&mut s, "c", 5);
+        assert_eq!(sigma_max(Some(&s)), 7);
+        /* no stop at a -1 sentinel: nodes after it are still visited */
+        let s = node(-1, None, Some(node(7, Some("x"), None)));
+        assert_eq!(sigma_max(Some(&s)), 7);
+    }
+
+    /* ---- sigma_to_list ---- */
+
+    // [spec:foma:sem:sigma.sigma-to-list-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-to-list-fn/test]
+    #[test]
+    fn sigma_to_list_empty_sigma_gives_zero_length_table() {
+        let s = sigma_create();
+        assert_eq!(sigma_to_list(Some(&s)).len(), 0);
+    }
+
+    // [spec:foma:sem:sigma.sigma-to-list-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-to-list-fn/test]
+    #[test]
+    fn sigma_to_list_indexes_symbols_by_number_with_none_gaps() {
+        let mut s = sigma_create();
+        sigma_add_number(&mut s, "@_EPSILON_SYMBOL_@", 0);
+        sigma_add_number(&mut s, "c", 5);
+        sigma_add_number(&mut s, "a", 3);
+        let sl = sigma_to_list(Some(&s));
+        assert_eq!(sl.len(), 6); /* sigma_max + 1 */
+        assert_eq!(sl[0].symbol.as_deref(), Some("@_EPSILON_SYMBOL_@"));
+        assert_eq!(sl[1].symbol, None);
+        assert_eq!(sl[2].symbol, None);
+        assert_eq!(sl[3].symbol.as_deref(), Some("a"));
+        assert_eq!(sl[4].symbol, None);
+        assert_eq!(sl[5].symbol.as_deref(), Some("c"));
+    }
+
+    // [spec:foma:sem:sigma.sigma-to-list-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-to-list-fn/test]
+    #[test]
+    fn sigma_to_list_stops_filling_at_interior_sentinel() {
+        /* the fill loop breaks at number==-1; sigma_max still sizes the table */
+        let s = node(3, Some("a"), Some(node(-1, None, Some(node(4, Some("b"), None)))));
+        let sl = sigma_to_list(Some(&s));
+        assert_eq!(sl.len(), 5);
+        assert_eq!(sl[3].symbol.as_deref(), Some("a"));
+        assert_eq!(sl[4].symbol, None);
+    }
+
+    /* ---- sigma_copy ---- */
+
+    // [spec:foma:sem:sigma.sigma-copy-fn/test]
+    // [spec:foma:sem:fomalib.sigma-copy-fn/test]
+    #[test]
+    fn sigma_copy_null_gives_null_and_sentinel_is_copied() {
+        assert!(sigma_copy(None).is_none());
+        let src = sigma_create();
+        let copy = sigma_copy(Some(&src));
+        assert_eq!(syms(copy.as_deref()), vec![(-1, None)]);
+    }
+
+    // [spec:foma:sem:sigma.sigma-copy-fn/test]
+    // [spec:foma:sem:fomalib.sigma-copy-fn/test]
+    #[test]
+    fn sigma_copy_deep_copies_order_numbers_symbols_source_untouched() {
+        let mut src = sigma_create();
+        sigma_add("@_EPSILON_SYMBOL_@", &mut src);
+        sigma_add("a", &mut src);
+        sigma_add("b", &mut src);
+        let mut copy = sigma_copy(Some(&src)).unwrap();
+        assert_eq!(syms(Some(&copy)), syms(Some(&src)));
+        /* deep: mutating the copy leaves the source intact */
+        copy.next.as_deref_mut().unwrap().symbol = Some("zzz".to_string());
+        assert_eq!(
+            syms(Some(&src)),
+            vec![pair(0, "@_EPSILON_SYMBOL_@"), pair(3, "a"), pair(4, "b")]
+        );
+    }
+
+    // [spec:foma:sem:sigma.sigma-copy-fn/test]
+    // [spec:foma:sem:fomalib.sigma-copy-fn/test]
+    #[test]
+    fn sigma_copy_preserves_null_symbols_and_trailing_sentinel() {
+        let src = node(3, Some("a"), Some(node(5, None, Some(node(-1, None, None)))));
+        let copy = sigma_copy(Some(&src));
+        assert_eq!(
+            syms(copy.as_deref()),
+            vec![pair(3, "a"), (5, None), (-1, None)]
+        );
+    }
+
+    /* ---- ssortcmp ---- */
+
+    // [spec:foma:sem:sigma.ssortcmp-fn/test]
+    #[test]
+    fn ssortcmp_orders_bytewise_on_symbol_ignoring_number() {
+        let a = Ssort {
+            symbol: Some("a".to_string()),
+            number: 99,
+        };
+        let b = Ssort {
+            symbol: Some("b".to_string()),
+            number: 1,
+        };
+        assert_eq!(ssortcmp(&a, &b), -1);
+        assert_eq!(ssortcmp(&b, &a), 1);
+        /* equal strings → 0 even with different numbers */
+        let a2 = Ssort {
+            symbol: Some("a".to_string()),
+            number: 5,
+        };
+        assert_eq!(ssortcmp(&a, &a2), 0);
+        /* byte order, not case-insensitive: 'B' (0x42) < 'a' (0x61) */
+        let upper = Ssort {
+            symbol: Some("B".to_string()),
+            number: 0,
+        };
+        assert_eq!(ssortcmp(&upper, &a), -1);
+    }
+
+    /* ---- sigma_sort ---- */
+
+    // [spec:foma:sem:sigma.sigma-sort-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-sort-fn/test]
+    #[test]
+    fn sigma_sort_empty_sigma_returns_1_without_touching_states() {
+        let mut net = fsm_create("t");
+        assert_eq!(sigma_sort(&mut net), 1);
+        assert!(net.states.is_empty());
+    }
+
+    // [spec:foma:sem:sigma.sigma-sort-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-sort-fn/test]
+    #[test]
+    fn sigma_sort_permutes_symbols_renumbers_from_3_and_rewrites_arcs() {
+        let mut net = fsm_create("t");
+        {
+            let sig = net.sigma.as_deref_mut().unwrap();
+            sigma_add_number(sig, "@_EPSILON_SYMBOL_@", 0);
+            sigma_add_number(sig, "c", 3);
+            sigma_add_number(sig, "a", 4);
+            sigma_add_number(sig, "b", 5);
+        }
+        net.states = vec![line(0, 3, 4, 0), line(0, 5, 0, 0), sentinel_line()];
+        assert_eq!(sigma_sort(&mut net), 1);
+        /* specials keep number/position; k-th non-special node gets the
+        k-th smallest symbol and number k+3 */
+        assert_eq!(
+            syms(net.sigma.as_deref()),
+            vec![
+                pair(0, "@_EPSILON_SYMBOL_@"),
+                pair(3, "a"),
+                pair(4, "b"),
+                pair(5, "c"),
+            ]
+        );
+        /* replacearray: c:3→5, a:4→3, b:5→4; labels <= IDENTITY untouched */
+        assert_eq!((net.states[0].r#in, net.states[0].out), (5, 3));
+        assert_eq!((net.states[1].r#in, net.states[1].out), (4, 0));
+    }
+
+    // [spec:foma:sem:sigma.sigma-sort-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-sort-fn/test]
+    #[test]
+    fn sigma_sort_arc_label_absent_from_sigma_becomes_0_deviation() {
+        /* DEVIATION pin: C reads an uninitialized replacearray entry; the
+        Rust port zero-initializes, so the arc label collapses to 0 */
+        let mut net = fsm_create("t");
+        {
+            let sig = net.sigma.as_deref_mut().unwrap();
+            sigma_add_number(sig, "b", 3);
+            sigma_add_number(sig, "a", 5);
+        }
+        net.states = vec![line(0, 4, 3, 0), sentinel_line()];
+        assert_eq!(sigma_sort(&mut net), 1);
+        assert_eq!(
+            syms(net.sigma.as_deref()),
+            vec![pair(3, "a"), pair(4, "b")]
+        );
+        /* in=4 is absent from sigma → replacearray[4] == 0; out: b 3→4 */
+        assert_eq!((net.states[0].r#in, net.states[0].out), (0, 4));
+    }
+
+    /* ---- sigma_cleanup ---- */
+
+    // [spec:foma:sem:sigma.sigma-cleanup-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-cleanup-fn/test]
+    #[test]
+    fn sigma_cleanup_force_0_noop_when_identity_or_unknown_present() {
+        let mut net = fsm_create("t");
+        {
+            let sig = net.sigma.as_deref_mut().unwrap();
+            sigma_add("@_IDENTITY_SYMBOL_@", sig);
+            sigma_add("a", sig);
+            sigma_add("b", sig); /* unused, but kept: IDENTITY blocks cleanup */
+        }
+        net.states = vec![line(0, 3, 3, 0), sentinel_line()];
+        sigma_cleanup(&mut net, 0);
+        assert_eq!(
+            syms(net.sigma.as_deref()),
+            vec![pair(2, "@_IDENTITY_SYMBOL_@"), pair(3, "a"), pair(4, "b")]
+        );
+
+        let mut net = fsm_create("t");
+        {
+            let sig = net.sigma.as_deref_mut().unwrap();
+            sigma_add("@_UNKNOWN_SYMBOL_@", sig);
+            sigma_add("a", sig);
+        }
+        net.states = vec![line(0, 3, 3, 0), sentinel_line()];
+        sigma_cleanup(&mut net, 0);
+        assert_eq!(
+            syms(net.sigma.as_deref()),
+            vec![pair(1, "@_UNKNOWN_SYMBOL_@"), pair(3, "a")]
+        );
+    }
+
+    // [spec:foma:sem:sigma.sigma-cleanup-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-cleanup-fn/test]
+    #[test]
+    fn sigma_cleanup_force_0_proceeds_without_identity_unknown() {
+        let mut net = fsm_create("t");
+        {
+            let sig = net.sigma.as_deref_mut().unwrap();
+            sigma_add("a", sig);
+            sigma_add("b", sig);
+        }
+        net.states = vec![line(0, 3, 3, 0), sentinel_line()];
+        sigma_cleanup(&mut net, 0);
+        assert_eq!(syms(net.sigma.as_deref()), vec![pair(3, "a")]);
+    }
+
+    // [spec:foma:sem:sigma.sigma-cleanup-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-cleanup-fn/test]
+    #[test]
+    fn sigma_cleanup_force_1_removes_unattested_incl_reserved_and_renumbers() {
+        let mut net = fsm_create("t");
+        {
+            let sig = net.sigma.as_deref_mut().unwrap();
+            sigma_add("@_EPSILON_SYMBOL_@", sig); /* 0, unattested head */
+            sigma_add("@_UNKNOWN_SYMBOL_@", sig); /* 1, unattested */
+            sigma_add("@_IDENTITY_SYMBOL_@", sig); /* 2, unattested */
+            sigma_add("a", sig); /* 3, used */
+            sigma_add("b", sig); /* 4, unused */
+            sigma_add("c", sig); /* 5, used → renumbered 4 */
+        }
+        net.states = vec![line(0, 3, 5, 0), sentinel_line()];
+        sigma_cleanup(&mut net, 1);
+        /* unattested reserved 0–2 entries are removed too (head included) */
+        assert_eq!(
+            syms(net.sigma.as_deref()),
+            vec![pair(3, "a"), pair(4, "c")]
+        );
+        /* arcs rewritten through the renumbering table */
+        assert_eq!((net.states[0].r#in, net.states[0].out), (3, 4));
+    }
+
+    // [spec:foma:sem:sigma.sigma-cleanup-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-cleanup-fn/test]
+    #[test]
+    fn sigma_cleanup_keeps_attested_reserved_numbers_unrenumbered() {
+        let mut net = fsm_create("t");
+        {
+            let sig = net.sigma.as_deref_mut().unwrap();
+            sigma_add("@_EPSILON_SYMBOL_@", sig); /* 0, used on an arc */
+            sigma_add("a", sig); /* 3, used */
+        }
+        net.states = vec![line(0, 0, 3, 0), sentinel_line()];
+        sigma_cleanup(&mut net, 1);
+        assert_eq!(
+            syms(net.sigma.as_deref()),
+            vec![pair(0, "@_EPSILON_SYMBOL_@"), pair(3, "a")]
+        );
+        assert_eq!((net.states[0].r#in, net.states[0].out), (0, 3));
+    }
+
+    // [spec:foma:sem:sigma.sigma-cleanup-fn/test]
+    // [spec:foma:sem:fomalibconf.sigma-cleanup-fn/test]
+    #[test]
+    fn sigma_cleanup_empty_sigma_returns_without_touching_states() {
+        let mut net = fsm_create("t");
+        /* sigma_max < 0: early return, states never dereferenced */
+        sigma_cleanup(&mut net, 1);
+        assert_eq!(syms(net.sigma.as_deref()), vec![(-1, None)]);
+    }
+}

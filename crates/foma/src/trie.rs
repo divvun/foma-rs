@@ -209,3 +209,177 @@ pub fn trie_hashf(source: u32, insym: &str, outsym: &str) -> u32 {
     hash = hash.wrapping_mul(101).wrapping_add(source);
     hash % THASH_TABLESIZE
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::Fsm;
+
+    /* Collect (source, in, out, target) for every real-arc line (in != -1),
+    walking the sentinel-terminated line table. */
+    fn arcs(net: &Fsm) -> Vec<(i32, i16, i16, i32)> {
+        let mut v = Vec::new();
+        let mut i = 0usize;
+        while net.states[i].state_no != -1 {
+            let s = &net.states[i];
+            if s.r#in != -1 {
+                v.push((s.state_no, s.r#in, s.out, s.target));
+            }
+            i += 1;
+        }
+        v.sort();
+        v
+    }
+
+    /* Distinct final state numbers (final flag rides on every line of a state,
+    incl. no-arc and arc lines). */
+    fn finals(net: &Fsm) -> Vec<i32> {
+        let mut v = Vec::new();
+        let mut i = 0usize;
+        while net.states[i].state_no != -1 {
+            if net.states[i].final_state == 1 && !v.contains(&net.states[i].state_no) {
+                v.push(net.states[i].state_no);
+            }
+            i += 1;
+        }
+        v.sort();
+        v
+    }
+
+    fn sigma_pairs(net: &Fsm) -> Vec<(i32, String)> {
+        let mut v = Vec::new();
+        let mut s = net.sigma.as_deref();
+        while let Some(sig) = s {
+            if let Some(sym) = sig.symbol.as_deref() {
+                v.push((sig.number, sym.to_string()));
+            }
+            s = sig.next.as_deref();
+        }
+        v
+    }
+
+    // [spec:foma:sem:trie.fsm-trie-init-fn/test]
+    // [spec:foma:sem:fomalib.fsm-trie-init-fn/test]
+    #[test]
+    fn fsm_trie_init_zeroed_handle_dimensions() {
+        let th = fsm_trie_init();
+        assert_eq!(th.trie_hash.len(), THASH_TABLESIZE as usize); // 1048573
+        assert_eq!(th.trie_states.len(), TRIE_STATESIZE as usize); // 32768
+        assert_eq!(th.statesize, TRIE_STATESIZE);
+        assert_eq!(th.trie_cursor, 0); // root state is 0
+        assert_eq!(th.used_states, 0);
+        assert!(th.sh_hash.is_some()); // per-trie interning table
+        assert!(th.trie_states.iter().all(|s| !s.is_final));
+    }
+
+    // [spec:foma:sem:trie.trie-hashf-fn/test]
+    #[test]
+    fn trie_hashf_poly101_with_source_and_signed_char() {
+        assert_eq!(trie_hashf(0, "", ""), 0);
+        assert_eq!(trie_hashf(0, "a", "a"), 999294);
+        assert_eq!(trie_hashf(1, "a", "a"), 999295); // +source term
+        // Signed-char folding on high bytes ("é" = C3 A9).
+        assert_eq!(trie_hashf(0, "é", "é"), 311100);
+    }
+
+    // [spec:foma:sem:trie.fsm-trie-symbol-fn/test]
+    // [spec:foma:sem:fomalib.fsm-trie-symbol-fn/test]
+    // [spec:foma:sem:trie.fsm-trie-end-word-fn/test]
+    // [spec:foma:sem:fomalib.fsm-trie-end-word-fn/test]
+    // [spec:foma:sem:trie.trie-hashf-fn/test]
+    #[test]
+    fn fsm_trie_symbol_inserts_head_then_reuses_and_end_word() {
+        let mut th = fsm_trie_init();
+        let bucket = trie_hashf(0, "a", "a") as usize; // 999294
+        // Insert (0, a:a): new target state 1, cursor → 1, head filled in place.
+        fsm_trie_symbol(&mut th, "a", "a");
+        assert_eq!(th.used_states, 1);
+        assert_eq!(th.trie_cursor, 1);
+        assert_eq!(th.trie_hash[bucket].insym.as_deref(), Some("a"));
+        assert_eq!(th.trie_hash[bucket].outsym.as_deref(), Some("a"));
+        assert_eq!(th.trie_hash[bucket].sourcestate, 0);
+        assert_eq!(th.trie_hash[bucket].targetstate, 1);
+        // end_word marks the reached state final and resets cursor to root 0.
+        fsm_trie_end_word(&mut th);
+        assert!(th.trie_states[1].is_final);
+        assert_eq!(th.trie_cursor, 0);
+        // Reuse: (0, a:a) already exists → cursor → 1, no new state allocated.
+        fsm_trie_symbol(&mut th, "a", "a");
+        assert_eq!(th.used_states, 1);
+        assert_eq!(th.trie_cursor, 1);
+    }
+
+    // [spec:foma:sem:trie.fsm-trie-add-word-fn/test]
+    // [spec:foma:sem:fomalib.fsm-trie-add-word-fn/test]
+    // [spec:foma:sem:trie.fsm-trie-symbol-fn/test]
+    // [spec:foma:sem:fomalib.fsm-trie-symbol-fn/test]
+    // [spec:foma:sem:trie.fsm-trie-end-word-fn/test]
+    // [spec:foma:sem:fomalib.fsm-trie-end-word-fn/test]
+    // [spec:foma:sem:trie.fsm-trie-done-fn/test]
+    // [spec:foma:sem:fomalib.fsm-trie-done-fn/test]
+    #[test]
+    fn fsm_trie_build_single_word_ab() {
+        let mut th = fsm_trie_init();
+        fsm_trie_add_word(&mut th, "ab");
+        let net = fsm_trie_done(th);
+        assert_eq!(net.name, "name"); // fsm_construct_init("name")
+        assert_eq!(net.statecount, 3); // states 0,1,2
+        assert_eq!(net.arccount, 2);
+        assert_eq!(net.finalcount, 1);
+        // Symbols sorted bytewise and renumbered from 3 by sigma_sort.
+        assert_eq!(
+            sigma_pairs(&net),
+            vec![(3, "a".to_string()), (4, "b".to_string())]
+        );
+        // Chain 0 -a:a-> 1 -b:b-> 2, state 2 final.
+        assert_eq!(arcs(&net), vec![(0, 3, 3, 1), (1, 4, 4, 2)]);
+        assert_eq!(finals(&net), vec![2]);
+    }
+
+    // [spec:foma:sem:trie.fsm-trie-add-word-fn/test]
+    // [spec:foma:sem:fomalib.fsm-trie-add-word-fn/test]
+    // [spec:foma:sem:trie.fsm-trie-symbol-fn/test]
+    // [spec:foma:sem:fomalib.fsm-trie-symbol-fn/test]
+    // [spec:foma:sem:trie.fsm-trie-end-word-fn/test]
+    // [spec:foma:sem:fomalib.fsm-trie-end-word-fn/test]
+    // [spec:foma:sem:trie.fsm-trie-done-fn/test]
+    // [spec:foma:sem:fomalib.fsm-trie-done-fn/test]
+    #[test]
+    fn fsm_trie_build_prefix_word_a_then_ab() {
+        // "a" is a prefix of "ab": adding "ab" reuses the a-arc (symbol
+        // lookup hit), and state 1 ends up final AND with an outgoing arc.
+        let mut th = fsm_trie_init();
+        fsm_trie_add_word(&mut th, "a");
+        fsm_trie_add_word(&mut th, "ab");
+        let net = fsm_trie_done(th);
+        assert_eq!(net.statecount, 3);
+        assert_eq!(net.arccount, 2);
+        assert_eq!(net.finalcount, 2);
+        assert_eq!(
+            sigma_pairs(&net),
+            vec![(3, "a".to_string()), (4, "b".to_string())]
+        );
+        assert_eq!(arcs(&net), vec![(0, 3, 3, 1), (1, 4, 4, 2)]);
+        assert_eq!(finals(&net), vec![1, 2]);
+    }
+
+    // [spec:foma:sem:trie.fsm-trie-add-word-fn/test]
+    // [spec:foma:sem:fomalib.fsm-trie-add-word-fn/test]
+    // [spec:foma:sem:trie.fsm-trie-symbol-fn/test]
+    // [spec:foma:sem:fomalib.fsm-trie-symbol-fn/test]
+    // [spec:foma:sem:trie.fsm-trie-done-fn/test]
+    // [spec:foma:sem:fomalib.fsm-trie-done-fn/test]
+    #[test]
+    fn fsm_trie_build_multibyte_single_symbol() {
+        // "é" is a 2-byte UTF-8 char; add_word emits ONE symbol via utf8skip.
+        let mut th = fsm_trie_init();
+        fsm_trie_add_word(&mut th, "é");
+        let net = fsm_trie_done(th);
+        assert_eq!(net.statecount, 2);
+        assert_eq!(net.arccount, 1);
+        assert_eq!(net.finalcount, 1);
+        assert_eq!(sigma_pairs(&net), vec![(3, "é".to_string())]);
+        assert_eq!(arcs(&net), vec![(0, 3, 3, 1)]);
+        assert_eq!(finals(&net), vec![1]);
+    }
+}
