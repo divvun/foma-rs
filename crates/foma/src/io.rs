@@ -1097,7 +1097,7 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Option<(Box<Fsm>, String)> {
         crate::spelling::cmatrix_init(&mut net);
         let mut cm = 0usize;
         loop {
-            io_gets(iobh, buf);
+            io_gets(iobh, &mut buf);
             if buf.starts_with('#') {
                 break;
             }
