@@ -105,6 +105,12 @@ thread_local! {
     static RAND_NEXT: Cell<u64> = const { Cell::new(1) };
 }
 
+/* C library srand() twin: reseeds the shared LCG state used by rand().
+   apply_init calls this; the ISO C sample sets `next = seed`. */
+pub(crate) fn srand(seed: u32) {
+    RAND_NEXT.with(|n| n.set(seed as u64));
+}
+
 /* C library rand() twin (ISO C sample implementation; see RAND_NEXT) */
 pub(crate) fn rand() -> i32 {
     RAND_NEXT.with(|n| {
