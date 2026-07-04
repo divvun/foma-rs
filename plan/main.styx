@@ -305,16 +305,43 @@ children (
             {
                 id w3-base-utils
                 title "Tests: mem, utf8, int_stack, stringhash, trie, sigma (~120 fns)"
+                sealed true
+                log (
+                    {
+                        at 2026-07-04T23:19:27.560381Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
+                    }
+                )
             }
 
             {
                 id w3-structures-dynarray
                 title "Tests: structures, dynarray (~78 fns)"
+                sealed true
+                log (
+                    {
+                        at 2026-07-04T23:19:27.587368Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Done (nplan complete)"
+                    }
+                )
             }
 
             {
                 id w3-graph-algorithms
                 title "Tests: determinize, minimize, topsort, reverse, coaccessible, extract (~40 fns)"
+                sealed true
+                log (
+                    {
+                        at 2026-07-04T23:19:27.613258Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Done (nplan complete)"
+                    }
+                )
             }
 
             {
