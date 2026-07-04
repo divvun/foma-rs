@@ -112,3 +112,28 @@ carry the header id (e.g. `fomalib.fsm`) plus any duplicate per-file id.
 2. Every symbol in the concern shows `tgt_impl: true` in
    `nplan port status` (annotation present in target source).
 3. No Wave-4 idiom crept in.
+
+## Wave 3: tests
+
+- Unit tests live in a `#[cfg(test)] mod tests` block at the bottom of the
+  module under test (access to `pub(crate)` internals; thread-local state is
+  isolated per test thread automatically).
+- CLI/binary behavior (iface printed output, foma REPL, flookup/cgflookup) is
+  tested as integration tests in `crates/foma/tests/`, spawning the built
+  binaries and asserting on stdout/stderr bytes.
+- Every function symbol needs a `/test` facet: put
+  `// [spec:foma:sem:<id>/test]` directly above the `#[test]` fn (or the
+  assertion site) that verifies it. Header-duplicate ids get their facet
+  line at the same site (e.g. `apply.apply-init-fn/test` AND
+  `fomalib.apply-init-fn/test`).
+- The test asserts the SEM RULE's behavior — including the documented bugs
+  (a test that "fixes" a bug is wrong for Wave 3; pin the literal behavior
+  so Wave 4 diffs against it). DEVIATION sites assert the deviated-but-safe
+  behavior (`#[should_panic]` where the C had UB and the port panics).
+- Dead prototypes (fsm_find_ambiguous, fsm_mark_ambiguous, save_stack_att,
+  int_stack_status): `#[should_panic]` tests pinning the never-callable
+  contract.
+- The C foma at /opt/homebrew/bin/foma may be used while WRITING tests to
+  derive expected values, but tests must not invoke it at runtime.
+- Never annotate aspirationally: the facet goes in only once the test exists
+  and passes (`cargo test` green is part of every Wave-3 concern's gate).
