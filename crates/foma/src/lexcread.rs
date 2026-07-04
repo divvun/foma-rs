@@ -1,1 +1,1707 @@
-//! foma/lexcread.c — placeholder; replaced by its owning Wave-2 concern.
+//! foma/lexcread.c — literal (bug-for-bug) Wave-2 port per
+//! docs/port/rust-conventions.md. Sem rules: docs/spec/port/foma/lexcread.md
+//! (per-file ids) and docs/spec/port/foma/lexc.md (lexc.h header ids).
+//!
+//! The lexc compiler builds a raw `struct states` graph (shared, cyclic,
+//! heavily aliased through statelist/trans/merge_with/lexstate pointers),
+//! then converts it to a struct fsm. Safe Rust cannot hold the C's raw
+//! pointer graph, so — exactly as the fsm line table becomes index walks in
+//! types.rs — every C pointer becomes an index into a `Vec` arena, and NULL
+//! becomes `Option<usize>` / `None`. All file-static globals plus the arenas
+//! live in a single `Lexc` context behind one thread_local `LEXC` (the C
+//! non-reentrancy contract is preserved; the C names are kept on the fields).
+//! The lexc.h public functions keep their C signatures and borrow LEXC once;
+//! the file-static helpers take `&mut Lexc` so the whole compile threads one
+//! borrow and never re-borrows the RefCell.
+
+use std::cell::RefCell;
+
+use crate::constructions::{add_fsm_arc, fsm_update_flags};
+use crate::determinize::fsm_determinize;
+use crate::mem::{G_LEXC_ALIGN, G_VERBOSE};
+use crate::minimize::fsm_minimize;
+use crate::sigma::{
+    sigma_add, sigma_add_special, sigma_cleanup, sigma_create, sigma_find, sigma_find_number,
+    sigma_max, sigma_sort,
+};
+use crate::structures::{fsm_create, fsm_empty_set};
+use crate::topsort::fsm_topsort;
+use crate::types::{EPSILON, Fsm, FsmState, IDENTITY, Sigma, UNK, UNKNOWN};
+use crate::utf8::{utf8skip, utf8strlen};
+
+const SIGMA_HASH_TABLESIZE: usize = 3079;
+
+const WORD_ENTRY: i32 = 1;
+const REGEX_ENTRY: i32 = 2;
+
+/* ------------------------------------------------------------------ */
+/* File-local struct types (declared inside lexcread.c)               */
+/* ------------------------------------------------------------------ */
+
+// [spec:foma:def:lexcread.multichar-symbols]
+// C: struct multichar_symbols { char *symbol; short int sigma_number;
+// struct multichar_symbols *next; }. `next` is an arena index (None ↔ NULL).
+#[derive(Debug, Clone)]
+struct MulticharSymbols {
+    symbol: Option<String>,
+    sigma_number: i16,
+    next: Option<usize>,
+}
+
+// [spec:foma:def:lexcread.lexstates]
+// C: struct lexstates — separate list of LEXICON states. `state` is a state
+// arena index; `next` a lexstates arena index (None ↔ NULL).
+#[derive(Debug, Clone)]
+struct Lexstates {
+    name: Option<String>,
+    state: usize,
+    next: Option<usize>,
+    targeted: u8,
+    has_outgoing: u8,
+}
+
+// [spec:foma:def:lexcread.states.trans]
+// C: struct trans { short int in; short int out; struct states *target;
+// struct trans *next; }. `target` is a state arena index; `next` a trans
+// arena index (None ↔ NULL).
+#[derive(Debug, Clone)]
+struct Trans {
+    r#in: i16,
+    out: i16,
+    target: usize,
+    next: Option<usize>,
+}
+
+// [spec:foma:def:lexcread.states]
+// C: struct states { struct trans *trans; struct lexstates *lexstate;
+// int number; unsigned int hashval; unsigned char mergeable;
+// unsigned short int distance; struct states *merge_with; }.
+// `trans` and `lexstate` are Option<arena index>; `merge_with` a state arena
+// index (initialised to self).
+#[derive(Debug, Clone)]
+struct States {
+    trans: Option<usize>,
+    lexstate: Option<usize>,
+    number: i32,
+    hashval: u32,
+    mergeable: u8,
+    distance: u16,
+    merge_with: usize,
+}
+
+// [spec:foma:def:lexcread.statelist]
+// C: struct statelist { struct states *state; struct statelist *next;
+// char start; char final; }. `state` is a state arena index; `next` a
+// statelist arena index (None ↔ NULL).
+#[derive(Debug, Clone)]
+struct Statelist {
+    state: usize,
+    next: Option<usize>,
+    start: i8,
+    r#final: i8,
+}
+
+// [spec:foma:def:lexcread.lexc-hashtable]
+// C: struct lexc_hashtable { char *symbol; struct lexc_hashtable *next;
+// int sigma_number; }. Hash for looking up symbols in sigma quickly. The
+// 3079 bucket heads live in a Vec; collision chains are owned Box nodes.
+#[derive(Debug, Clone)]
+struct LexcHashtable {
+    symbol: Option<String>,
+    next: Option<Box<LexcHashtable>>,
+    sigma_number: i32,
+}
+
+/* C: static unsigned int primes[26] = { ... }; */
+static PRIMES: [u32; 26] = [
+    61, 127, 251, 509, 1021, 2039, 4093, 8191, 16381, 32749, 65521, 131071, 262139, 524287,
+    1048573, 2097143, 4194301, 8388593, 16777213, 33554393, 67108859, 134217689, 268435399,
+    536870909, 1073741789, 2147483647,
+];
+
+/* ------------------------------------------------------------------ */
+/* File-static globals, grouped into one non-reentrant thread_local    */
+/* ------------------------------------------------------------------ */
+
+/// Holds every lexcread.c file-static (the C names are kept on the fields)
+/// plus the arenas that back the C pointer graph. Pointer fields are arena
+/// indices; NULL is `None` / an empty arena.
+struct Lexc {
+    /* arenas backing the C `struct *` graph (never reclaimed mid-compile;
+    the C frees are no-ops here — see the DEVIATION notes at each free site) */
+    state_arena: Vec<States>,
+    trans_arena: Vec<Trans>,
+    statelist_arena: Vec<Statelist>,
+    lexstates_arena: Vec<Lexstates>,
+    mc_arena: Vec<MulticharSymbols>,
+
+    /* C: static struct statelist *statelist / *mc / *lexstates — list heads */
+    statelist: Option<usize>,
+    mc: Option<usize>,
+    lexstates: Option<usize>,
+
+    /* C: static struct sigma *lexsigma */
+    lexsigma: Option<Box<Sigma>>,
+    /* C: static struct lexc_hashtable *hashtable — 3079 calloc'd bucket heads */
+    hashtable: Vec<LexcHashtable>,
+    /* C: static struct fsm *current_regex_network */
+    current_regex_network: Option<Box<Fsm>>,
+
+    /* C: static int cwordin[1000], cwordout[1000], medcwordin[2000],
+    medcwordout[2000] — fixed sizes kept; an over-long entry side overflows
+    them (DEVIATION: C corrupts adjacent memory, Rust panics on OOB index) */
+    cwordin: [i32; 1000],
+    cwordout: [i32; 1000],
+    medcwordin: [i32; 2000],
+    medcwordout: [i32; 2000],
+    /* C: static _Bool *mchash — calloc(256*256) two-byte-prefix filter */
+    mchash: Vec<bool>,
+
+    /* C scalar file-statics */
+    carity: i32,
+    lexc_statecount: i32,
+    maxlen: i32,
+    hasfinal: i32,
+    current_entry: i32,
+    net_has_unknown: i32,
+
+    /* C: static struct lexstates *clexicon, *ctarget — lexstates indices */
+    clexicon: Option<usize>,
+    ctarget: Option<usize>,
+}
+
+impl Lexc {
+    const fn new_empty() -> Lexc {
+        Lexc {
+            state_arena: Vec::new(),
+            trans_arena: Vec::new(),
+            statelist_arena: Vec::new(),
+            lexstates_arena: Vec::new(),
+            mc_arena: Vec::new(),
+            statelist: None,
+            mc: None,
+            lexstates: None,
+            lexsigma: None,
+            hashtable: Vec::new(),
+            current_regex_network: None,
+            cwordin: [0; 1000],
+            cwordout: [0; 1000],
+            medcwordin: [0; 2000],
+            medcwordout: [0; 2000],
+            mchash: Vec::new(),
+            carity: 0,
+            lexc_statecount: 0,
+            maxlen: 0,
+            hasfinal: 0,
+            current_entry: 0,
+            net_has_unknown: 0,
+            clexicon: None,
+            ctarget: None,
+        }
+    }
+}
+
+thread_local! {
+    static LEXC: RefCell<Lexc> = const { RefCell::new(Lexc::new_empty()) };
+}
+
+/* ------------------------------------------------------------------ */
+/* C-string helpers over NUL-terminated byte buffers                   */
+/* ------------------------------------------------------------------ */
+
+/// strlen: byte offset of the first NUL in `buf` (buf.len() if none — the C
+/// callers always supply a NUL-terminated buffer).
+fn cstrlen(buf: &[u8]) -> usize {
+    buf.iter().position(|&b| b == 0).unwrap_or(buf.len())
+}
+
+/// strdup of the NUL-terminated content of `buf`.
+/// DEVIATION from C (symbols are stored as String; malformed UTF-8 — only
+/// reachable on the invalid-input infinite-loop path — is lossy-decoded).
+fn cstrdup(buf: &[u8]) -> String {
+    let n = cstrlen(buf);
+    String::from_utf8_lossy(&buf[..n]).into_owned()
+}
+
+/// The NUL-terminated content bytes of `buf` (up to the first NUL).
+fn cstr(buf: &[u8]) -> &[u8] {
+    &buf[..cstrlen(buf)]
+}
+
+/// strcmp(stored_symbol, buf) == 0 — compares a stored String against the
+/// NUL-terminated content of `buf`.
+fn sym_eq(sym: &Option<String>, buf: &[u8]) -> bool {
+    match sym {
+        Some(s) => s.as_bytes() == cstr(buf),
+        None => false,
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Hashing                                                             */
+/* ------------------------------------------------------------------ */
+
+// [spec:foma:def:lexcread.lexc-suffix-hash-fn]
+// [spec:foma:sem:lexcread.lexc-suffix-hash-fn]
+fn lexc_suffix_hash(lx: &Lexc, offset: i32) -> u32 {
+    let mut h: u32 = 0;
+    let mut g: u32;
+    /* Read suffixes in cwordin[] and cwordout[] and return a hash value */
+    let mut p = offset as usize;
+    while lx.cwordin[p] != -1 {
+        h = (h << 4).wrapping_add((lx.cwordin[p] | (lx.cwordout[p] << 8)) as u32);
+        g = h & 0xf000_0000;
+        if g != 0 {
+            h ^= g >> 24;
+            h ^= g;
+        }
+        p += 1;
+    }
+    /* No tablemod here, we decide on the table size later */
+    h
+}
+
+// [spec:foma:def:lexcread.lexc-symbol-hash-fn]
+// [spec:foma:sem:lexcread.lexc-symbol-hash-fn]
+fn lexc_symbol_hash(s: &[u8]) -> u32 {
+    let mut hash: u32 = 5381;
+    /* while ((c = *s++)) — signed char sign-extension into int c, per the
+    conventions (bytes >= 0x80 add a wrapped large value) */
+    for &b in cstr(s) {
+        let c = b as i8 as i32;
+        hash = ((hash << 5).wrapping_add(hash)).wrapping_add(c as u32);
+    }
+    hash % SIGMA_HASH_TABLESIZE as u32
+}
+
+// [spec:foma:def:lexcread.lexc-find-sigma-hash-fn]
+// [spec:foma:sem:lexcread.lexc-find-sigma-hash-fn]
+fn lexc_find_sigma_hash(lx: &Lexc, symbol: &[u8]) -> i32 {
+    let ptr = lexc_symbol_hash(symbol) as usize;
+
+    if lx.hashtable[ptr].symbol.is_none() {
+        return -1;
+    }
+    /* for (h = head; h != NULL; h = h->next) */
+    if sym_eq(&lx.hashtable[ptr].symbol, symbol) {
+        return lx.hashtable[ptr].sigma_number;
+    }
+    let mut h = lx.hashtable[ptr].next.as_deref();
+    while let Some(node) = h {
+        if sym_eq(&node.symbol, symbol) {
+            return node.sigma_number;
+        }
+        h = node.next.as_deref();
+    }
+    -1
+}
+
+// [spec:foma:def:lexcread.lexc-add-sigma-hash-fn]
+// [spec:foma:sem:lexcread.lexc-add-sigma-hash-fn]
+fn lexc_add_sigma_hash(lx: &mut Lexc, symbol: &[u8], number: i32) {
+    let ptr = lexc_symbol_hash(symbol) as usize;
+
+    if lx.net_has_unknown == 1 {
+        lexc_update_unknowns(lx, number);
+    }
+
+    if lx.hashtable[ptr].symbol.is_none() {
+        lx.hashtable[ptr].symbol = Some(cstrdup(symbol));
+        lx.hashtable[ptr].sigma_number = number;
+        return;
+    }
+    /* for (h = head; h->next != NULL; h = h->next) {} — walk to the tail */
+    let mut tail_next = &mut lx.hashtable[ptr].next;
+    while tail_next.is_some() {
+        tail_next = &mut tail_next.as_mut().unwrap().next;
+    }
+    *tail_next = Some(Box::new(LexcHashtable {
+        symbol: Some(cstrdup(symbol)),
+        sigma_number: number,
+        next: None,
+    }));
+}
+
+// [spec:foma:def:lexcread.lexc-init-fn]
+// [spec:foma:sem:lexcread.lexc-init-fn]
+// [spec:foma:def:lexc.lexc-init-fn]
+// [spec:foma:sem:lexc.lexc-init-fn]
+pub fn lexc_init() {
+    LEXC.with_borrow_mut(|lx| {
+        lx.lexsigma = Some(sigma_create());
+        lx.mc = None;
+        lx.lexstates = None;
+        lx.clexicon = None;
+        lx.ctarget = None;
+        lx.statelist = None;
+        lx.lexc_statecount = 0;
+        lx.net_has_unknown = 0;
+        lexc_clear_current_word_impl(lx);
+        /* calloc(SIGMA_HASH_TABLESIZE) then the loop below sets each bucket
+        head to {symbol=NULL, sigma_number=-1, next=NULL} */
+        lx.hashtable = vec![
+            LexcHashtable {
+                symbol: None,
+                next: None,
+                sigma_number: -1,
+            };
+            SIGMA_HASH_TABLESIZE
+        ];
+
+        lx.maxlen = 0;
+
+        lx.mchash = vec![false; 256 * 256];
+        /* Does not free structures from a previous run (that is
+        lexc_cleanup's job); calling lexc_init twice without an intervening
+        cleanup leaks the old tables — reproduced by not clearing the arenas
+        here (they are cleared in lexc_cleanup). current_regex_network is not
+        reset. */
+    });
+}
+
+// [spec:foma:def:lexcread.lexc-clear-current-word-fn]
+// [spec:foma:sem:lexcread.lexc-clear-current-word-fn]
+// [spec:foma:def:lexc.lexc-clear-current-word-fn]
+// [spec:foma:sem:lexc.lexc-clear-current-word-fn]
+pub fn lexc_clear_current_word() {
+    LEXC.with_borrow_mut(|lx| lexc_clear_current_word_impl(lx));
+}
+
+fn lexc_clear_current_word_impl(lx: &mut Lexc) {
+    lx.cwordin[0] = 0;
+    lx.cwordout[0] = 0;
+    lx.cwordin[1] = -1;
+    lx.cwordout[1] = -1;
+    lx.current_entry = WORD_ENTRY;
+}
+
+// [spec:foma:def:lexcread.lexc-add-state-fn]
+// [spec:foma:sem:lexcread.lexc-add-state-fn]
+fn lexc_add_state(lx: &mut Lexc, s: usize) {
+    /* sl = malloc(struct statelist); sl->state = s; s->number = -1;
+    sl->next = statelist; sl->start = 0; sl->final = 0; statelist = sl; */
+    let slidx = lx.statelist_arena.len();
+    lx.statelist_arena.push(Statelist {
+        state: s,
+        next: lx.statelist,
+        start: 0,
+        r#final: 0,
+    });
+    lx.state_arena[s].number = -1;
+    lx.statelist = Some(slidx);
+    lx.lexc_statecount += 1;
+}
+
+/* Go through the net built so far and add new transitions for @ */
+/* to reflect the new symbols we now have in sigma */
+
+// [spec:foma:def:lexcread.lexc-update-unknowns-fn]
+// [spec:foma:sem:lexcread.lexc-update-unknowns-fn]
+fn lexc_update_unknowns(lx: &mut Lexc, sigma_number: i32) {
+    /* for (s = statelist; s != NULL; s = s->next) */
+    let mut s = lx.statelist;
+    while let Some(sidx) = s {
+        let stateidx = lx.statelist_arena[sidx].state;
+        if lx.state_arena[stateidx].mergeable != 2 {
+            /* for (t = s->state->trans; t != NULL; t = t->next) */
+            let mut t = lx.state_arena[stateidx].trans;
+            while let Some(tidx) = t {
+                if lx.trans_arena[tidx].r#in as i32 == IDENTITY
+                    || lx.trans_arena[tidx].out as i32 == IDENTITY
+                {
+                    let target = lx.trans_arena[tidx].target;
+                    let tnext = lx.trans_arena[tidx].next;
+                    /* newtrans->next = t->next; t->next = newtrans */
+                    let newidx = lx.trans_arena.len();
+                    lx.trans_arena.push(Trans {
+                        r#in: sigma_number as i16,
+                        out: sigma_number as i16,
+                        target,
+                        next: tnext,
+                    });
+                    lx.trans_arena[tidx].next = Some(newidx);
+                }
+                /* t = t->next: after an insertion this visits the new arc next
+                (labels are the new symbol, not IDENTITY, so no recursion) */
+                t = lx.trans_arena[tidx].next;
+            }
+        }
+        s = lx.statelist_arena[sidx].next;
+    }
+}
+
+// [spec:foma:def:lexcread.lexc-add-network-fn]
+// [spec:foma:sem:lexcread.lexc-add-network-fn]
+fn lexc_add_network(lx: &mut Lexc) {
+    let mut unknown_symbols = 0;
+    let mut first_new_sigma = 0;
+    let sourcestate = lx.lexstates_arena[lx.clexicon.unwrap()].state;
+    let deststate = lx.lexstates_arena[lx.ctarget.unwrap()].state;
+
+    /* net = current_regex_network; taken out so the &mut lx calls below do not
+    conflict with reading net->states / net->sigma. Put back at the end (C
+    never frees it and leaves current_regex_network pointing at the mutated
+    net). */
+    let mut net = lx.current_regex_network.take().unwrap();
+
+    /* sigreplace = calloc(sigma_max(net->sigma)+1, sizeof(int)) */
+    let mut sigreplace: Vec<i32> = vec![0; (sigma_max(net.sigma.as_deref()) + 1) as usize];
+
+    /* for (sigma = net->sigma; sigma != NULL && sigma->number != -1; ...) */
+    {
+        let mut node = net.sigma.as_deref();
+        while let Some(s) = node {
+            if s.number == -1 {
+                break;
+            }
+            let sym = s.symbol.as_deref().unwrap_or("");
+            let symbytes = sym.as_bytes();
+            let signumber = lexc_find_sigma_hash(lx, symbytes);
+            if signumber == -1 {
+                /* Add to existing lexc sigma */
+                let signumber = sigma_add(sym, lx.lexsigma.as_deref_mut().unwrap());
+                first_new_sigma = if first_new_sigma > 0 {
+                    first_new_sigma
+                } else {
+                    signumber
+                };
+                lexc_add_sigma_hash(lx, symbytes, signumber);
+                sigreplace[s.number as usize] = signumber;
+            } else {
+                /* We already have it, add to conversion table */
+                sigreplace[s.number as usize] = signumber;
+            }
+            node = s.next.as_deref();
+        }
+    }
+
+    /* Renum arcs — net->states is mutated in place */
+    let mut maxstate = 0i32;
+    {
+        let fsm = &mut net.states;
+        let mut i = 0usize;
+        while fsm[i].state_no != -1 {
+            if fsm[i].r#in != -1 {
+                fsm[i].r#in = sigreplace[fsm[i].r#in as usize] as i16;
+            }
+            if fsm[i].out != -1 {
+                fsm[i].out = sigreplace[fsm[i].out as usize] as i16;
+            }
+            if fsm[i].state_no > maxstate {
+                maxstate = fsm[i].state_no;
+            }
+            if fsm[i].r#in as i32 == IDENTITY
+                || fsm[i].r#in as i32 == UNKNOWN
+                || fsm[i].out as i32 == UNKNOWN
+            {
+                unknown_symbols = 1;
+            }
+            i += 1;
+        }
+    }
+
+    /* unk: 0-terminated list of concrete lexsigma symbols absent from net */
+    let mut unk: Vec<i32> = Vec::new();
+    if unknown_symbols == 1 {
+        unk = vec![0; (sigma_max(lx.lexsigma.as_deref()) + 2) as usize];
+        let mut i = 0usize;
+        let mut node = lx.lexsigma.as_deref();
+        while let Some(s) = node {
+            if s.number == -1 {
+                break;
+            }
+            if s.number > 2 && sigma_find(s.symbol.as_deref().unwrap_or(""), net.sigma.as_deref()) == -1
+            {
+                unk[i] = s.number;
+                i += 1;
+            }
+            node = s.next.as_deref();
+        }
+    }
+
+    /* slist[state_no] -> fresh state index; finals[state_no] -> final flag */
+    let mut slist: Vec<usize> = vec![0; (maxstate + 1) as usize];
+    let mut finals: Vec<i32> = vec![0; (maxstate + 1) as usize];
+
+    for i in 0..=(maxstate as usize) {
+        let newidx = lx.state_arena.len();
+        lx.state_arena.push(States {
+            trans: None,
+            lexstate: None,
+            number: -1,
+            hashval: u32::MAX, /* C: newstate->hashval = -1 (unsigned int) */
+            mergeable: 0,
+            distance: 0,
+            merge_with: 0, /* set to self below */
+        });
+        lx.state_arena[newidx].merge_with = newidx;
+        slist[i] = newidx;
+        /* Prepend a statelist cell directly (NOT via lexc_add_state, so
+        lexc_statecount is not bumped — harmless; recomputed later) */
+        let slidx = lx.statelist_arena.len();
+        lx.statelist_arena.push(Statelist {
+            state: newidx,
+            next: lx.statelist,
+            start: 0,
+            r#final: 0,
+        });
+        lx.statelist = Some(slidx);
+    }
+
+    /* Add an EPSILON transition from sourcestate to state 0 */
+    {
+        let newtrans = lx.trans_arena.len();
+        lx.trans_arena.push(Trans {
+            r#in: EPSILON as i16,
+            out: EPSILON as i16,
+            target: slist[0],
+            next: lx.state_arena[sourcestate].trans,
+        });
+        lx.state_arena[sourcestate].trans = Some(newtrans);
+    }
+
+    {
+        let mut i = 0usize;
+        while net.states[i].state_no != -1 {
+            if net.states[i].target != -1 {
+                let newstate = slist[net.states[i].state_no as usize];
+                let newtrans = lx.trans_arena.len();
+                lx.trans_arena.push(Trans {
+                    r#in: net.states[i].r#in,
+                    out: net.states[i].out,
+                    target: slist[net.states[i].target as usize],
+                    next: lx.state_arena[newstate].trans,
+                });
+                lx.state_arena[newstate].trans = Some(newtrans);
+                /* Add new symbols for @:@ transitions */
+                /* TODO: make this work for ?: or :? trans as well */
+                if unknown_symbols == 1
+                    && (net.states[i].r#in as i32 == IDENTITY
+                        || net.states[i].out as i32 == IDENTITY)
+                {
+                    let mut j = 0usize;
+                    while unk[j] != 0 {
+                        let nt = lx.trans_arena.len();
+                        lx.trans_arena.push(Trans {
+                            r#in: unk[j] as i16,
+                            out: unk[j] as i16,
+                            target: slist[net.states[i].target as usize],
+                            next: lx.state_arena[newstate].trans,
+                        });
+                        lx.state_arena[newstate].trans = Some(nt);
+                        j += 1;
+                    }
+                }
+            }
+            finals[net.states[i].state_no as usize] = net.states[i].final_state as i32;
+            i += 1;
+        }
+    }
+
+    /* Add an EPSILON transition from all final states to deststate */
+    for i in 0..=(maxstate as usize) {
+        if finals[i] == 1 {
+            let newstate = slist[i];
+            let nt = lx.trans_arena.len();
+            lx.trans_arena.push(Trans {
+                r#in: EPSILON as i16,
+                out: EPSILON as i16,
+                target: deststate,
+                next: lx.state_arena[newstate].trans,
+            });
+            lx.state_arena[newstate].trans = Some(nt);
+        }
+    }
+
+    if unknown_symbols == 1 {
+        /* free(unk) — no-op (local Vec) */
+        lx.net_has_unknown = 1;
+    }
+    /* free(slist); free(finals) — no-op. sigreplace is never freed in C
+    (leak); the local Vecs drop here. */
+    lx.current_regex_network = Some(net);
+    let _ = first_new_sigma; /* recorded but never read (dead code in C) */
+}
+
+// [spec:foma:def:lexcread.lexc-set-network-fn]
+// [spec:foma:sem:lexcread.lexc-set-network-fn]
+// [spec:foma:def:lexc.lexc-set-network-fn]
+// [spec:foma:sem:lexc.lexc-set-network-fn]
+pub fn lexc_set_network(net: Box<Fsm>) {
+    LEXC.with_borrow_mut(|lx| {
+        lx.current_regex_network = Some(net);
+        lx.current_entry = REGEX_ENTRY;
+    });
+}
+
+// [spec:foma:def:lexcread.lexc-set-current-lexicon-fn]
+// [spec:foma:sem:lexcread.lexc-set-current-lexicon-fn]
+// [spec:foma:def:lexc.lexc-set-current-lexicon-fn]
+// [spec:foma:sem:lexc.lexc-set-current-lexicon-fn]
+pub fn lexc_set_current_lexicon(name: &[u8], which: i32) {
+    /* Sets the global lexicon variable to point to a new lexicon */
+    /* which == 0 indicates source, which == 1 indicates target */
+    LEXC.with_borrow_mut(|lx| {
+        let mut l = lx.lexstates;
+        while let Some(lidx) = l {
+            if sym_eq(&lx.lexstates_arena[lidx].name, name) {
+                if which == 0 {
+                    lx.lexstates_arena[lidx].has_outgoing = 1;
+                    lx.clexicon = Some(lidx);
+                } else {
+                    lx.ctarget = Some(lidx);
+                }
+                return;
+            }
+            l = lx.lexstates_arena[lidx].next;
+        }
+        let lidx = lx.lexstates_arena.len();
+        lx.lexstates_arena.push(Lexstates {
+            name: Some(cstrdup(name)),
+            /* state assigned below after lexc_add_state */
+            state: 0,
+            next: lx.lexstates,
+            has_outgoing: 0,
+            targeted: 0,
+        });
+        lx.lexstates = Some(lidx);
+        let newidx = lx.state_arena.len();
+        lx.state_arena.push(States {
+            trans: None,
+            lexstate: None,
+            number: -1,
+            /* C leaves hashval and distance uninitialised — never read while
+            mergeable == 0; zeroed here */
+            hashval: 0,
+            mergeable: 0,
+            distance: 0,
+            merge_with: 0,
+        });
+        lexc_add_state(lx, newidx);
+        lx.state_arena[newidx].lexstate = Some(lidx);
+        lx.state_arena[newidx].trans = None;
+        lx.state_arena[newidx].mergeable = 0;
+        lx.state_arena[newidx].merge_with = newidx;
+        lx.lexstates_arena[lidx].state = newidx;
+        if which == 0 {
+            lx.clexicon = Some(lidx);
+            lx.lexstates_arena[lidx].has_outgoing = 1;
+        } else {
+            lx.ctarget = Some(lidx);
+        }
+    });
+}
+
+// [spec:foma:def:lexcread.lexc-find-delim-fn]
+// [spec:foma:sem:lexcread.lexc-find-delim-fn]
+fn lexc_find_delim(name: &[u8], delimiter: u8, escape: u8) -> Option<usize> {
+    let mut i = 0usize;
+    while name[i] != 0 {
+        if name[i] == escape && name[i + 1] != 0 {
+            i += 1; /* body i++ */
+            i += 1; /* for-loop i++ on continue */
+            continue;
+        }
+        if name[i] == delimiter {
+            return Some(i);
+        }
+        i += 1; /* for-loop i++ */
+    }
+    None
+}
+
+// [spec:foma:def:lexcread.lexc-deescape-string-fn]
+// [spec:foma:sem:lexcread.lexc-deescape-string-fn]
+fn lexc_deescape_string(name: &mut [u8], escape: u8, mode: i32) {
+    let mut i = 0usize;
+    let mut j = 0usize;
+    while name[i] != 0 {
+        name[j] = name[i];
+        if name[i] == escape {
+            name[j] = name[i + 1];
+            j += 1;
+            i += 1; /* body i++ */
+            i += 1; /* for-loop i++ */
+            continue;
+        } else if mode == 1 && name[i] == b'0' {
+            /* Marks alignment EPSILON */
+            name[j] = 0xff;
+            j += 1;
+            i += 1; /* for-loop i++ */
+            continue;
+        } else if name[i] != escape && name[i] != b'0' {
+            j += 1;
+            i += 1; /* for-loop i++ */
+            continue;
+        }
+        /* char == '0' && mode != 1: no branch taken, j not advanced (the '0'
+        is silently deleted) */
+        i += 1; /* for-loop i++ */
+    }
+    name[j] = 0;
+}
+
+/* Read a string and fill cwordin, cwordout arrays */
+/* with the sigma numbers of the current word, -1 terminated */
+
+// [spec:foma:def:lexcread.lexc-set-current-word-fn]
+// [spec:foma:sem:lexcread.lexc-set-current-word-fn]
+// [spec:foma:def:lexc.lexc-set-current-word-fn]
+// [spec:foma:sem:lexc.lexc-set-current-word-fn]
+pub fn lexc_set_current_word(name: &mut [u8]) {
+    LEXC.with_borrow_mut(|lx| {
+        lx.carity = 1;
+        /* instring = name; outstring = lexc_find_delim(name, ':', '%') */
+        let outstring = lexc_find_delim(name, b':', b'%');
+        let mut out_off = 0usize;
+        if let Some(colon) = outstring {
+            name[colon] = 0;
+            out_off = colon + 1;
+            lexc_deescape_string(&mut name[out_off..], b'%', 1);
+            lx.carity = 2;
+        }
+        lexc_deescape_string(&mut name[..], b'%', 1);
+
+        /* lexc_string_to_tokens(instring, cwordin) — cwordin copied out so it
+        can be a &mut param disjoint from &mut lx */
+        let mut intarr = lx.cwordin;
+        lexc_string_to_tokens(lx, &name[..], &mut intarr);
+        lx.cwordin = intarr;
+
+        if lx.carity == 2 {
+            let mut intarr = lx.cwordout;
+            lexc_string_to_tokens(lx, &name[out_off..], &mut intarr);
+            lx.cwordout = intarr;
+            if G_LEXC_ALIGN.with(|v| v.get()) != 0 {
+                lexc_medpad(lx);
+            } else {
+                lexc_pad(lx);
+            }
+        } else {
+            let mut i = 0usize;
+            while lx.cwordin[i] != -1 {
+                lx.cwordout[i] = lx.cwordin[i];
+                i += 1;
+            }
+            lx.cwordout[i] = -1;
+        }
+        lx.current_entry = WORD_ENTRY;
+    });
+}
+
+const LEV_DOWN: i32 = 0;
+const LEV_LEFT: i32 = 1;
+const LEV_DIAG: i32 = 2;
+
+// [spec:foma:def:lexcread.lexc-medpad-fn]
+// [spec:foma:sem:lexcread.lexc-medpad-fn]
+fn lexc_medpad(lx: &mut Lexc) {
+    if lx.cwordin[0] == -1 && lx.cwordout[0] == -1 {
+        lx.cwordin[0] = EPSILON;
+        lx.cwordout[0] = EPSILON;
+        lx.cwordin[1] = -1;
+        lx.cwordout[1] = -1;
+        return;
+    }
+
+    /* compact cwordin, deleting every EPSILON token */
+    {
+        let mut i = 0usize;
+        let mut j = 0usize;
+        while lx.cwordin[i] != -1 {
+            if lx.cwordin[i] == EPSILON {
+                i += 1;
+                continue;
+            }
+            lx.cwordin[j] = lx.cwordin[i];
+            j += 1;
+            i += 1;
+        }
+        lx.cwordin[j] = -1;
+    }
+    /* compact cwordout */
+    {
+        let mut i = 0usize;
+        let mut j = 0usize;
+        while lx.cwordout[i] != -1 {
+            if lx.cwordout[i] == EPSILON {
+                i += 1;
+                continue;
+            }
+            lx.cwordout[j] = lx.cwordout[i];
+            j += 1;
+            i += 1;
+        }
+        lx.cwordout[j] = -1;
+    }
+
+    let mut s1len = 0usize;
+    while lx.cwordin[s1len] != -1 {
+        s1len += 1;
+    }
+    let mut s2len = 0usize;
+    while lx.cwordout[s2len] != -1 {
+        s2len += 1;
+    }
+
+    /* calloc (s1len+2) x (s2len+2) int matrices */
+    let mut matrix: Vec<Vec<i32>> = vec![vec![0i32; s2len + 2]; s1len + 2];
+    let mut dirmatrix: Vec<Vec<i32>> = vec![vec![0i32; s2len + 2]; s1len + 2];
+
+    matrix[0][0] = 0;
+    dirmatrix[0][0] = 0;
+    for x in 1..=s1len {
+        matrix[x][0] = matrix[x - 1][0] + 1;
+        dirmatrix[x][0] = LEV_LEFT;
+    }
+    for y in 1..=s2len {
+        matrix[0][y] = matrix[0][y - 1] + 1;
+        dirmatrix[0][y] = LEV_DOWN;
+    }
+    for x in 1..=s1len {
+        for y in 1..=s2len {
+            let diag = matrix[x - 1][y - 1]
+                + if lx.cwordin[x - 1] == lx.cwordout[y - 1] {
+                    0
+                } else {
+                    100
+                };
+            let down = matrix[x][y - 1] + 1;
+            let left = matrix[x - 1][y] + 1;
+            if diag <= left && diag <= down {
+                matrix[x][y] = diag;
+                dirmatrix[x][y] = LEV_DIAG;
+            } else if left <= diag && left <= down {
+                matrix[x][y] = left;
+                dirmatrix[x][y] = LEV_LEFT;
+            } else {
+                matrix[x][y] = down;
+                dirmatrix[x][y] = LEV_DOWN;
+            }
+        }
+    }
+
+    let mut x = s1len;
+    let mut y = s2len;
+    let mut i = 0usize;
+    while x > 0 || y > 0 {
+        let dir = dirmatrix[x][y];
+        if dir == LEV_DIAG {
+            lx.medcwordin[i] = lx.cwordin[x - 1];
+            lx.medcwordout[i] = lx.cwordout[y - 1];
+            x -= 1;
+            y -= 1;
+        } else if dir == LEV_DOWN {
+            lx.medcwordin[i] = EPSILON;
+            lx.medcwordout[i] = lx.cwordout[y - 1];
+            y -= 1;
+        } else {
+            lx.medcwordin[i] = lx.cwordin[x - 1];
+            lx.medcwordout[i] = EPSILON;
+            x -= 1;
+        }
+        i += 1;
+    }
+    /* for (j = 0, i -= 1; i >= 0; j++, i--) — copy the reversed scratch back */
+    let mut j = 0usize;
+    let mut k: isize = i as isize - 1;
+    while k >= 0 {
+        lx.cwordin[j] = lx.medcwordin[k as usize];
+        lx.cwordout[j] = lx.medcwordout[k as usize];
+        j += 1;
+        k -= 1;
+    }
+    lx.cwordin[j] = -1;
+    lx.cwordout[j] = -1;
+    /* free matrices — Vecs drop here */
+}
+
+// [spec:foma:def:lexcread.lexc-pad-fn]
+// [spec:foma:sem:lexcread.lexc-pad-fn]
+fn lexc_pad(lx: &mut Lexc) {
+    /* Pad the shorter of current in, out words with EPSILON */
+    if lx.cwordin[0] == -1 && lx.cwordout[0] == -1 {
+        lx.cwordin[0] = EPSILON;
+        lx.cwordout[0] = EPSILON;
+        lx.cwordin[1] = -1;
+        lx.cwordout[1] = -1;
+        return;
+    }
+
+    let mut i = 0usize;
+    let mut pad = 0;
+    loop {
+        if pad == 1 && lx.cwordout[i] == -1 {
+            lx.cwordin[i] = -1;
+            break;
+        }
+        if pad == 2 && lx.cwordin[i] == -1 {
+            lx.cwordout[i] = -1;
+            break;
+        }
+        if lx.cwordin[i] == -1 && lx.cwordout[i] != -1 {
+            pad = 1; /* Pad upper */
+        } else if lx.cwordin[i] != -1 && lx.cwordout[i] == -1 {
+            pad = 2; /* Pad lower */
+        }
+        if pad == 1 {
+            lx.cwordin[i] = EPSILON;
+        }
+        if pad == 2 {
+            lx.cwordout[i] = EPSILON;
+        }
+        if pad == 0 && lx.cwordin[i] == -1 {
+            break;
+        }
+        i += 1;
+    }
+}
+
+// [spec:foma:def:lexcread.lexc-string-to-tokens-fn]
+// [spec:foma:sem:lexcread.lexc-string-to-tokens-fn]
+fn lexc_string_to_tokens(lx: &mut Lexc, string: &[u8], intarr: &mut [i32; 1000]) {
+    let len = cstrlen(string) as i32;
+    let mut tmpstring = [0u8; 5];
+    let mut i = 0i32;
+    let mut pos = 0usize;
+    while i < len {
+        /* EPSILON for alignment is marked as 0xff */
+        if string[i as usize] == 0xff {
+            /* DEVIATION from C (intarr is the fixed 1000-int cwordin/cwordout;
+            an over-long entry side — including the malformed-UTF-8 infinite
+            loop below — panics on OOB index where C corrupts memory) */
+            intarr[pos] = EPSILON;
+            pos += 1;
+            i += 1;
+            continue;
+        }
+
+        let mut multi = 0;
+        let mut mcs_idx: Option<usize> = None;
+        let b0 = string[i as usize] as usize;
+        let b1 = if ((i + 1) as usize) < string.len() {
+            string[(i + 1) as usize] as usize
+        } else {
+            0
+        };
+        let mchashval = b0 * 256 + b1;
+        if i < len - 1 && lx.mchash[mchashval] {
+            let mut mcs = lx.mc;
+            while let Some(m) = mcs {
+                let sym = lx.mc_arena[m].symbol.as_deref().unwrap().as_bytes();
+                if string[i as usize..].starts_with(sym) {
+                    multi = 1;
+                    mcs_idx = Some(m);
+                    break;
+                }
+                mcs = lx.mc_arena[m].next;
+            }
+        }
+
+        if multi == 1 {
+            let m = mcs_idx.unwrap();
+            intarr[pos] = lx.mc_arena[m].sigma_number as i32;
+            pos += 1;
+            i += lx.mc_arena[m].symbol.as_deref().unwrap().len() as i32;
+        } else {
+            let skip = utf8skip(&string[i as usize..]);
+            mystrncpy(&mut tmpstring, &string[i as usize..], skip + 1);
+            let signumber = lexc_find_sigma_hash(lx, &tmpstring);
+            if signumber != -1 {
+                intarr[pos] = signumber;
+                pos += 1;
+                i = i + skip + 1;
+            } else {
+                mystrncpy(&mut tmpstring, &string[i as usize..], skip + 1);
+                let signumber = sigma_add(&cstrdup(&tmpstring), lx.lexsigma.as_deref_mut().unwrap());
+                lexc_add_sigma_hash(lx, &tmpstring, signumber);
+                intarr[pos] = signumber;
+                pos += 1;
+                i = i + skip + 1;
+            }
+        }
+    }
+    intarr[pos] = -1;
+}
+
+// [spec:foma:def:lexcread.mystrncpy-fn]
+// [spec:foma:sem:lexcread.mystrncpy-fn]
+fn mystrncpy(dest: &mut [u8], src: &[u8], len: i32) {
+    let mut i = 0i32;
+    while i < len {
+        dest[i as usize] = src[i as usize];
+        if src[i as usize] == 0 {
+            return;
+        }
+        i += 1;
+    }
+    dest[i as usize] = 0;
+}
+
+/* Add MC to front of chain */
+/* In decreasing order of length */
+
+// [spec:foma:def:lexcread.lexc-add-mc-fn]
+// [spec:foma:sem:lexcread.lexc-add-mc-fn]
+// [spec:foma:def:lexc.lexc-add-mc-fn]
+// [spec:foma:sem:lexc.lexc-add-mc-fn]
+pub fn lexc_add_mc(symbol: &mut [u8]) {
+    LEXC.with_borrow_mut(|lx| {
+        lexc_deescape_string(symbol, b'%', 0);
+        if lexc_find_mc_impl(lx, symbol) == 0 {
+            let len = utf8strlen(symbol);
+            let mut mcprev: Option<usize> = None;
+            /* for (mcs = mc; mcs != NULL && utf8strlen(mcs->symbol) > len; ...) */
+            let mut mcs = lx.mc;
+            while let Some(m) = mcs {
+                if !(utf8strlen(lx.mc_arena[m].symbol.as_deref().unwrap().as_bytes()) > len) {
+                    break;
+                }
+                mcprev = Some(m);
+                mcs = lx.mc_arena[m].next;
+            }
+            let mcnew = lx.mc_arena.len();
+            lx.mc_arena.push(MulticharSymbols {
+                symbol: Some(cstrdup(symbol)),
+                sigma_number: 0, /* set below */
+                next: mcs,
+            });
+            if lx.mc.is_none() || (mcs.is_some() && mcprev.is_none()) {
+                lx.mc = Some(mcnew);
+            }
+            if let Some(p) = mcprev {
+                lx.mc_arena[p].next = Some(mcnew);
+            }
+
+            let s = sigma_add(&cstrdup(symbol), lx.lexsigma.as_deref_mut().unwrap());
+            /* mchashval = (unsigned char)symbol[0]*256 + (unsigned char)symbol[1]
+            — raw second byte (NUL for a 1-byte symbol) */
+            let b0 = symbol[0] as usize;
+            let b1 = symbol.get(1).copied().unwrap_or(0) as usize;
+            let mchashval = b0 * 256 + b1;
+            lexc_add_sigma_hash(lx, symbol, s);
+            lx.mchash[mchashval] = true;
+            lx.mc_arena[mcnew].sigma_number = s as i16;
+        }
+    });
+}
+
+// [spec:foma:def:lexcread.lexc-find-mc-fn]
+// [spec:foma:sem:lexcread.lexc-find-mc-fn]
+// [spec:foma:def:lexc.lexc-find-mc-fn]
+// [spec:foma:sem:lexc.lexc-find-mc-fn]
+pub fn lexc_find_mc(symbol: &[u8]) -> i32 {
+    LEXC.with_borrow(|lx| lexc_find_mc_impl(lx, symbol))
+}
+
+fn lexc_find_mc_impl(lx: &Lexc, symbol: &[u8]) -> i32 {
+    let mut mcs = lx.mc;
+    while let Some(m) = mcs {
+        if sym_eq(&lx.mc_arena[m].symbol, symbol) {
+            return 1;
+        }
+        mcs = lx.mc_arena[m].next;
+    }
+    0
+}
+
+// [spec:foma:def:lexcread.lexc-find-lex-state-fn]
+// [spec:foma:sem:lexcread.lexc-find-lex-state-fn]
+// [spec:foma:def:lexc.lexc-find-lex-state-fn]
+// [spec:foma:sem:lexc.lexc-find-lex-state-fn]
+// Returns the lexicon's state (a private `struct states` — exposed here as its
+// arena index, since this is dead API with no callers in the C tree).
+pub fn lexc_find_lex_state(name: &[u8]) -> Option<usize> {
+    LEXC.with_borrow(|lx| {
+        let mut l = lx.lexstates;
+        while let Some(lidx) = l {
+            if sym_eq(&lx.lexstates_arena[lidx].name, name) {
+                return Some(lx.lexstates_arena[lidx].state);
+            }
+            l = lx.lexstates_arena[lidx].next;
+        }
+        None
+    })
+}
+
+// [spec:foma:def:lexcread.lexc-add-word-fn]
+// [spec:foma:sem:lexcread.lexc-add-word-fn]
+// [spec:foma:def:lexc.lexc-add-word-fn]
+// [spec:foma:sem:lexc.lexc-add-word-fn]
+pub fn lexc_add_word() {
+    /* Add a word from source state to destination state */
+    LEXC.with_borrow_mut(|lx| {
+        if lx.current_entry == REGEX_ENTRY {
+            lexc_add_network(lx);
+            return;
+        }
+
+        /* find source, dest */
+        let mut sourcestate = lx.lexstates_arena[lx.clexicon.unwrap()].state;
+        let deststate = lx.lexstates_arena[lx.ctarget.unwrap()].state;
+
+        let mut li = 0usize;
+        while lx.cwordin[li] != -1 {
+            li += 1;
+        }
+        let len = li as i32;
+        if len > lx.maxlen {
+            lx.maxlen = len;
+        }
+
+        /* We follow the source state if the symbols are the same (merge prefixes) */
+        let mut follow = 1;
+        let mut i = 0usize;
+        while lx.cwordin[i] != -1 {
+            let mut followed = false;
+            if follow == 1 {
+                let mut trans = lx.state_arena[sourcestate].trans;
+                while let Some(tidx) = trans {
+                    let t_in = lx.trans_arena[tidx].r#in as i32;
+                    let t_out = lx.trans_arena[tidx].out as i32;
+                    let t_target = lx.trans_arena[tidx].target;
+                    if t_in == lx.cwordin[i]
+                        && t_out == lx.cwordout[i]
+                        && lx.state_arena[t_target].lexstate.is_none()
+                    {
+                        /* Can't follow if target needs to be lexstate */
+                        if lx.cwordin[i + 1] == -1 && t_target != deststate {
+                            trans = lx.trans_arena[tidx].next;
+                            continue;
+                        }
+                        sourcestate = t_target;
+                        lx.state_arena[sourcestate].mergeable = 0;
+                        followed = true; /* goto breakout */
+                        break;
+                    }
+                    trans = lx.trans_arena[tidx].next;
+                }
+            }
+            if followed {
+                i += 1;
+                continue;
+            }
+            follow = 0;
+
+            let target;
+            if lx.cwordin[i + 1] == -1 {
+                target = deststate;
+            } else {
+                let newstate = lx.state_arena.len();
+                lx.state_arena.push(States {
+                    trans: None,
+                    lexstate: None,
+                    number: -1,
+                    hashval: 0,
+                    mergeable: 1,
+                    distance: 0,
+                    merge_with: 0,
+                });
+                lexc_add_state(lx, newstate);
+                lx.state_arena[newstate].trans = None;
+                lx.state_arena[newstate].lexstate = None;
+                lx.state_arena[newstate].mergeable = 1;
+                lx.state_arena[newstate].hashval = lexc_suffix_hash(lx, (i + 1) as i32);
+                lx.state_arena[newstate].distance = (len - i as i32 - 1) as u16;
+                lx.state_arena[newstate].merge_with = newstate;
+                target = newstate;
+            }
+            let newtrans = lx.trans_arena.len();
+            lx.trans_arena.push(Trans {
+                r#in: lx.cwordin[i] as i16,
+                out: lx.cwordout[i] as i16,
+                target,
+                next: lx.state_arena[sourcestate].trans,
+            });
+            lx.state_arena[sourcestate].trans = Some(newtrans);
+            sourcestate = target;
+            i += 1;
+        }
+    });
+}
+
+// [spec:foma:def:lexcread.lexc-number-states-fn]
+// [spec:foma:sem:lexcread.lexc-number-states-fn]
+fn lexc_number_states(lx: &mut Lexc) {
+    let mut smax = 0i32;
+    let mut n = 0i32;
+    lx.hasfinal = 0;
+
+    let mut hasroot = 0;
+    {
+        let mut s = lx.statelist;
+        while let Some(sidx) = s {
+            smax += 1;
+            let state = lx.statelist_arena[sidx].state;
+            let is_root = match lx.state_arena[state].lexstate {
+                Some(lidx) => lx.lexstates_arena[lidx].name.as_deref() == Some("Root"),
+                None => false,
+            };
+            if is_root {
+                lx.state_arena[state].number = 0;
+                lx.statelist_arena[sidx].start = 1;
+                n += 1;
+                hasroot = 1;
+                break;
+            }
+            s = lx.statelist_arena[sidx].next;
+        }
+    }
+    /* If there is no Root lexicon, the first lexicon mentioned is Root */
+    if hasroot == 0 {
+        let mut s = lx.statelist;
+        while let Some(sidx) = s {
+            if lx.statelist_arena[sidx].next.is_none() {
+                let state = lx.statelist_arena[sidx].state;
+                lx.state_arena[state].number = 0;
+                if G_VERBOSE.with(|v| v.get()) != 0 {
+                    let lidx = lx.state_arena[state].lexstate.unwrap();
+                    let name = lx.lexstates_arena[lidx].name.as_deref().unwrap_or("");
+                    eprint!("*Warning: no Root lexicon, using '{}' as Root.\n", name);
+                }
+                lx.statelist_arena[sidx].start = 1;
+                n += 1;
+            }
+            s = lx.statelist_arena[sidx].next;
+        }
+    }
+    /* Mark # as the last state */
+    {
+        let mut s = lx.statelist;
+        while let Some(sidx) = s {
+            let state = lx.statelist_arena[sidx].state;
+            if let Some(lidx) = lx.state_arena[state].lexstate {
+                if lx.lexstates_arena[lidx].name.as_deref() == Some("#") {
+                    lx.state_arena[state].number = smax - 1;
+                    lx.statelist_arena[sidx].r#final = 1;
+                    lx.hasfinal = 1;
+                } else if lx.lexstates_arena[lidx].has_outgoing == 0 {
+                    /* Also mark uncontinued states as final */
+                    lx.statelist_arena[sidx].r#final = 1;
+                }
+            }
+            s = lx.statelist_arena[sidx].next;
+        }
+    }
+
+    {
+        let mut s = lx.statelist;
+        while let Some(sidx) = s {
+            let state = lx.statelist_arena[sidx].state;
+            if lx.state_arena[state].number == -1 {
+                lx.state_arena[state].number = n;
+                n += 1;
+            }
+            s = lx.statelist_arena[sidx].next;
+        }
+    }
+    lx.lexc_statecount = n + 1;
+    {
+        let mut l = lx.lexstates;
+        while let Some(lidx) = l {
+            let state = lx.lexstates_arena[lidx].state;
+            if lx.lexstates_arena[lidx].targeted == 0 && lx.state_arena[state].number != 0 {
+                if G_VERBOSE.with(|v| v.get()) != 0 {
+                    let name = lx.lexstates_arena[lidx].name.as_deref().unwrap_or("");
+                    eprint!("*Warning: lexicon '{}' defined but not used\n", name);
+                }
+            }
+            if lx.lexstates_arena[lidx].has_outgoing == 0
+                && lx.lexstates_arena[lidx].name.as_deref() != Some("#")
+            {
+                if G_VERBOSE.with(|v| v.get()) != 0 {
+                    let name = lx.lexstates_arena[lidx].name.as_deref().unwrap_or("");
+                    eprint!("***Warning: lexicon '{}' used but never defined\n", name);
+                }
+            }
+            l = lx.lexstates_arena[lidx].next;
+        }
+    }
+}
+
+// [spec:foma:def:lexcread.lexc-eq-paths-fn]
+// [spec:foma:sem:lexcread.lexc-eq-paths-fn]
+fn lexc_eq_paths(lx: &Lexc, mut one: usize, mut two: usize) -> i32 {
+    while lx.state_arena[one].lexstate.is_none() && lx.state_arena[two].lexstate.is_none() {
+        /* dereferences trans without a NULL check (unwrap → panic on None,
+        the nearest safe behavior to C's crash) */
+        let ot = lx.state_arena[one].trans.unwrap();
+        let tt = lx.state_arena[two].trans.unwrap();
+        if lx.trans_arena[ot].r#in != lx.trans_arena[tt].r#in
+            || lx.trans_arena[ot].out != lx.trans_arena[tt].out
+        {
+            return 0;
+        }
+        one = lx.trans_arena[ot].target;
+        two = lx.trans_arena[tt].target;
+    }
+    if lx.state_arena[one].lexstate != lx.state_arena[two].lexstate {
+        return 0;
+    }
+    1
+}
+
+/* Local chained bucket cell for lexc_merge_states (lenlist / hashstates).
+Heads occupy the first maxlen+1 / tablesize entries of their Vec; chained
+cells are appended, linked via `next` into the same Vec. */
+#[derive(Debug, Clone, Copy)]
+struct MergeNode {
+    state: Option<usize>,
+    next: Option<usize>,
+}
+
+// [spec:foma:def:lexcread.lexc-merge-states-fn]
+// [spec:foma:sem:lexcread.lexc-merge-states-fn]
+fn lexc_merge_states(lx: &mut Lexc) {
+    /* Array of ptrs to states depending on string length */
+    let mut lenlist: Vec<MergeNode> = vec![
+        MergeNode {
+            state: None,
+            next: None
+        };
+        (lx.maxlen + 1) as usize
+    ];
+    let mut numstates = 0i32;
+    {
+        let mut s = lx.statelist;
+        while let Some(sidx) = s {
+            if lx.state_arena[lx.statelist_arena[sidx].state].mergeable != 0 {
+                numstates += 1;
+            }
+            s = lx.statelist_arena[sidx].next;
+        }
+    }
+
+    /* Find a suitable prime proportional to the number of mergeable states */
+    let mut pi = 0usize;
+    while PRIMES[pi] < (numstates / 4) as u32 {
+        pi += 1;
+    }
+    let tablesize = PRIMES[pi];
+    let mut hashstates: Vec<MergeNode> = vec![
+        MergeNode {
+            state: None,
+            next: None
+        };
+        tablesize as usize
+    ];
+
+    {
+        let mut s = lx.statelist;
+        while let Some(sidx) = s {
+            let state = lx.statelist_arena[sidx].state;
+            if lx.state_arena[state].mergeable != 0 {
+                numstates += 1; /* dead second count, as in C */
+                let distance = lx.state_arena[state].distance as usize;
+                if lenlist[distance].state.is_none() {
+                    lenlist[distance].state = Some(state);
+                } else {
+                    let newl = lenlist.len();
+                    let oldnext = lenlist[distance].next;
+                    lenlist.push(MergeNode {
+                        state: Some(state),
+                        next: oldnext,
+                    });
+                    lenlist[distance].next = Some(newl);
+                }
+                lx.state_arena[state].hashval %= tablesize;
+                let h = lx.state_arena[state].hashval as usize;
+                if hashstates[h].state.is_none() {
+                    hashstates[h].state = Some(state);
+                } else {
+                    let newh = hashstates.len();
+                    let oldnext = hashstates[h].next;
+                    hashstates.push(MergeNode {
+                        state: Some(state),
+                        next: oldnext,
+                    });
+                    hashstates[h].next = Some(newh);
+                }
+            }
+            s = lx.statelist_arena[sidx].next;
+        }
+    }
+
+    let mut i = lx.maxlen;
+    while i >= 1 {
+        let mut cl = Some(i as usize);
+        while let Some(clidx) = cl {
+            match lenlist[clidx].state {
+                None => break,
+                Some(cstate) => {
+                    if lx.state_arena[cstate].mergeable != 1 {
+                        cl = lenlist[clidx].next;
+                        continue;
+                    }
+                    let state = cstate;
+                    let hash = lx.state_arena[state].hashval as usize;
+                    let mut ch = Some(hash);
+                    while let Some(chidx) = ch {
+                        if let Some(hstate) = hashstates[chidx].state {
+                            if hstate != state
+                                && lx.state_arena[hstate].mergeable == 1
+                                && lx.state_arena[hstate].distance == lx.state_arena[state].distance
+                                && lexc_eq_paths(lx, hstate, state) == 1
+                            {
+                                lx.state_arena[hstate].merge_with = state;
+                                let mut purge = hstate;
+                                while lx.state_arena[purge].lexstate.is_none() {
+                                    lx.state_arena[purge].mergeable = 2;
+                                    let t = lx.state_arena[purge].trans.unwrap();
+                                    purge = lx.trans_arena[t].target;
+                                }
+                            }
+                        }
+                        ch = hashstates[chidx].next;
+                    }
+                    cl = lenlist[clidx].next;
+                }
+            }
+        }
+        i -= 1;
+    }
+
+    /* Rewrite pass: redirect targets through merge_with; free merged states'
+    trans cells (no-op in the arena); set lexstate->targeted for survivors */
+    {
+        let mut s = lx.statelist;
+        while let Some(sidx) = s {
+            let state = lx.statelist_arena[sidx].state;
+            let merged = lx.state_arena[state].mergeable == 2;
+            let mut t = lx.state_arena[state].trans;
+            let mut tprev: Option<usize> = None;
+            while let Some(tidx) = t {
+                let tgt = lx.trans_arena[tidx].target;
+                lx.trans_arena[tidx].target = lx.state_arena[tgt].merge_with;
+                if tprev.is_some() && merged {
+                    /* free(tprev) — no-op (arena) */
+                } else {
+                    let newtgt = lx.trans_arena[tidx].target;
+                    if let Some(lidx) = lx.state_arena[newtgt].lexstate {
+                        lx.lexstates_arena[lidx].targeted = 1;
+                    }
+                }
+                tprev = Some(tidx);
+                t = lx.trans_arena[tidx].next;
+            }
+            /* if (tprev != NULL && merged) free(tprev) — no-op */
+            s = lx.statelist_arena[sidx].next;
+        }
+    }
+
+    /* Removal pass: unlink and free cells (and states) with mergeable == 2 */
+    {
+        let mut s = lx.statelist;
+        let mut sprev: Option<usize> = None;
+        while let Some(sidx) = s {
+            let state = lx.statelist_arena[sidx].state;
+            if lx.state_arena[state].mergeable == 2 {
+                match sprev {
+                    Some(p) => {
+                        lx.statelist_arena[p].next = lx.statelist_arena[sidx].next;
+                    }
+                    None => {
+                        /* C latent bug: statelist = s (the removed cell), not
+                        s->next.
+                        DEVIATION from C (C free()s s → the head dangles at freed
+                        memory but "usually works" because the cell's fields are
+                        read before reuse; the arena never reclaims s, so the head
+                        deterministically stays at the removed cell with its next
+                        intact — the observable "usually works" result) */
+                        lx.statelist = Some(sidx);
+                    }
+                }
+                /* free(s->state); free(sf) — no-op (arena) */
+                s = lx.statelist_arena[sidx].next;
+            } else {
+                sprev = Some(sidx);
+                s = lx.statelist_arena[sidx].next;
+            }
+        }
+    }
+
+    /* Cleanup of the index chains is memory-only (the local Vecs drop here);
+    the C off-by-one leak of lenlist[maxlen]'s chain has no observable effect. */
+}
+
+// [spec:foma:def:lexcread.lexc-to-fsm-fn]
+// [spec:foma:sem:lexcread.lexc-to-fsm-fn]
+// [spec:foma:def:lexc.lexc-to-fsm-fn]
+// [spec:foma:sem:lexc.lexc-to-fsm-fn]
+pub fn lexc_to_fsm() -> Box<Fsm> {
+    LEXC.with_borrow_mut(|lx| {
+        if G_VERBOSE.with(|v| v.get()) != 0 {
+            eprint!("Building lexicon...\n");
+        }
+        lexc_merge_states(lx);
+        let mut net = fsm_create("");
+        /* free(net->sigma); net->sigma = lexsigma (ownership transfer) */
+        net.sigma = lx.lexsigma.take();
+        lexc_number_states(lx);
+        if lx.hasfinal == 0 {
+            if G_VERBOSE.with(|v| v.get()) != 0 {
+                eprint!("Warning: # is never reached!!!\n");
+            }
+            /* Leak path: lexc_cleanup is not called; the state graph and hash
+            tables persist in the arenas until the next lexc_init. */
+            return fsm_empty_set();
+        }
+        // DEVIATION from C (sa is malloc'd uninitialized and indexed by state
+        // number; a numbering gap from the "#" collision bug leaves entries
+        // unset — read as (state 0, 0, 0) here instead of C's garbage; an
+        // out-of-range collision index panics where C corrupts the heap)
+        let statecount = lx.lexc_statecount as usize;
+        let mut sa: Vec<(usize, i8, i8)> = vec![(0usize, 0i8, 0i8); statecount];
+        {
+            let mut s = lx.statelist;
+            while let Some(sidx) = s {
+                let state = lx.statelist_arena[sidx].state;
+                let num = lx.state_arena[state].number as usize;
+                sa[num] = (
+                    state,
+                    lx.statelist_arena[sidx].start,
+                    lx.statelist_arena[sidx].r#final,
+                );
+                s = lx.statelist_arena[sidx].next;
+            }
+        }
+        let mut linecount = 0i32;
+        {
+            let mut s = lx.statelist;
+            while let Some(sidx) = s {
+                linecount += 1;
+                let state = lx.statelist_arena[sidx].state;
+                let mut t = lx.state_arena[state].trans;
+                while let Some(tidx) = t {
+                    linecount += 1;
+                    t = lx.trans_arena[tidx].next;
+                }
+                s = lx.statelist_arena[sidx].next;
+            }
+        }
+        let default_line = FsmState {
+            state_no: 0,
+            r#in: 0,
+            out: 0,
+            target: 0,
+            final_state: 0,
+            start_state: 0,
+        };
+        let mut fsm: Vec<FsmState> = vec![default_line; (linecount + 1) as usize];
+        let mut i = 0i32;
+        for j in 0..statecount {
+            let (state, sfinal, sstart) = sa[j];
+            if lx.state_arena[state].trans.is_none() {
+                add_fsm_arc(
+                    &mut fsm,
+                    i,
+                    lx.state_arena[state].number,
+                    -1,
+                    -1,
+                    -1,
+                    sfinal as i32,
+                    sstart as i32,
+                );
+                i += 1;
+            } else {
+                let mut t = lx.state_arena[state].trans;
+                while let Some(tidx) = t {
+                    let tgt = lx.trans_arena[tidx].target;
+                    add_fsm_arc(
+                        &mut fsm,
+                        i,
+                        lx.state_arena[state].number,
+                        lx.trans_arena[tidx].r#in as i32,
+                        lx.trans_arena[tidx].out as i32,
+                        lx.state_arena[tgt].number,
+                        sfinal as i32,
+                        sstart as i32,
+                    );
+                    i += 1;
+                    t = lx.trans_arena[tidx].next;
+                }
+            }
+        }
+        add_fsm_arc(&mut fsm, i, -1, -1, -1, -1, -1, -1);
+        net.states = fsm;
+        net.statecount = lx.lexc_statecount;
+        fsm_update_flags(&mut net, UNK, UNK, UNK, UNK, UNK, UNK);
+        /* lexsigma is now net.sigma (aliased in C); operate on net.sigma */
+        if sigma_find_number(EPSILON, net.sigma.as_deref()) == -1 {
+            sigma_add_special(EPSILON, net.sigma.as_deref_mut().unwrap());
+        }
+        /* free(s): C frees the sa array here (s == sa after the build loop);
+        the sa Vec drops at scope end, observably identical */
+        lexc_cleanup(lx);
+        sigma_cleanup(&mut net, 0);
+        sigma_sort(&mut net);
+
+        if G_VERBOSE.with(|v| v.get()) != 0 {
+            eprint!("Determinizing...\n");
+        }
+        let net = fsm_determinize(net);
+        if G_VERBOSE.with(|v| v.get()) != 0 {
+            eprint!("Minimizing...\n");
+        }
+        let net = fsm_topsort(fsm_minimize(net));
+        if G_VERBOSE.with(|v| v.get()) != 0 {
+            eprint!("Done!\n");
+        }
+        net
+    })
+}
+
+// [spec:foma:def:lexcread.lexc-cleanup-fn]
+// [spec:foma:sem:lexcread.lexc-cleanup-fn]
+fn lexc_cleanup(lx: &mut Lexc) {
+    /* free(mchash) */
+    lx.mchash = Vec::new();
+    /* free every hashtable chain node + symbol, then the bucket array */
+    lx.hashtable = Vec::new();
+    /* free the mc list (symbols + nodes) */
+    lx.mc_arena = Vec::new();
+    lx.mc = None;
+    /* free the lexstates list (names + nodes; states freed via statelist) */
+    lx.lexstates_arena = Vec::new();
+    lx.lexstates = None;
+    /* free each state's trans, then each state, then the statelist cells */
+    lx.trans_arena = Vec::new();
+    lx.state_arena = Vec::new();
+    lx.statelist_arena = Vec::new();
+    lx.statelist = None;
+    /* lexsigma is not freed here — ownership was transferred to the net. The
+    static pointers are left dangling in C; reset to None here (lexc_init must
+    still run before any further lexc use). */
+    lx.clexicon = None;
+    lx.ctarget = None;
+}
+
+// [spec:foma:def:lexc.lexc-trim-fn]
+// [spec:foma:sem:lexc.lexc-trim-fn]
+// Implemented in foma/lexc.l (not lexcread.c); ported here per the concern.
+pub fn lexc_trim(s: &mut [u8]) {
+    /* Remove trailing ; and = and space and initial space */
+    // DEVIATION from C (phase 1 has no lower bound and underruns the buffer on
+    // an empty / all-trimmable string — UB; bounded at index 0 here).
+    let mut i: isize = cstrlen(s) as isize - 1;
+    while i >= 0
+        && (s[i as usize] == b';'
+            || s[i as usize] == b'='
+            || s[i as usize] == b' '
+            || s[i as usize] == b'\t')
+    {
+        s[i as usize] = 0;
+        i -= 1;
+    }
+    let mut i = 0usize;
+    while s[i] == b' ' || s[i] == b'\t' || s[i] == b'\n' {
+        i += 1;
+    }
+    let mut j = 0usize;
+    while s[i] != 0 {
+        s[j] = s[i];
+        i += 1;
+        j += 1;
+    }
+    s[j] = s[i];
+}
