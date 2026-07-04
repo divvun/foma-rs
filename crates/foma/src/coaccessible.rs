@@ -208,3 +208,204 @@ pub fn fsm_coaccessible(net: Box<Fsm>) -> Box<Fsm> {
     net.is_pruned = YES;
     net
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dynarray::{
+        fsm_construct_add_arc, fsm_construct_done, fsm_construct_init, fsm_construct_set_final,
+        fsm_construct_set_initial,
+    };
+    use crate::regex::fsm_parse_regex;
+    use crate::structures::fsm_create;
+    use crate::types::FsmState;
+
+    /// Line table up to (excluding) the state_no == -1 sentinel.
+    fn lines(net: &Fsm) -> Vec<(i32, i16, i16, i32, i8, i8)> {
+        net.states
+            .iter()
+            .take_while(|l| l.state_no != -1)
+            .map(|l| {
+                (
+                    l.state_no,
+                    l.r#in,
+                    l.out,
+                    l.target,
+                    l.final_state,
+                    l.start_state,
+                )
+            })
+            .collect()
+    }
+
+    // [spec:foma:sem:coaccessible.fsm-coaccessible-fn/test]
+    // [spec:foma:sem:fomalib.fsm-coaccessible-fn/test]
+    #[test]
+    fn coaccessible_prunes_dead_end_state_and_updates_counts() {
+        /* 0 -a-> 1 (final), 0 -b-> 2 (dead end): state 2 is pruned */
+        let mut h = fsm_construct_init("c");
+        fsm_construct_add_arc(&mut h, 0, 1, "a", "a");
+        fsm_construct_add_arc(&mut h, 0, 2, "b", "b");
+        fsm_construct_set_final(&mut h, 1);
+        fsm_construct_set_initial(&mut h, 0);
+        let net = fsm_coaccessible(fsm_construct_done(h));
+        assert_eq!(
+            lines(&net),
+            vec![(0, 3, 3, 1, 0, 1), (1, -1, -1, -1, 1, 0)]
+        );
+        assert_eq!(net.statecount, 2);
+        assert_eq!(net.linecount, 2);
+        assert_eq!(net.arccount, 1);
+        assert_eq!(net.is_pruned, YES);
+    }
+
+    // [spec:foma:sem:coaccessible.fsm-coaccessible-fn/test]
+    // [spec:foma:sem:fomalib.fsm-coaccessible-fn/test]
+    #[test]
+    fn coaccessible_marks_predecessors_through_inverse_chain_nodes() {
+        /* state 2 has two predecessors (0 and 1): the second one lives in a
+        malloc'd invtable chain node spliced after the array-resident head;
+        state 1 is only reached through that chain. State 3 is a dead end. */
+        let mut h = fsm_construct_init("c");
+        fsm_construct_add_arc(&mut h, 0, 2, "a", "a");
+        fsm_construct_add_arc(&mut h, 1, 2, "b", "b");
+        fsm_construct_add_arc(&mut h, 0, 3, "c", "c");
+        fsm_construct_set_final(&mut h, 2);
+        fsm_construct_set_initial(&mut h, 0);
+        let net = fsm_coaccessible(fsm_construct_done(h));
+        assert_eq!(
+            lines(&net),
+            vec![
+                (0, 3, 3, 2, 0, 1),
+                (1, 4, 4, 2, 0, 0),
+                (2, -1, -1, -1, 1, 0),
+            ]
+        );
+        assert_eq!(net.statecount, 3);
+        assert_eq!(net.linecount, 3);
+        assert_eq!(net.arccount, 2);
+        assert_eq!(net.is_pruned, YES);
+    }
+
+    // [spec:foma:sem:coaccessible.fsm-coaccessible-fn/test]
+    // [spec:foma:sem:fomalib.fsm-coaccessible-fn/test]
+    #[test]
+    fn coaccessible_mapping_zero_quirk_renumbers_survivors_from_one() {
+        /* State 0 is NOT coaccessible (its only arc reaches dead end 3);
+        1 -b-> 2 (final) is the coaccessible part. mapping[0] = 0 is set
+        unconditionally, so survivors are numbered from 1 and the result
+        has no state 0 — pin the literal renumbering. */
+        let mut h = fsm_construct_init("c");
+        fsm_construct_add_arc(&mut h, 0, 3, "a", "a");
+        fsm_construct_add_arc(&mut h, 1, 2, "b", "b");
+        fsm_construct_set_final(&mut h, 2);
+        fsm_construct_set_initial(&mut h, 0);
+        let net = fsm_coaccessible(fsm_construct_done(h));
+        assert_eq!(
+            lines(&net),
+            vec![(1, 4, 4, 2, 0, 0), (2, -1, -1, -1, 1, 0)]
+        );
+        assert!(lines(&net).iter().all(|l| l.0 != 0), "no state 0 survives");
+        assert_eq!(net.statecount, 2);
+        assert_eq!(net.linecount, 2);
+        assert_eq!(net.arccount, 1);
+        assert_eq!(net.is_pruned, YES);
+    }
+
+    // [spec:foma:sem:coaccessible.fsm-coaccessible-fn/test]
+    // [spec:foma:sem:fomalib.fsm-coaccessible-fn/test]
+    #[test]
+    fn coaccessible_emits_synthetic_final_line_when_all_arcs_pruned() {
+        /* 0 -a-> 1 (final), 1 -b-> 2 (dead end): state 1 keeps no line of
+        its own, so a synthetic arcless final line is emitted for it when
+        the scan moves past its block */
+        let mut h = fsm_construct_init("c");
+        fsm_construct_add_arc(&mut h, 0, 1, "a", "a");
+        fsm_construct_add_arc(&mut h, 1, 2, "b", "b");
+        fsm_construct_set_final(&mut h, 1);
+        fsm_construct_set_initial(&mut h, 0);
+        let net = fsm_coaccessible(fsm_construct_done(h));
+        assert_eq!(
+            lines(&net),
+            vec![(0, 3, 3, 1, 0, 1), (1, -1, -1, -1, 1, 0)]
+        );
+        assert_eq!(net.statecount, 2);
+        assert_eq!(net.linecount, 2);
+        assert_eq!(net.arccount, 1);
+    }
+
+    // [spec:foma:sem:coaccessible.fsm-coaccessible-fn/test]
+    // [spec:foma:sem:fomalib.fsm-coaccessible-fn/test]
+    #[test]
+    fn coaccessible_emits_trailing_synthetic_final_line_for_last_state() {
+        /* 0 -a-> 2 (final), 2 -b-> 1 (dead end): the final state 2 owns the
+        LAST line block and keeps no line, exercising the post-scan
+        synthetic-final branch. Survivors renumber 2 -> 1. */
+        let mut h = fsm_construct_init("c");
+        fsm_construct_add_arc(&mut h, 0, 2, "a", "a");
+        fsm_construct_add_arc(&mut h, 2, 1, "b", "b");
+        fsm_construct_set_final(&mut h, 2);
+        fsm_construct_set_initial(&mut h, 0);
+        let net = fsm_coaccessible(fsm_construct_done(h));
+        assert_eq!(
+            lines(&net),
+            vec![(0, 3, 3, 1, 0, 1), (1, -1, -1, -1, 1, 0)]
+        );
+        assert_eq!(net.statecount, 2);
+        assert_eq!(net.linecount, 2);
+        assert_eq!(net.arccount, 1);
+    }
+
+    // [spec:foma:sem:coaccessible.fsm-coaccessible-fn/test]
+    // [spec:foma:sem:fomalib.fsm-coaccessible-fn/test]
+    #[test]
+    fn coaccessible_all_coaccessible_terminates_early_with_counts_unchanged() {
+        let net = fsm_parse_regex("a b", None, None).unwrap();
+        let before = lines(&net);
+        let (sc, lc, ac) = (net.statecount, net.linecount, net.arccount);
+        let net = fsm_coaccessible(net);
+        assert_eq!(lines(&net), before, "line array untouched");
+        assert_eq!(net.statecount, sc);
+        assert_eq!(net.linecount, lc);
+        assert_eq!(net.arccount, ac);
+        assert_eq!(net.is_pruned, YES);
+    }
+
+    // [spec:foma:sem:coaccessible.fsm-coaccessible-fn/test]
+    // [spec:foma:sem:fomalib.fsm-coaccessible-fn/test]
+    #[test]
+    fn coaccessible_no_finals_yields_empty_language_shape() {
+        /* no final state at all: markcount == 0 -> canonical empty machine
+        with a fresh sigma and zeroed counts */
+        let mut net = fsm_create("");
+        net.states = vec![
+            FsmState {
+                state_no: 0,
+                r#in: 0,
+                out: 0,
+                target: 0,
+                final_state: 0,
+                start_state: 0,
+            };
+            3
+        ];
+        add_fsm_arc(&mut net.states, 0, 0, 3, 3, 1, 0, 1);
+        add_fsm_arc(&mut net.states, 1, 1, -1, -1, -1, 0, 0);
+        add_fsm_arc(&mut net.states, 2, -1, -1, -1, -1, -1, -1);
+        net.statecount = 2;
+        net.linecount = 2;
+        net.arccount = 1;
+        let net = fsm_coaccessible(net);
+        /* fsm_empty(): one non-final start state, no arcs */
+        assert_eq!(lines(&net), vec![(0, -1, -1, -1, 0, 1)]);
+        assert_eq!(net.states[1].state_no, -1);
+        assert_eq!(net.statecount, 0);
+        assert_eq!(net.linecount, 0);
+        assert_eq!(net.arccount, 0);
+        let sigma = net.sigma.as_deref().unwrap();
+        assert_eq!(sigma.number, -1, "fresh empty sigma");
+        assert!(sigma.symbol.is_none());
+        assert!(sigma.next.is_none());
+        assert_eq!(net.is_pruned, YES);
+    }
+}

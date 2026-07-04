@@ -1160,3 +1160,400 @@ pub(crate) fn nhash_free(mut nptr: Vec<NhashList>, size: i32) {
     }
     /* free(nptr) — the bucket array is dropped on return */
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::apply::{apply_clear, apply_down, apply_init};
+    use crate::dynarray::{
+        fsm_construct_add_arc, fsm_construct_done, fsm_construct_init, fsm_construct_set_final,
+        fsm_construct_set_initial,
+    };
+    use crate::types::{Fsm, NO, UNK};
+
+    fn accepts(net: &Fsm, word: &str) -> Option<String> {
+        let mut h = apply_init(net);
+        let r = apply_down(&mut h, Some(word));
+        apply_clear(h);
+        r
+    }
+
+    fn lines(net: &Fsm) -> Vec<(i32, i16, i16, i32, i8, i8)> {
+        net.states
+            .iter()
+            .map(|s| (s.state_no, s.r#in, s.out, s.target, s.final_state, s.start_state))
+            .collect()
+    }
+
+    /* NFA over {a}: 0 start, 0-a->0, 0-a->1, 1-a->2 (final). L = a^n, n >= 2. */
+    fn build_a_ge2() -> Box<Fsm> {
+        let mut hc = fsm_construct_init("d");
+        fsm_construct_set_initial(&mut hc, 0);
+        fsm_construct_add_arc(&mut hc, 0, 0, "a", "a");
+        fsm_construct_add_arc(&mut hc, 0, 1, "a", "a");
+        fsm_construct_add_arc(&mut hc, 1, 2, "a", "a");
+        fsm_construct_set_final(&mut hc, 2);
+        fsm_construct_done(hc)
+    }
+
+    // Full subset construction over the whole engine: fsm_determinize drives
+    // fsm_subset, init, init_trans_array (+ trans_sort_cmp on the state with two
+    // a-arcs), initial_e_closure, e_closure (no-epsilon branch), set_lookup and
+    // the do-loop's next_unmarked agenda pops.
+    // [spec:foma:sem:determinize.fsm-determinize-fn/test]
+    // [spec:foma:sem:fomalib.fsm-determinize-fn/test]
+    // [spec:foma:sem:determinize.fsm-subset-fn/test]
+    // [spec:foma:sem:determinize.init-fn/test]
+    // [spec:foma:sem:determinize.init-trans-array-fn/test]
+    // [spec:foma:sem:determinize.initial-e-closure-fn/test]
+    // [spec:foma:sem:determinize.e-closure-fn/test]
+    // [spec:foma:sem:determinize.set-lookup-fn/test]
+    #[test]
+    fn determinize_subset_construction_shape() {
+        let net = build_a_ge2();
+        assert_ne!(net.is_deterministic, YES, "input NFA is nondeterministic");
+        let d = fsm_determinize(net);
+        /* subsets {0}, {0,1}, {0,1,2 final}: 3 states, 3 arcs, 1 final */
+        assert_eq!(d.statecount, 3);
+        assert_eq!(d.arccount, 3);
+        assert_eq!(d.finalcount, 1);
+        assert_eq!(d.is_deterministic, YES);
+        assert_eq!(d.is_epsilon_free, YES);
+        /* start state renumbered to 0, densely numbered result */
+        assert_eq!(
+            d.states.iter().filter(|s| s.state_no != -1 && s.start_state != 0).count(),
+            1
+        );
+        assert_eq!(accepts(&d, ""), None);
+        assert_eq!(accepts(&d, "a"), None);
+        assert_eq!(accepts(&d, "aa"), Some("aa".to_string()));
+        assert_eq!(accepts(&d, "aaaa"), Some("aaaa".to_string()));
+    }
+
+    // fsm_epsilon_remove drives fsm_subset with epsilon memoization: memoize is
+    // exercised on the input's eps arc and the closure DFS runs the epsilon
+    // branch of e_closure; e_closure_free tears the memo down in wrapup.
+    // [spec:foma:sem:determinize.fsm-epsilon-remove-fn/test]
+    // [spec:foma:sem:fomalib.fsm-epsilon-remove-fn/test]
+    // [spec:foma:sem:determinize.e-closure-fn/test]
+    #[test]
+    fn epsilon_remove_eliminates_epsilon_arcs() {
+        /* eps-NFA: 0 start -eps-> 1, 1 -a-> 1 (loop), 1 final. L = a*. */
+        let mut hc = fsm_construct_init("e");
+        fsm_construct_set_initial(&mut hc, 0);
+        fsm_construct_add_arc(&mut hc, 0, 1, "@_EPSILON_SYMBOL_@", "@_EPSILON_SYMBOL_@");
+        fsm_construct_add_arc(&mut hc, 1, 1, "a", "a");
+        fsm_construct_set_final(&mut hc, 1);
+        let net = fsm_construct_done(hc);
+        assert_eq!(net.is_epsilon_free, NO);
+        let er = fsm_epsilon_remove(net);
+        assert_eq!(er.is_epsilon_free, YES);
+        /* no (EPSILON:EPSILON) arc survives */
+        assert!(!er.states.iter().any(|s| s.r#in == 0 && s.out == 0 && s.target != -1));
+        /* state 0's epsilon closure reaches final state 1 -> language a* kept */
+        assert_eq!(accepts(&er, ""), Some("".to_string()));
+        assert_eq!(accepts(&er, "a"), Some("a".to_string()));
+        assert_eq!(accepts(&er, "aaa"), Some("aaa".to_string()));
+    }
+
+    // fsm_subset's second fast path: EPSILON_REMOVE on a net with no epsilon arc
+    // sets is_epsilon_free and returns the net unmodified (NOT determinized).
+    // [spec:foma:sem:determinize.fsm-subset-fn/test]
+    #[test]
+    fn epsilon_remove_no_epsilon_fast_path() {
+        /* nondeterministic (skips the top-level det early return) but eps-free */
+        let mut hc = fsm_construct_init("f");
+        fsm_construct_set_initial(&mut hc, 0);
+        fsm_construct_add_arc(&mut hc, 0, 1, "a", "a");
+        fsm_construct_add_arc(&mut hc, 0, 2, "a", "a"); /* two a-arcs -> nondet */
+        fsm_construct_set_final(&mut hc, 1);
+        fsm_construct_set_final(&mut hc, 2);
+        let net = fsm_construct_done(hc);
+        assert_ne!(net.is_deterministic, YES);
+        let sc = net.statecount;
+        let before = lines(&net);
+        let er = fsm_epsilon_remove(net);
+        assert_eq!(er.is_epsilon_free, YES);
+        assert_eq!(er.statecount, sc);
+        assert_ne!(er.is_deterministic, YES, "not determinized on the eps-free path");
+        assert_eq!(lines(&er), before, "line table returned untouched");
+    }
+
+    // Internal already-deterministic shortcut: forced past the top-level
+    // is_deterministic==YES early return, a structurally-deterministic single-
+    // start-at-0 net takes the shortcut, which sets det/eps flags but does NOT
+    // rebuild (is_pruned/is_minimized preserved, line table intact).
+    // [spec:foma:sem:determinize.fsm-subset-fn/test]
+    #[test]
+    fn already_deterministic_shortcut_preserves_flags() {
+        let mut hc = fsm_construct_init("A");
+        fsm_construct_set_initial(&mut hc, 0);
+        fsm_construct_set_final(&mut hc, 0);
+        fsm_construct_add_arc(&mut hc, 0, 1, "a", "a");
+        fsm_construct_set_final(&mut hc, 1);
+        fsm_construct_add_arc(&mut hc, 1, 1, "a", "a");
+        let mut net = fsm_construct_done(hc);
+        net.is_deterministic = UNK; /* skip the top-level early return */
+        net.is_pruned = YES;
+        net.is_minimized = YES;
+        let before = lines(&net);
+        let d = fsm_determinize(net);
+        assert_eq!(d.is_deterministic, YES);
+        assert_eq!(d.is_epsilon_free, YES);
+        assert_eq!(d.is_pruned, YES, "shortcut does not touch is_pruned");
+        assert_eq!(d.is_minimized, YES, "shortcut does not touch is_minimized");
+        assert_eq!(lines(&d), before, "line table not rebuilt");
+    }
+
+    // numss _Bool truncation quirk: a deterministic net whose single start state
+    // is NOT state 0 has numss = (state_no != 0) = true, so the shortcut is
+    // skipped and the full subset construction runs (rebuild via fsm_state_close
+    // clears is_pruned/is_minimized and renumbers the start state to 0).
+    // [spec:foma:sem:determinize.fsm-subset-fn/test]
+    // [spec:foma:sem:determinize.initial-e-closure-fn/test]
+    #[test]
+    fn numss_bool_truncation_forces_full_path() {
+        let mut hc = fsm_construct_init("B");
+        fsm_construct_set_initial(&mut hc, 1);
+        fsm_construct_add_arc(&mut hc, 1, 0, "a", "a");
+        fsm_construct_set_final(&mut hc, 0);
+        let mut net = fsm_construct_done(hc);
+        net.is_deterministic = UNK;
+        net.is_pruned = YES;
+        net.is_minimized = YES;
+        let d = fsm_determinize(net);
+        /* full path taken -> the builder close resets these to UNK */
+        assert_eq!(d.is_pruned, UNK);
+        assert_eq!(d.is_minimized, UNK);
+        let start_states: Vec<i32> = d
+            .states
+            .iter()
+            .filter(|s| s.state_no != -1 && s.start_state != 0)
+            .map(|s| s.state_no)
+            .collect();
+        assert_eq!(start_states, vec![0], "start state renumbered to 0");
+        assert_eq!(accepts(&d, "a"), Some("a".to_string()));
+        assert_eq!(accepts(&d, ""), None);
+    }
+
+    // hashf: the fixed 6703271 seed (observable on the empty set) and the
+    // permutation invariance the subset hashing relies on.
+    // [spec:foma:sem:determinize.hashf-fn/test]
+    #[test]
+    fn hashf_seed_and_permutation() {
+        NHASH_TABLESIZE.set(61);
+        assert_eq!(hashf(&[], 0), (6703271u32 % 61) as i32);
+        /* large prime table: modulo does not mask the permutation equality */
+        NHASH_TABLESIZE.set(2147483647);
+        let base = hashf(&[7, 3, 19, 2], 4);
+        assert_eq!(base, hashf(&[2, 19, 3, 7], 4));
+        assert_eq!(base, hashf(&[19, 2, 7, 3], 4));
+    }
+
+    // nhash_init picks the smallest prime >= initial_size off the ladder
+    // (minimum 61) and resets load / current_setnum.
+    // [spec:foma:sem:determinize.nhash-init-fn/test]
+    #[test]
+    fn nhash_init_prime_ladder() {
+        nhash_init(6);
+        assert_eq!(NHASH_TABLESIZE.get(), 61);
+        assert_eq!(CURRENT_SETNUM.get(), -1);
+        assert_eq!(NHASH_LOAD.get(), 0);
+        nhash_init(61);
+        assert_eq!(NHASH_TABLESIZE.get(), 61);
+        nhash_init(62);
+        assert_eq!(NHASH_TABLESIZE.get(), 127);
+        nhash_init(0);
+        assert_eq!(NHASH_TABLESIZE.get(), 61);
+        nhash_init(2000);
+        assert_eq!(NHASH_TABLESIZE.get(), 2039);
+    }
+
+    // nhash_rebuild_table advances to the next prime and rehashes (empty here).
+    // [spec:foma:sem:determinize.nhash-rebuild-table-fn/test]
+    #[test]
+    fn nhash_rebuild_advances_prime() {
+        nhash_init(6); /* 61, empty */
+        nhash_rebuild_table();
+        assert_eq!(NHASH_TABLESIZE.get(), 127);
+        assert_eq!(NHASH_LOAD.get(), 0);
+    }
+
+    // Round-trip through the subset canonicaliser: set_lookup -> nhash_find_insert
+    // -> nhash_insert -> move_set + add_T_ptr. A first set is numbered 0 and its
+    // members copied into set_table; a permutation of it canonicalises back to 0
+    // (order-insensitive membership test via e_table); a distinct set gets 1.
+    // add_T_ptr pushed both onto the agenda (next_unmarked pops LIFO).
+    // [spec:foma:sem:determinize.set-lookup-fn/test]
+    // [spec:foma:sem:determinize.nhash-find-insert-fn/test]
+    // [spec:foma:sem:determinize.nhash-insert-fn/test]
+    // [spec:foma:sem:determinize.move-set-fn/test]
+    // [spec:foma:sem:determinize.add-t-ptr-fn/test]
+    #[test]
+    fn nhash_insert_find_roundtrip() {
+        let n = 5usize;
+        FINALS.with_borrow_mut(|v| *v = vec![false; n]);
+        E_TABLE.with_borrow_mut(|v| *v = vec![0; n]);
+        MAINLOOP.set(1);
+        SET_TABLE_SIZE.set(64);
+        SET_TABLE.with_borrow_mut(|v| *v = vec![0; 64]);
+        SET_TABLE_OFFSET.set(0);
+        T_LIMIT.set(8);
+        T_PTR.with_borrow_mut(|v| *v = vec![TMemo::default(); 8]);
+        OP.set(SUBSET_DETERMINIZE);
+        crate::int_stack::int_stack_clear();
+        nhash_init(6);
+
+        /* first insert of {2,0,1} -> subset 0, members copied to set_table */
+        assert_eq!(set_lookup(&[2, 0, 1], 3), 0);
+        assert_eq!(SET_TABLE_OFFSET.get(), 3);
+        SET_TABLE.with_borrow(|st| assert_eq!(&st[0..3], &[2, 0, 1]));
+        assert_eq!(T_PTR.with_borrow(|t| (t[0].size, t[0].set_offset)), (3, 0));
+
+        /* find a permutation: mark members e_table == mainloop-1, bump mainloop */
+        E_TABLE.with_borrow_mut(|e| {
+            e[0] = 1;
+            e[1] = 1;
+            e[2] = 1;
+        });
+        MAINLOOP.set(2);
+        assert_eq!(set_lookup(&[0, 1, 2], 3), 0, "permutation canonicalises to 0");
+
+        /* a distinct set gets the next number */
+        assert_eq!(set_lookup(&[3, 4], 2), 1);
+        assert_eq!(SET_TABLE_OFFSET.get(), 5);
+
+        /* both subsets were pushed on the agenda by add_T_ptr (LIFO) */
+        assert_eq!(next_unmarked(), 1);
+        assert_eq!(next_unmarked(), 0);
+        assert_eq!(next_unmarked(), -1);
+    }
+
+    // next_unmarked pops the agenda LIFO, -1 when empty.
+    // [spec:foma:sem:determinize.next-unmarked-fn/test]
+    #[test]
+    fn next_unmarked_pops_lifo() {
+        crate::int_stack::int_stack_clear();
+        crate::int_stack::int_stack_push(3);
+        crate::int_stack::int_stack_push(7);
+        assert_eq!(next_unmarked(), 7);
+        assert_eq!(next_unmarked(), 3);
+        assert_eq!(next_unmarked(), -1);
+    }
+
+    // sigma_to_pairs builds the (in,out)<->composite bijection, flags a
+    // transducer (arity 2), records epsilon_symbol for the (0,0) pair, and the
+    // two mapping functions invert each other for every registered pair.
+    // [spec:foma:sem:determinize.sigma-to-pairs-fn/test]
+    // [spec:foma:sem:determinize.symbol-pair-to-single-symbol-fn/test]
+    // [spec:foma:sem:determinize.single-symbol-to-symbol-pair-fn/test]
+    #[test]
+    fn sigma_to_pairs_and_symbol_mappings() {
+        let mut hc = fsm_construct_init("s");
+        fsm_construct_set_initial(&mut hc, 0);
+        fsm_construct_add_arc(&mut hc, 0, 1, "a", "b"); /* a:b -> arity 2 */
+        fsm_construct_add_arc(&mut hc, 1, 2, "a", "a"); /* a:a */
+        fsm_construct_add_arc(&mut hc, 0, 2, "@_EPSILON_SYMBOL_@", "@_EPSILON_SYMBOL_@");
+        fsm_construct_set_final(&mut hc, 2);
+        let mut net = fsm_construct_done(hc);
+        sigma_to_pairs(&mut net);
+        assert_eq!(net.arity, 2);
+        assert_ne!(EPSILON_SYMBOL.get(), -1);
+        assert_eq!(EPSILON_SYMBOL.get(), symbol_pair_to_single_symbol(EPSILON, EPSILON));
+        for st in net.states.iter() {
+            let (i, o) = (st.r#in as i32, st.out as i32);
+            if i < 0 || o < 0 {
+                continue;
+            }
+            let c = symbol_pair_to_single_symbol(i, o);
+            assert!(c >= 0 && c < NUM_SYMBOLS.get());
+            let (mut si, mut so) = (0, 0);
+            single_symbol_to_symbol_pair(c, &mut si, &mut so);
+            assert_eq!((si, so), (i, o), "back-map inverts forward-map");
+        }
+    }
+
+    // memoize_e_closure builds the per-state epsilon adjacency graph, skipping
+    // self-loops and duplicate (source,target) pairs; fanout is a head ->target
+    // plus a ->next chain (LIFO of int_stack pops).
+    // [spec:foma:sem:determinize.memoize-e-closure-fn/test]
+    #[test]
+    fn memoize_e_closure_builds_epsilon_graph() {
+        crate::int_stack::int_stack_clear();
+        NUM_STATES.set(3);
+        let e = EPSILON as i16;
+        let fsm = vec![
+            FsmState { state_no: 0, r#in: e, out: e, target: 1, final_state: 0, start_state: 1 },
+            FsmState { state_no: 0, r#in: e, out: e, target: 2, final_state: 0, start_state: 1 },
+            FsmState { state_no: 0, r#in: e, out: e, target: 1, final_state: 0, start_state: 1 }, /* dup */
+            FsmState { state_no: 0, r#in: e, out: e, target: 0, final_state: 0, start_state: 1 }, /* self */
+            FsmState { state_no: 1, r#in: -1, out: -1, target: -1, final_state: 0, start_state: 0 },
+            FsmState { state_no: 2, r#in: -1, out: -1, target: -1, final_state: 1, start_state: 0 },
+            FsmState { state_no: -1, r#in: -1, out: -1, target: -1, final_state: -1, start_state: -1 },
+        ];
+        memoize_e_closure(&fsm);
+        E_CLOSURE_MEMO.with_borrow(|em| {
+            /* head 0 -> successors {2,1} (LIFO), heads 1,2 have none */
+            assert_eq!(em[0].state, 0);
+            assert_eq!(em[0].target, Some(2));
+            let chain = em[0].next.expect("fanout chain node");
+            assert_eq!(em[chain].target, Some(1));
+            assert_eq!(em[chain].next, None);
+            assert_eq!(em[1].target, None);
+            assert_eq!(em[2].target, None);
+        });
+    }
+
+    // e_closure_free drops marktable and the memo pool.
+    // [spec:foma:sem:determinize.e-closure-free-fn/test]
+    #[test]
+    fn e_closure_free_clears_memo() {
+        MARKTABLE.with_borrow_mut(|v| *v = vec![1, 2, 3]);
+        E_CLOSURE_MEMO.with_borrow_mut(|v| *v = vec![EClosureMemo::default(); 4]);
+        e_closure_free();
+        assert!(MARKTABLE.with_borrow(|v| v.is_empty()));
+        assert!(E_CLOSURE_MEMO.with_borrow(|v| v.is_empty()));
+    }
+
+    // nhash_free walks each bucket's ->next chain without panicking.
+    // [spec:foma:sem:determinize.nhash-free-fn/test]
+    #[test]
+    fn nhash_free_walks_chains() {
+        let mut table = vec![NhashList::default(); 2];
+        table[0].size = 1;
+        table[0].next = Some(Box::new(NhashList {
+            setnum: 1,
+            size: 1,
+            set_offset: 0,
+            next: Some(Box::new(NhashList::default())),
+        }));
+        nhash_free(table, 2);
+    }
+
+    // trans_sort_cmp: ascending by composite symbol (a->inout - b->inout).
+    // [spec:foma:sem:determinize.trans-sort-cmp-fn/test]
+    #[test]
+    fn trans_sort_cmp_orders_by_inout() {
+        let a = TransList { inout: 5, target: 0 };
+        let b = TransList { inout: 2, target: 9 };
+        assert_eq!(trans_sort_cmp(&a, &b), 3);
+        assert_eq!(trans_sort_cmp(&b, &a), -3);
+        assert_eq!(trans_sort_cmp(&a, &a), 0);
+    }
+
+    // The extern add_fsm_arc re-export writes one flat line and returns offset+1.
+    // [spec:foma:sem:determinize.add-fsm-arc-fn/test]
+    #[test]
+    fn add_fsm_arc_reexport_writes_line() {
+        let mut fsm = vec![
+            FsmState { state_no: 0, r#in: 0, out: 0, target: 0, final_state: 0, start_state: 0 };
+            2
+        ];
+        let r = add_fsm_arc(&mut fsm, 0, 5, 1, 2, 3, 1, 1);
+        assert_eq!(r, 1);
+        assert_eq!(
+            (fsm[0].state_no, fsm[0].r#in, fsm[0].out, fsm[0].target, fsm[0].final_state, fsm[0].start_state),
+            (5, 1, 2, 3, 1, 1)
+        );
+    }
+}

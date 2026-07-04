@@ -954,3 +954,357 @@ pub(crate) fn sigma_to_pairs(net: &mut Fsm) {
 pub(crate) fn symbol_pair_to_single_symbol(r#in: i32, out: i32) -> i32 {
     DOUBLE_SIGMA_ARRAY.with_borrow(|d| d[(MAXSIGMA.get() * r#in + out) as usize])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::apply::{apply_clear, apply_down, apply_init};
+    use crate::dynarray::{
+        fsm_construct_add_arc, fsm_construct_done, fsm_construct_init, fsm_construct_set_final,
+        fsm_construct_set_initial,
+    };
+
+    fn accepts(net: &Fsm, word: &str) -> Option<String> {
+        let mut h = apply_init(net);
+        let r = apply_down(&mut h, Some(word));
+        apply_clear(h);
+        r
+    }
+
+    /* Deterministic 3-state input for (a|b)+: states {1,2} are equivalent and
+    must merge, exercising rebuild_machine's compaction. */
+    fn build_ab_plus() -> Box<Fsm> {
+        let mut hc = fsm_construct_init("m");
+        fsm_construct_set_initial(&mut hc, 0);
+        fsm_construct_add_arc(&mut hc, 0, 1, "a", "a");
+        fsm_construct_add_arc(&mut hc, 0, 2, "b", "b");
+        fsm_construct_add_arc(&mut hc, 1, 1, "a", "a");
+        fsm_construct_add_arc(&mut hc, 1, 2, "b", "b");
+        fsm_construct_add_arc(&mut hc, 2, 1, "a", "a");
+        fsm_construct_add_arc(&mut hc, 2, 2, "b", "b");
+        fsm_construct_set_final(&mut hc, 1);
+        fsm_construct_set_final(&mut hc, 2);
+        fsm_construct_done(hc)
+    }
+
+    /* NFA over {a}: L = a^n, n >= 2. */
+    fn build_a_ge2() -> Box<Fsm> {
+        let mut hc = fsm_construct_init("d");
+        fsm_construct_set_initial(&mut hc, 0);
+        fsm_construct_add_arc(&mut hc, 0, 0, "a", "a");
+        fsm_construct_add_arc(&mut hc, 0, 1, "a", "a");
+        fsm_construct_add_arc(&mut hc, 1, 2, "a", "a");
+        fsm_construct_set_final(&mut hc, 2);
+        fsm_construct_done(hc)
+    }
+
+    /* NFA over {a,b}: strings ending in 'a' (0-a->0, 0-b->0, 0-a->1 final). */
+    fn build_ends_a() -> Box<Fsm> {
+        let mut hc = fsm_construct_init("t");
+        fsm_construct_set_initial(&mut hc, 0);
+        fsm_construct_add_arc(&mut hc, 0, 0, "a", "a");
+        fsm_construct_add_arc(&mut hc, 0, 0, "b", "b");
+        fsm_construct_add_arc(&mut hc, 0, 1, "a", "a");
+        fsm_construct_set_final(&mut hc, 1);
+        fsm_construct_done(hc)
+    }
+
+    // End-to-end Hopcroft minimization: the whole hop pipeline (sigma_to_pairs,
+    // init_PE, generate_inverse, trans_sort_cmp, refine_states no-split touch
+    // pass, rebuild_machine's in-place compaction) collapses the equivalent
+    // pair {1,2} to one state.
+    // [spec:foma:sem:minimize.fsm-minimize-fn/test]
+    // [spec:foma:sem:fomalib.fsm-minimize-fn/test]
+    // [spec:foma:sem:minimize.fsm-minimize-hop-fn/test]
+    // [spec:foma:sem:minimize.rebuild-machine-fn/test]
+    // [spec:foma:sem:minimize.refine-states-fn/test]
+    // [spec:foma:sem:minimize.symbol-pair-to-single-symbol-fn/test]
+    #[test]
+    fn minimize_hop_reduces_and_preserves_language() {
+        let net = build_ab_plus();
+        let m = fsm_minimize(net);
+        assert_eq!(m.statecount, 2, "3-state DFA minimizes to 2");
+        assert_eq!(m.arccount, 4);
+        assert_eq!(m.linecount, 5);
+        assert_eq!(m.is_deterministic, YES);
+        assert_eq!(m.is_minimized, YES);
+        /* exactly one structural final state (the merged {1,2}) ... */
+        let finals: Vec<i32> = m
+            .states
+            .iter()
+            .filter(|s| s.state_no != -1 && s.final_state != 0)
+            .map(|s| s.state_no)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        assert_eq!(finals, vec![1]);
+        /* ... but finalcount stays 2: rebuild_machine does NOT recompute it
+        (stale-count quirk preserved from the pre-merge fsm_count). */
+        assert_eq!(m.finalcount, 2);
+        assert_eq!(accepts(&m, ""), None);
+        assert_eq!(accepts(&m, "a"), Some("a".to_string()));
+        assert_eq!(accepts(&m, "ab"), Some("ab".to_string()));
+        assert_eq!(accepts(&m, "bbaa"), Some("bbaa".to_string()));
+    }
+
+    // Brzozowski dispatch: with g_minimize_hopcroft == 0, fsm_minimize routes to
+    // fsm_minimize_brz = determinize(reverse(determinize(reverse(net)))).
+    // [spec:foma:sem:minimize.fsm-minimize-fn/test]
+    // [spec:foma:sem:minimize.fsm-minimize-brz-fn/test]
+    #[test]
+    fn minimize_brzozowski_path() {
+        let net = build_ab_plus();
+        G_MINIMIZE_HOPCROFT.set(0);
+        let m = fsm_minimize(net);
+        G_MINIMIZE_HOPCROFT.set(1); /* restore default before asserting */
+        assert_eq!(m.statecount, 2);
+        assert_eq!(m.is_deterministic, YES);
+        assert_eq!(m.is_minimized, YES);
+        assert_eq!(accepts(&m, ""), None);
+        assert_eq!(accepts(&m, "a"), Some("a".to_string()));
+        assert_eq!(accepts(&m, "abba"), Some("abba".to_string()));
+    }
+
+    // fsm_minimize_brz called directly yields the minimal deterministic core.
+    // [spec:foma:sem:minimize.fsm-minimize-brz-fn/test]
+    #[test]
+    fn fsm_minimize_brz_direct() {
+        let m = fsm_minimize_brz(build_ab_plus());
+        assert_eq!(m.is_deterministic, YES);
+        assert_eq!(m.statecount, 2);
+        assert_eq!(accepts(&m, "a"), Some("a".to_string()));
+        assert_eq!(accepts(&m, ""), None);
+    }
+
+    // fsm_minimize_hop empty-language shortcut: finalcount == 0 destroys net and
+    // returns a fresh canonical empty set.
+    // [spec:foma:sem:minimize.fsm-minimize-hop-fn/test]
+    #[test]
+    fn hop_empty_language_returns_empty_set() {
+        let mut hc = fsm_construct_init("z");
+        fsm_construct_set_initial(&mut hc, 0);
+        fsm_construct_add_arc(&mut hc, 0, 1, "a", "a");
+        fsm_construct_set_final(&mut hc, 1);
+        let mut net = fsm_construct_done(hc);
+        for s in net.states.iter_mut() {
+            s.final_state = 0; /* strip all finals -> finalcount 0 after fsm_count */
+        }
+        let e = fsm_minimize_hop(net);
+        assert_eq!(e.statecount, 1);
+        assert_eq!(e.finalcount, 0);
+        assert_eq!(e.arccount, 0);
+        assert_eq!(e.linecount, 2);
+        assert_eq!(e.is_deterministic, YES);
+    }
+
+    // Property: minimize(net) and determinize(net) accept the same word set
+    // across several small NFAs (checked with apply_down on sample words).
+    // [spec:foma:sem:minimize.fsm-minimize-fn/test]
+    // [spec:foma:sem:fomalib.fsm-minimize-fn/test]
+    #[test]
+    fn minimize_determinize_language_equivalence() {
+        fn check(net: Box<Fsm>, samples: &[(&str, bool)]) {
+            let d = fsm_determinize(net.clone());
+            let m = fsm_minimize(net);
+            for (w, exp) in samples {
+                assert_eq!(accepts(&d, w).is_some(), *exp, "determinize accepts {:?}", w);
+                assert_eq!(accepts(&m, w).is_some(), *exp, "minimize accepts {:?}", w);
+            }
+        }
+        check(
+            build_a_ge2(),
+            &[("", false), ("a", false), ("aa", true), ("aaa", true), ("aaaa", true)],
+        );
+        check(
+            build_ab_plus(),
+            &[("", false), ("a", true), ("b", true), ("ab", true), ("bba", true)],
+        );
+        check(
+            build_ends_a(),
+            &[("", false), ("a", true), ("b", false), ("ba", true), ("ab", false), ("aba", true)],
+        );
+    }
+
+    // init_PE builds the initial {nonfinals, finals} partition, weaves each
+    // block's doubly linked member list in state order, seeds the agenda
+    // (finals first) and the P chain.
+    // [spec:foma:sem:minimize.init-pe-fn/test]
+    #[test]
+    fn init_pe_builds_initial_partition() {
+        NUM_STATES.set(3);
+        NUM_FINALS.set(1);
+        FINALS.with_borrow_mut(|v| *v = vec![false, false, true]);
+        init_PE();
+        assert_eq!(TOTAL_STATES.get(), 2);
+        /* nonFP == block 0 (count 2), FP == block 1 (count 1) */
+        PHEAD.with_borrow(|pp| {
+            assert_eq!(pp[0].count, 2);
+            assert_eq!(pp[1].count, 1);
+            assert_eq!(pp[0].first_e, Some(0));
+            assert_eq!(pp[0].last_e, Some(1));
+            assert_eq!(pp[1].first_e, Some(2));
+            assert_eq!(pp[1].last_e, Some(2));
+            /* P chain head is FP -> nonFP */
+            assert_eq!(pp[1].next, Some(0));
+            assert_eq!(pp[0].next, None);
+            assert_eq!(pp[1].agenda, Some(0));
+            assert_eq!(pp[0].agenda, Some(1));
+        });
+        assert_eq!(P.get(), Some(1));
+        E.with_borrow(|e| {
+            assert_eq!((e[0].group, e[1].group, e[2].group), (0, 0, 1));
+            assert_eq!(e[0].left, None);
+            assert_eq!(e[0].right, Some(1));
+            assert_eq!(e[1].left, Some(0));
+            assert_eq!(e[1].right, None);
+            assert_eq!(e[2].left, None);
+            assert_eq!(e[2].right, None);
+        });
+        /* agenda: finals (FP) first, then nonfinals (nonFP) */
+        assert_eq!(AGENDA_HEAD.get(), Some(0));
+        AGENDA_TOP.with_borrow(|ap| {
+            assert_eq!(ap[0].p, 1);
+            assert_eq!(ap[0].next, Some(1));
+            assert_eq!(ap[1].p, 0);
+            assert_eq!(ap[1].next, None);
+        });
+    }
+
+    // sigma_to_pairs (minimize variant) also fills the finals bitmap and counts
+    // distinct final states, flags arity, and forward-maps every real pair.
+    // [spec:foma:sem:minimize.sigma-to-pairs-fn/test]
+    #[test]
+    fn sigma_to_pairs_sets_finals_and_arity() {
+        let mut hc = fsm_construct_init("s");
+        fsm_construct_set_initial(&mut hc, 0);
+        fsm_construct_add_arc(&mut hc, 0, 1, "a", "b"); /* a:b -> arity 2 */
+        fsm_construct_add_arc(&mut hc, 1, 1, "a", "a");
+        fsm_construct_set_final(&mut hc, 1);
+        let mut net = fsm_construct_done(hc);
+        NUM_STATES.set(net.statecount);
+        sigma_to_pairs(&mut net);
+        assert_eq!(net.arity, 2);
+        assert_eq!(EPSILON_SYMBOL.get(), -1);
+        assert_eq!(NUM_FINALS.get(), 1);
+        FINALS.with_borrow(|f| assert!(f[1] && !f[0]));
+        for st in net.states.iter() {
+            let (i, o) = (st.r#in as i32, st.out as i32);
+            if i < 0 || o < 0 {
+                continue;
+            }
+            let c = symbol_pair_to_single_symbol(i, o);
+            assert!(c >= 0 && c < NUM_SYMBOLS.get());
+        }
+    }
+
+    // generate_inverse: inverse in-degree per state (trans_array size,
+    // E.inv_count) and inverse-arc source lists over a 2-state cycle.
+    // [spec:foma:sem:minimize.generate-inverse-fn/test]
+    #[test]
+    fn generate_inverse_counts_and_sources() {
+        let mut hc = fsm_construct_init("g");
+        fsm_construct_set_initial(&mut hc, 0);
+        fsm_construct_set_final(&mut hc, 0);
+        fsm_construct_add_arc(&mut hc, 0, 1, "a", "a");
+        fsm_construct_add_arc(&mut hc, 1, 0, "a", "a");
+        let mut net = fsm_construct_done(hc);
+        fsm_count(&mut net);
+        NUM_STATES.set(net.statecount);
+        sigma_to_pairs(&mut net);
+        init_PE();
+        generate_inverse(&net);
+        TRANS_ARRAY_MINIMIZE.with_borrow(|ta| {
+            assert_eq!(ta[0].size, 1);
+            assert_eq!(ta[1].size, 1);
+        });
+        E.with_borrow(|e| {
+            assert_eq!(e[0].inv_count, 1);
+            assert_eq!(e[1].inv_count, 1);
+        });
+        /* inverse arc of state 0 comes from state 1 and vice versa; both carry
+        the single composite symbol 0 */
+        TRANS_ARRAY_MINIMIZE.with_borrow(|ta| {
+            TRANS_LIST_MINIMIZE.with_borrow(|tl| {
+                let s0 = tl[ta[0].transitions].source;
+                let s1 = tl[ta[1].transitions].source;
+                assert_eq!((s0, s1), (1, 0));
+                assert_eq!(tl[ta[0].transitions].inout, 0);
+                assert_eq!(tl[ta[1].transitions].inout, 0);
+            })
+        });
+    }
+
+    // refine_states splits a block when only some members reach the splitter.
+    // Hand-built partition: block 1 = {0,1,2}, S = {0,1} touched. The block
+    // splits into newP = {0,1} (touched) and {2} (remainder). Verifies the
+    // always-false inv_count < inv_t_count quirk: the touched half (newP) is the
+    // one enqueued, with index 0.
+    // [spec:foma:sem:minimize.refine-states-fn/test]
+    // [spec:foma:sem:minimize.agenda-add-fn/test]
+    #[test]
+    fn refine_states_splits_and_enqueues_touched_half() {
+        NUM_STATES.set(10); /* large: TOTAL never reaches it -> no abort */
+        TOTAL_STATES.set(3);
+        /* block pool: index 1 is the splittable block tP, index 3 is free */
+        PHEAD.with_borrow_mut(|pp| {
+            *pp = vec![P::default(); 6];
+            pp[1].count = 3;
+            pp[1].first_e = Some(0);
+            pp[1].last_e = Some(2);
+            pp[1].current_split = None;
+            pp[1].agenda = None;
+            pp[1].next = None;
+        });
+        P.set(Some(1)); /* chain head */
+        PNEXT.set(3);
+        CURRENT_W.set(5); /* tP (1) is NOT current_w */
+        E.with_borrow_mut(|e| {
+            *e = vec![E::default(); 3];
+            for (i, ent) in e.iter_mut().enumerate() {
+                ent.group = 1;
+                ent.inv_count = 0;
+                ent.left = if i == 0 { None } else { Some(i - 1) };
+                ent.right = if i == 2 { None } else { Some(i + 1) };
+            }
+        });
+        TEMP_MOVE.with_borrow_mut(|v| *v = vec![0, 1, 0]);
+        AGENDA_TOP.with_borrow_mut(|v| *v = vec![Agenda::default(); 4]);
+        AGENDA_NEXT.set(0);
+        AGENDA.set(None);
+        MAINLOOP.set(1);
+
+        let selfsplit = refine_states(2);
+        assert_eq!(selfsplit, 0, "tP is not current_w");
+        assert_eq!(TOTAL_STATES.get(), 4, "one new block created");
+        E.with_borrow(|e| {
+            /* touched states 0,1 moved to newP (block 3); state 2 stays in tP */
+            assert_eq!((e[0].group, e[1].group, e[2].group), (3, 3, 1));
+        });
+        PHEAD.with_borrow(|pp| {
+            assert_eq!(pp[3].count, 2, "newP holds the two touched states");
+            assert_eq!(pp[1].count, 1, "tP reduced to the untouched remainder");
+            assert_eq!(pp[1].next, Some(3), "newP linked after the chain head");
+            /* tP's remaining member list is just {2} */
+            assert_eq!(pp[1].first_e, Some(2));
+            assert_eq!(pp[1].last_e, Some(2));
+        });
+        /* the touched half (newP == 3) is the one enqueued, index 0 (false) */
+        assert_eq!(AGENDA.get(), Some(0));
+        AGENDA_TOP.with_borrow(|ap| {
+            assert_eq!(ap[0].p, 3);
+            assert!(!ap[0].index);
+        });
+        PHEAD.with_borrow(|pp| assert_eq!(pp[3].agenda, Some(0)));
+    }
+
+    // trans_sort_cmp: ascending by composite symbol.
+    // [spec:foma:sem:minimize.trans-sort-cmp-fn/test]
+    #[test]
+    fn trans_sort_cmp_orders_by_inout() {
+        let a = TransList { inout: 9, source: 0 };
+        let b = TransList { inout: 4, source: 1 };
+        assert_eq!(trans_sort_cmp(&a, &b), 5);
+        assert_eq!(trans_sort_cmp(&b, &a), -5);
+        assert_eq!(trans_sort_cmp(&a, &a), 0);
+    }
+}

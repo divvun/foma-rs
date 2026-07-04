@@ -112,3 +112,153 @@ pub fn fsm_upper(net: Box<Fsm>) -> Box<Fsm> {
     sigma_cleanup(&mut net, 0);
     net
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::apply::{apply_down, apply_init};
+    use crate::regex::fsm_parse_regex;
+    use crate::types::EPSILON;
+
+    fn sigma_syms(net: &Fsm) -> Vec<(i32, String)> {
+        let mut v = Vec::new();
+        let mut s = net.sigma.as_deref();
+        while let Some(node) = s {
+            if let Some(sym) = &node.symbol {
+                v.push((node.number, sym.clone()));
+            }
+            s = node.next.as_deref();
+        }
+        v
+    }
+
+    fn arc_labels(net: &Fsm) -> Vec<(i16, i16)> {
+        net.states
+            .iter()
+            .take_while(|l| l.state_no != -1)
+            .filter(|l| l.target != -1)
+            .map(|l| (l.r#in, l.out))
+            .collect()
+    }
+
+    // [spec:foma:sem:extract.fsm-lower-fn/test]
+    // [spec:foma:sem:fomalib.fsm-lower-fn/test]
+    #[test]
+    fn lower_projects_transducer_to_output_side() {
+        let net = fsm_lower(fsm_parse_regex("a:b", None, None).unwrap());
+        /* acceptor: both labels are the old `out` symbol */
+        for (i, o) in arc_labels(&net) {
+            assert_eq!(i, o);
+        }
+        /* sigma_cleanup(net, 0): no UNKNOWN/IDENTITY left in sigma, so the
+        now-unused "a" is purged */
+        let syms: Vec<String> = sigma_syms(&net).into_iter().map(|(_, s)| s).collect();
+        assert!(syms.contains(&"b".to_string()));
+        assert!(!syms.contains(&"a".to_string()));
+        /* fsm_update_flags(net, NO, NO, NO, UNK, UNK, UNK) */
+        assert_eq!(net.is_deterministic, NO);
+        assert_eq!(net.is_pruned, NO);
+        assert_eq!(net.is_minimized, NO);
+        assert_eq!(net.is_epsilon_free, UNK);
+        assert_eq!(net.is_loop_free, UNK);
+        assert_eq!(net.is_completed, UNK);
+        /* resulting language is {b} */
+        let mut h = apply_init(&net);
+        assert_eq!(apply_down(&mut h, Some("b")), Some("b".to_string()));
+        assert_eq!(apply_down(&mut h, Some("a")), None);
+    }
+
+    // [spec:foma:sem:extract.fsm-upper-fn/test]
+    // [spec:foma:sem:fomalib.fsm-upper-fn/test]
+    #[test]
+    fn upper_projects_transducer_to_input_side() {
+        let net = fsm_upper(fsm_parse_regex("a:b", None, None).unwrap());
+        for (i, o) in arc_labels(&net) {
+            assert_eq!(i, o);
+        }
+        /* the now-unused "b" is purged; "a" stays */
+        let syms: Vec<String> = sigma_syms(&net).into_iter().map(|(_, s)| s).collect();
+        assert!(syms.contains(&"a".to_string()));
+        assert!(!syms.contains(&"b".to_string()));
+        assert_eq!(net.is_deterministic, NO);
+        assert_eq!(net.is_pruned, NO);
+        assert_eq!(net.is_minimized, NO);
+        assert_eq!(net.is_epsilon_free, UNK);
+        assert_eq!(net.is_loop_free, UNK);
+        assert_eq!(net.is_completed, UNK);
+        /* resulting language is {a} */
+        let mut h = apply_init(&net);
+        assert_eq!(apply_down(&mut h, Some("a")), Some("a".to_string()));
+        assert_eq!(apply_down(&mut h, Some("b")), None);
+    }
+
+    // [spec:foma:sem:extract.fsm-lower-fn/test]
+    // [spec:foma:sem:fomalib.fsm-lower-fn/test]
+    #[test]
+    fn lower_maps_unknown_label_to_identity() {
+        /* a:? has arcs a:UNKNOWN and a:a; on the lower side the lone
+        UNKNOWN becomes an IDENTITY pair */
+        let src = fsm_parse_regex("a:?", None, None).unwrap();
+        assert!(
+            arc_labels(&src).iter().any(|&(_, o)| o as i32 == UNKNOWN),
+            "source transducer has an UNKNOWN on the lower side"
+        );
+        let a_num = sigma_syms(&src)
+            .into_iter()
+            .find(|(_, s)| s == "a")
+            .unwrap()
+            .0 as i16;
+        let net = fsm_lower(src);
+        let mut labels = arc_labels(&net);
+        labels.sort();
+        assert_eq!(
+            labels,
+            vec![(IDENTITY as i16, IDENTITY as i16), (a_num, a_num)]
+        );
+        /* UNKNOWN and IDENTITY remain in sigma, so sigma_cleanup(net, 0)
+        purges nothing */
+        let nums: Vec<i32> = sigma_syms(&net).into_iter().map(|(n, _)| n).collect();
+        assert!(nums.contains(&UNKNOWN));
+        assert!(nums.contains(&IDENTITY));
+        /* language is ?: accepts known "a" and (via IDENTITY) unknown "z" */
+        let mut h = apply_init(&net);
+        assert_eq!(apply_down(&mut h, Some("a")), Some("a".to_string()));
+        assert_eq!(apply_down(&mut h, Some("z")), Some("z".to_string()));
+    }
+
+    // [spec:foma:sem:extract.fsm-upper-fn/test]
+    // [spec:foma:sem:fomalib.fsm-upper-fn/test]
+    #[test]
+    fn upper_of_unknown_transducer_projects_all_arcs_to_input_side() {
+        /* a:? upper side: both arcs project to a:a with the same target,
+        and the fsm_state_add_arc builder drops the exact duplicate */
+        let src = fsm_parse_regex("a:?", None, None).unwrap();
+        assert_eq!(arc_labels(&src).len(), 2, "source has a:UNKNOWN and a:a");
+        let a_num = sigma_syms(&src)
+            .into_iter()
+            .find(|(_, s)| s == "a")
+            .unwrap()
+            .0 as i16;
+        let net = fsm_upper(src);
+        assert_eq!(arc_labels(&net), vec![(a_num, a_num)]);
+        /* UNKNOWN stays in sigma (no purge with force = 0) */
+        let nums: Vec<i32> = sigma_syms(&net).into_iter().map(|(n, _)| n).collect();
+        assert!(nums.contains(&UNKNOWN));
+        assert!(nums.contains(&IDENTITY));
+        let mut h = apply_init(&net);
+        assert_eq!(apply_down(&mut h, Some("a")), Some("a".to_string()));
+        assert_eq!(apply_down(&mut h, Some("z")), None);
+    }
+
+    // [spec:foma:sem:extract.fsm-lower-fn/test]
+    // [spec:foma:sem:fomalib.fsm-lower-fn/test]
+    #[test]
+    fn lower_epsilon_output_becomes_epsilon_arc() {
+        /* a:0 lower side: the EPSILON output becomes an eps:eps arc and the
+        language is the empty string */
+        let net = fsm_lower(fsm_parse_regex("a:0", None, None).unwrap());
+        assert_eq!(arc_labels(&net), vec![(EPSILON as i16, EPSILON as i16)]);
+        let mut h = apply_init(&net);
+        assert_eq!(apply_down(&mut h, Some("")), Some("".to_string()));
+    }
+}
