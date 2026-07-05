@@ -457,3 +457,286 @@ pub fn stack_print() -> i32 {
     // No-op stub: reads/writes no state, prints nothing, returns 1.
     1
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::constructions::fsm_symbol;
+
+    /// Push a symbol net with a caller-chosen name (fsm_symbol leaves name "").
+    fn add_named(sym: &str, name: &str) -> i32 {
+        let mut f = fsm_symbol(sym);
+        f.name = name.to_string();
+        stack_add(f)
+    }
+
+    fn top_fsm_name() -> String {
+        stack_entry_fsm(stack_find_top().unwrap(), |f| f.name.clone())
+    }
+
+    fn bottom_fsm_name() -> String {
+        stack_entry_fsm(stack_find_bottom().unwrap(), |f| f.name.clone())
+    }
+
+    // [spec:foma:sem:stack.stack-init-fn/test]
+    // [spec:foma:sem:foma.stack-init-fn/test]
+    #[test]
+    fn stack_init_creates_fresh_empty_sentinel() {
+        assert_eq!(stack_init(), 1);
+        // Head is the sentinel: number == -1, no next, no previous, no fsm.
+        let head = main_stack();
+        assert_eq!(e_number(head), -1);
+        assert_eq!(e_next(head), None);
+        assert_eq!(e_previous(head), None);
+        assert_eq!(stack_isempty(), 1);
+        assert_eq!(stack_size(), 0);
+        // Re-init on a populated stack abandons the old list (leak, as in C)
+        // and starts empty again.
+        add_named("a", "old");
+        assert_eq!(stack_init(), 1);
+        assert_eq!(stack_size(), 0);
+        assert_eq!(stack_isempty(), 1);
+    }
+
+    // [spec:foma:sem:stack.stack-isempty-fn/test]
+    // [spec:foma:sem:foma.stack-isempty-fn/test]
+    #[test]
+    fn stack_isempty_is_1_iff_no_real_entries() {
+        stack_init();
+        assert_eq!(stack_isempty(), 1);
+        add_named("a", "x");
+        assert_eq!(stack_isempty(), 0);
+        stack_clear();
+        assert_eq!(stack_isempty(), 1);
+    }
+
+    // [spec:foma:sem:stack.stack-size-fn/test]
+    // [spec:foma:sem:foma.stack-size-fn/test]
+    #[test]
+    fn stack_size_counts_real_entries() {
+        stack_init();
+        assert_eq!(stack_size(), 0);
+        add_named("a", "one");
+        assert_eq!(stack_size(), 1);
+        add_named("b", "two");
+        assert_eq!(stack_size(), 2);
+        stack_pop();
+        assert_eq!(stack_size(), 1);
+    }
+
+    // [spec:foma:sem:stack.stack-add-fn/test]
+    // [spec:foma:sem:foma.stack-add-fn/test]
+    #[test]
+    fn stack_add_appends_numbers_names_and_counts() {
+        stack_init();
+        // Return value is the new entry's number == stack size before the push.
+        assert_eq!(add_named("a", "first"), 0);
+        assert_eq!(add_named("b", "second"), 1);
+        // Entries append at the tail: head == bottom == first pushed,
+        // entry before the sentinel == top == most recently pushed.
+        assert_eq!(bottom_fsm_name(), "first");
+        assert_eq!(top_fsm_name(), "second");
+        assert_eq!(e_number(stack_find_bottom().unwrap()), 0);
+        assert_eq!(e_number(stack_find_top().unwrap()), 1);
+        // An empty fsm->name gets sprintf(name, "%X", rand()): nonempty
+        // uppercase hex.
+        assert_eq!(stack_add(fsm_symbol("c")), 2);
+        let name = top_fsm_name();
+        assert!(!name.is_empty());
+        assert!(name.bytes().all(|b| b.is_ascii_digit() || (b'A'..=b'F').contains(&b)));
+        // fsm_count ran on the pushed net: single-symbol net is
+        // "2 states, 1 arc, 1 path" (C foma `print size`), 1 final.
+        stack_entry_fsm(stack_find_top().unwrap(), |f| {
+            assert_eq!(f.statecount, 2);
+            assert_eq!(f.arccount, 1);
+            assert_eq!(f.finalcount, 1);
+            assert_eq!(f.pathcount, 1);
+        });
+    }
+
+    // [spec:foma:sem:stack.stack-pop-fn/test]
+    // [spec:foma:sem:foma.stack-pop-fn/test]
+    #[test]
+    fn stack_add_pop_is_lifo() {
+        stack_init();
+        add_named("a", "first");
+        add_named("b", "second");
+        add_named("c", "third");
+        // Pop returns the most recently pushed net and unlinks the top entry.
+        assert_eq!(stack_pop().unwrap().name, "third");
+        assert_eq!(stack_size(), 2);
+        assert_eq!(e_number(stack_find_top().unwrap()), 1);
+        assert_eq!(stack_pop().unwrap().name, "second");
+        // Size-1 fast path: fsm is saved, stack_clear() re-inits empty.
+        assert_eq!(stack_pop().unwrap().name, "first");
+        assert_eq!(stack_isempty(), 1);
+        assert_eq!(stack_size(), 0);
+    }
+
+    // DEVIATION pin: C dereferences the sentinel's NULL `next` on an empty
+    // stack (UB/crash); the port panics.
+    // [spec:foma:sem:stack.stack-pop-fn/test]
+    // [spec:foma:sem:foma.stack-pop-fn/test]
+    #[test]
+    #[should_panic]
+    fn stack_pop_on_empty_stack_panics() {
+        stack_init();
+        stack_pop();
+    }
+
+    // [spec:foma:sem:stack.stack-find-top-fn/test]
+    // [spec:foma:sem:foma.stack-find-top-fn/test]
+    // [spec:foma:sem:stack.stack-find-bottom-fn/test]
+    // [spec:foma:sem:foma.stack-find-bottom-fn/test]
+    // [spec:foma:sem:stack.stack-find-second-fn/test]
+    // [spec:foma:sem:foma.stack-find-second-fn/test]
+    #[test]
+    fn stack_find_top_bottom_second_on_multi_entry_stacks() {
+        stack_init();
+        // Empty stack: top and bottom are NULL (None).
+        assert_eq!(stack_find_top(), None);
+        assert_eq!(stack_find_bottom(), None);
+        add_named("a", "only");
+        // One entry: top == bottom == head; second (top->previous) is NULL.
+        assert_eq!(stack_find_top(), stack_find_bottom());
+        assert_eq!(stack_find_second(), None);
+        add_named("b", "mid");
+        add_named("c", "newest");
+        let top = stack_find_top().unwrap();
+        let bottom = stack_find_bottom().unwrap();
+        let second = stack_find_second().unwrap();
+        assert_eq!(e_number(top), 2);
+        assert_eq!(bottom, main_stack());
+        assert_eq!(e_number(bottom), 0);
+        // Second-from-top is the top entry's `previous`.
+        assert_eq!(e_number(second), 1);
+        assert_eq!(stack_entry_fsm(second, |f| f.name.clone()), "mid");
+    }
+
+    // DEVIATION pin: C's empty-stack guard is commented out, so it walks
+    // through the sentinel's NULL `next` (UB/crash); the port panics.
+    // [spec:foma:sem:stack.stack-find-second-fn/test]
+    // [spec:foma:sem:foma.stack-find-second-fn/test]
+    #[test]
+    #[should_panic]
+    fn stack_find_second_on_empty_stack_panics() {
+        stack_init();
+        stack_find_second();
+    }
+
+    // [spec:foma:sem:stack.stack-get-ah-fn/test]
+    // [spec:foma:sem:foma.stack-get-ah-fn/test]
+    #[test]
+    fn stack_get_ah_lazily_creates_then_caches() {
+        stack_init();
+        // Empty stack: NULL (None).
+        assert_eq!(stack_get_ah(), None);
+        add_named("a", "net");
+        let se = stack_get_ah().unwrap();
+        assert_eq!(se, stack_find_top().unwrap());
+        // Mark the handle; a second call must return the SAME cached handle
+        // (not a fresh apply_init), so the mark survives.
+        stack_entry_ah(se, |ah| ah.ptr = 424_242);
+        let se2 = stack_get_ah().unwrap();
+        assert_eq!(se2, se);
+        assert_eq!(stack_entry_ah(se2, |ah| ah.ptr), 424_242);
+    }
+
+    // [spec:foma:sem:stack.stack-get-med-ah-fn/test]
+    // [spec:foma:sem:foma.stack-get-med-ah-fn/test]
+    #[test]
+    fn stack_get_med_ah_lazily_creates_sets_align_then_caches() {
+        stack_init();
+        assert_eq!(stack_get_med_ah(), None);
+        add_named("a", "net");
+        let se = stack_get_med_ah().unwrap();
+        assert_eq!(se, stack_find_top().unwrap());
+        // apply_med_set_align_symbol(amedh, "-") ran on creation.
+        assert_eq!(
+            stack_entry_amedh(se, |m| m.align_symbol.clone()),
+            Some("-".to_string())
+        );
+        // Cached: the marked handle is returned again, not re-created.
+        stack_entry_amedh(se, |m| m.med_limit = 77);
+        let se2 = stack_get_med_ah().unwrap();
+        assert_eq!(se2, se);
+        assert_eq!(stack_entry_amedh(se2, |m| m.med_limit), 77);
+    }
+
+    // [spec:foma:sem:stack.stack-rotate-fn/test]
+    // [spec:foma:sem:foma.stack-rotate-fn/test]
+    #[test]
+    fn stack_rotate_swaps_only_top_and_bottom_fsms() {
+        stack_init();
+        // Empty: prints "Stack is empty." and returns -1.
+        assert_eq!(stack_rotate(), -1);
+        add_named("a", "bottomnet");
+        // Size 1: returns 1, no change.
+        assert_eq!(stack_rotate(), 1);
+        assert_eq!(top_fsm_name(), "bottomnet");
+        add_named("b", "midnet");
+        add_named("c", "topnet");
+        // Cache an apply handle on the top entry and mark it.
+        let top = stack_get_ah().unwrap();
+        stack_entry_ah(top, |ah| ah.ptr = 313_131);
+        assert_eq!(stack_rotate(), 1);
+        // ONLY the fsm pointers of bottom and top were exchanged; the middle
+        // entry is untouched and (for size > 2) this is a swap, not a rotate.
+        assert_eq!(bottom_fsm_name(), "topnet");
+        assert_eq!(top_fsm_name(), "bottomnet");
+        assert_eq!(stack_entry_fsm(stack_find_second().unwrap(), |f| f.name.clone()), "midnet");
+        // Numbers are NOT swapped...
+        assert_eq!(e_number(stack_find_bottom().unwrap()), 0);
+        assert_eq!(e_number(stack_find_top().unwrap()), 2);
+        // ...and neither are the cached handles: the top entry keeps the
+        // handle built for its FORMER fsm (stale-handle quirk).
+        assert_eq!(stack_entry_ah(top, |ah| ah.ptr), 313_131);
+        assert_eq!(top, stack_find_top().unwrap());
+    }
+
+    // [spec:foma:sem:stack.stack-print-fn/test]
+    // [spec:foma:sem:foma.stack-print-fn/test]
+    #[test]
+    fn stack_print_is_a_noop_returning_1() {
+        stack_init();
+        assert_eq!(stack_print(), 1);
+        add_named("a", "x");
+        assert_eq!(stack_print(), 1);
+        assert_eq!(stack_size(), 1);
+    }
+
+    // [spec:foma:sem:stack.stack-clear-fn/test]
+    // [spec:foma:sem:foma.stack-clear-fn/test]
+    #[test]
+    fn stack_clear_destroys_all_entries_and_reinits() {
+        stack_init();
+        add_named("a", "one");
+        add_named("b", "two");
+        // Cache handles on the top entry so clear exercises apply_clear /
+        // apply_med_clear paths.
+        stack_get_ah().unwrap();
+        stack_get_med_ah().unwrap();
+        assert_eq!(stack_clear(), 1);
+        assert_eq!(stack_isempty(), 1);
+        assert_eq!(stack_size(), 0);
+        assert_eq!(e_number(main_stack()), -1);
+    }
+
+    // [spec:foma:sem:stack.stack-turn-fn/test]
+    // [spec:foma:sem:foma.stack-turn-fn/test]
+    #[test]
+    fn stack_turn_terminates_only_for_sizes_0_and_1() {
+        // Per the sem rule, for stacks of >= 2 entries the final previous-link
+        // fix-up loop never advances and stack_turn never returns; the port
+        // reproduces that non-terminating loop literally, so it MUST NOT be
+        // called here with 2+ entries. Only the terminating paths are pinned:
+        stack_init();
+        // Empty: prints "Stack is empty." and returns 0.
+        assert_eq!(stack_turn(), 0);
+        add_named("a", "solo");
+        // Size 1: returns 1 with no change.
+        assert_eq!(stack_turn(), 1);
+        assert_eq!(stack_size(), 1);
+        assert_eq!(top_fsm_name(), "solo");
+    }
+}

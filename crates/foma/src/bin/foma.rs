@@ -424,6 +424,13 @@ fn usage_err() -> ! {
 one REPL line) and dispatch its commands. Persistent state (PROMPTMODE apply
 mode, PENDING_REGEX) survives across calls, matching flex's global yy_start. */
 fn my_interfaceparse(buffer: &str) {
+    // interface.l scans a NUL-terminated C string (file_to_mem buffers carry a
+    // trailing '\0'); flex stops at the first NUL, so trim there before splitting
+    // into lines — otherwise the terminator becomes a spurious final command.
+    let buffer = match buffer.find('\0') {
+        Some(i) => &buffer[..i],
+        None => buffer,
+    };
     LINENO.with(|l| l.set(1));
     for raw in buffer.split('\n') {
         let line = raw.strip_suffix('\r').unwrap_or(raw);
@@ -1553,4 +1560,88 @@ fn pfx(tok: &str, full: &str, min: usize) -> bool {
 /// Same as pfx; named separately at hyphenated command sites for readability.
 fn pfx_hyphen(tok: &str, full: &str, min: usize) -> bool {
     pfx(tok, full, min)
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Wave-3 unit tests. The readline-completion stand-ins (my_completion /
+// my_generator) and the no-op hooks (xprintf / add_history) are inert at
+// runtime (readline is not linked), so they have no observable effect via the
+// spawned CLI. Their sem-rule behavior is pinned here directly. thread_local
+// completion cursors are isolated per test thread by the harness.
+// ────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // my_generator ignores its `text` argument and matches the WHOLE line
+    // (rl_line_buffer, primed by my_completion) as a prefix against cmd[], then —
+    // when rl_point > 0 — against abbrvcmd[], returning strdup(name + smatch) for
+    // each hit and NULL once both tables are exhausted. my_completion stores
+    // start→smatch / end→rl_point and drives the generator (state 0 then 1).
+    // [spec:foma:sem:foma.my-generator-fn/test]
+    // [spec:foma:sem:foma.my-completion-fn/test]
+    #[test]
+    fn my_generator_prefix_matching() {
+        // "apply " is a prefix of the three "apply …" commands; smatch = 6 drops
+        // the shared "apply " so only the completion tail is returned (readline
+        // substitutes only the word starting at column smatch).
+        assert_eq!(
+            my_completion("apply ", 6, 6),
+            vec!["down".to_string(), "med".to_string(), "up".to_string()]
+        );
+
+        // smatch = 0 returns the full command names (whole-line prefix match).
+        assert_eq!(
+            my_completion("apply", 0, 5),
+            vec![
+                "apply down".to_string(),
+                "apply med".to_string(),
+                "apply up".to_string()
+            ]
+        );
+
+        // rl_point > 0 makes it also scan the abbreviation table: "do" is not a
+        // prefix of any cmd[] entry but matches abbrvcmd[]'s "down".
+        assert_eq!(my_completion("do", 0, 2), vec!["down".to_string()]);
+
+        // No prefix hit in either table → empty (my_generator returns None at once).
+        assert!(my_completion("zzzz", 0, 4).is_empty());
+    }
+
+    // On state == 0 my_generator resets its static cursors and caches len; it then
+    // yields each cmd[] prefix hit and finally None. With rl_point == 0 the
+    // abbrvcmd[] scan is skipped, so "quit" yields exactly one candidate.
+    // [spec:foma:sem:foma.my-generator-fn/test]
+    #[test]
+    fn my_generator_state_reset_and_exhaustion() {
+        SMATCH.with(|s| s.set(0));
+        RL_LINE_BUFFER.with(|b| *b.borrow_mut() = "quit".to_string());
+        RL_POINT.with(|p| p.set(0));
+        // First call (state 0) resets the cursors and returns the first hit.
+        assert_eq!(my_generator("quit", 0), Some("quit".to_string()));
+        // Continuations (state 1) run to exhaustion and then return None.
+        let mut last = my_generator("quit", 1);
+        while last.is_some() {
+            last = my_generator("quit", 1);
+        }
+        assert_eq!(last, None);
+    }
+
+    // xprintf: C body is `{ return; printf("%s", string); }` — the printf is
+    // unreachable, so the function is a no-op that discards its argument.
+    // [spec:foma:sem:foma.xprintf-fn/test]
+    // [spec:foma:sem:fomalibconf.xprintf-fn/test]
+    #[test]
+    fn xprintf_is_a_noop() {
+        // Returns unit with no observable effect; simply calling it must succeed.
+        xprintf("this text is discarded");
+    }
+
+    // add_history: readline is not linked, so this stand-in is a no-op returning 0
+    // (the C extern's int result is ignored by foma in any case).
+    // [spec:foma:sem:foma.add-history-fn/test]
+    #[test]
+    fn add_history_is_a_noop_returning_zero() {
+        assert_eq!(add_history("some line"), 0);
+    }
 }

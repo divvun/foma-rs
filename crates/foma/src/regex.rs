@@ -768,6 +768,20 @@ fn link_rewritesets(mut nodes: Vec<Box<RewriteSet>>) -> Option<Box<RewriteSet>> 
 
 #[cfg(test)]
 mod tests {
+    use crate::constructions::{fsm_count, fsm_equivalent};
+    use crate::define::{add_defined, add_defined_function, defined_functions_init, defined_networks_init};
+    use crate::topsort::fsm_topsort;
+    use crate::types::Fsm;
+
+    /// C foma's `print size` numbers are produced downstream of
+    /// fsm_parse_regex: the CLI regex command runs fsm_topsort (which sets
+    /// pathcount) and stack_add runs fsm_count — mirror that pipeline here.
+    fn counted(net: Box<Fsm>) -> (i32, i32, i64) {
+        let mut net = fsm_topsort(net);
+        fsm_count(&mut net);
+        (net.statecount, net.arccount, net.pathcount)
+    }
+
     /// The internal regexes that rewrite.rs feeds to fsm_parse_regex and then
     /// `.unwrap()`s. If nfst-xre cannot parse any of these, the rewrite
     /// compiler would panic at runtime — so guard the parse here.
@@ -834,8 +848,103 @@ mod tests {
         assert!(super::fsm_parse_regex("a @-> b || _ c", None, None).is_some());
     }
 
+    // [spec:foma:sem:foma.my-yyparse-fn/test]
+    // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
     #[test]
     fn syntax_error_returns_none() {
+        /* C: yyparse returns non-zero, my_yyparse propagates it, and
+        fsm_parse_regex returns NULL. */
         assert!(super::fsm_parse_regex("[ a b", None, None).is_none());
+        assert!(super::fsm_parse_regex("a |", None, None).is_none());
+    }
+
+    // fsm_parse_regex returns fsm_minimize(current_parse): the shapes below
+    // are C foma's `print size` for the same regexes (2 states/1 arc/1 path;
+    // 2/2/2; 3/3/2 — the last only after minimization).
+    // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
+    #[test]
+    fn parse_success_yields_minimized_c_shapes() {
+        let expect = [
+            ("a", 2, 1, 1i64),
+            ("a|b", 2, 2, 2),
+            ("[a b]|[a c]", 3, 3, 2),
+        ];
+        for (src, states, arcs, paths) in expect {
+            let net = super::fsm_parse_regex(src, None, None).unwrap();
+            assert_eq!(counted(net), (states, arcs, paths), "shape of {:?}", src);
+        }
+    }
+
+    // Grammar start rule `start: regex | regex start`: current_parse is the
+    // LAST `;`-terminated network in the string.
+    // [spec:foma:sem:foma.my-yyparse-fn/test]
+    // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
+    #[test]
+    fn semicolon_separated_regexes_keep_last() {
+        let net = super::fsm_parse_regex("a b ; x y z ;", None, None).unwrap();
+        let expected = super::fsm_parse_regex("x y z", None, None).unwrap();
+        assert_eq!(fsm_equivalent(net, expected), 1);
+        let net = super::fsm_parse_regex("a ; b", None, None).unwrap();
+        let expected = super::fsm_parse_regex("b", None, None).unwrap();
+        assert_eq!(fsm_equivalent(net, expected), 1);
+    }
+
+    // regex.l NONRESERVED: a symbol naming a defined net is substituted with
+    // a copy of that net (via the defined_nets table); without the table the
+    // same name is a literal single symbol.
+    // [spec:foma:sem:foma.my-yyparse-fn/test]
+    // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
+    #[test]
+    fn defined_net_names_substitute_from_the_table() {
+        let mut nets = defined_networks_init();
+        let def = super::fsm_parse_regex("x y", None, None).unwrap();
+        assert_eq!(add_defined(&mut nets, Some(def), "Foo"), 0);
+        // With the table: "Foo" compiles to the defined net [x y]
+        // (C foma: 3 states, 2 arcs, 1 path).
+        let net = super::fsm_parse_regex("Foo", Some(&mut nets), None).unwrap();
+        assert_eq!(counted(net), (3, 2, 1));
+        let net = super::fsm_parse_regex("Foo", Some(&mut nets), None).unwrap();
+        let expected = super::fsm_parse_regex("x y", None, None).unwrap();
+        assert_eq!(fsm_equivalent(net, expected), 1);
+        // Without the table: "Foo" is one literal (multichar) symbol.
+        let net = super::fsm_parse_regex("Foo", None, None).unwrap();
+        assert_eq!(counted(net), (2, 1, 1));
+    }
+
+    // regex.y function_apply: F(a) expands the stored body regex with the
+    // argument bound to a temporary defined symbol and reparses it.
+    // [spec:foma:sem:foma.my-yyparse-fn/test]
+    // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
+    #[test]
+    fn defined_function_application_expands_body() {
+        let mut nets = defined_networks_init();
+        let mut funcs = defined_functions_init();
+        // define F(X) [X X];  — stored body references @ARGUMENT01@.
+        add_defined_function(&mut funcs, "F", "[@ARGUMENT01@ @ARGUMENT01@]", 1);
+        let net = super::fsm_parse_regex("F(a)", Some(&mut nets), Some(&mut funcs)).unwrap();
+        // C foma: regex F(a); => 3 states, 2 arcs, 1 path (== [a a]).
+        assert_eq!(counted(net), (3, 2, 1));
+        let net = super::fsm_parse_regex("F(a)", Some(&mut nets), Some(&mut funcs)).unwrap();
+        let expected = super::fsm_parse_regex("a a", None, None).unwrap();
+        assert_eq!(fsm_equivalent(net, expected), 1);
+        // Undefined functions fail.
+        assert!(super::fsm_parse_regex("G(a)", Some(&mut nets), Some(&mut funcs)).is_none());
+    }
+
+    // my_yyparse's g_parse_depth guard: at MAX_PARSE_DEPTH (100) nested
+    // reparses it prints "Exceeded parser stack depth.  Self-recursive call?"
+    // and fails instead of recursing forever.
+    // [spec:foma:sem:foma.my-yyparse-fn/test]
+    #[test]
+    fn parse_depth_guard_stops_self_recursive_defines() {
+        let mut nets = defined_networks_init();
+        let mut funcs = defined_functions_init();
+        // define F(X) F(X); — every application reparses another F(...) call.
+        add_defined_function(&mut funcs, "F", "F(@ARGUMENT01@)", 1);
+        assert!(super::fsm_parse_regex("F(a)", Some(&mut nets), Some(&mut funcs)).is_none());
+        // The guard restores g_parse_depth on the way out, so the parser
+        // still works afterwards.
+        assert_eq!(super::G_PARSE_DEPTH.with(|c| c.get()), 0);
+        assert!(super::fsm_parse_regex("a", None, None).is_some());
     }
 }
