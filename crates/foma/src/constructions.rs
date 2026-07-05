@@ -4743,7 +4743,7 @@ pub fn fsm_add_loop(net: Box<Fsm>, marker: &Fsm, finals: i32) -> Box<Fsm> {
 // [spec:foma:def:fomalib.fsm-context-restrict-fn]
 // [spec:foma:sem:fomalib.fsm-context-restrict-fn]
 pub fn fsm_context_restrict(x: Box<Fsm>, lr: Option<Box<Fsmcontexts>>) -> Box<Fsm> {
-    /* [.#. \.#.* .#.]-`[[ [\X* X C X \X*]&~[\X* [L1 X \X* X R1|...|Ln X \X* X Rn] \X*]],X,0] */
+    /* [.#. \.#.* .#.]-'[[ [\X* X C X \X*]&~[\X* [L1 X \X* X R1|...|Ln X \X* X Rn] \X*]],X,0] */
     /* Where X = variable symbol */
 
     let mut x = x;
