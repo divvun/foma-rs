@@ -1464,3 +1464,773 @@ never-callable contract). */
 pub fn save_stack_att() -> i32 {
     panic!("save_stack_att: dead prototype in C foma (declared, never defined; link error)");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::apply::{apply_down, apply_init, apply_up};
+    use crate::define::{defined_networks_init, find_defined};
+    use crate::regex::fsm_parse_regex;
+    use crate::spelling::cmatrix_init;
+
+    /* ---- scratch files: unique per test, dropped on exit (best-effort) ---- */
+    struct Scratch(std::path::PathBuf);
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static CTR: AtomicU64 = AtomicU64::new(0);
+            let n = CTR.fetch_add(1, Ordering::Relaxed);
+            let mut p = std::env::temp_dir();
+            p.push(format!("foma_io_test_{}_{}_{}", std::process::id(), tag, n));
+            Scratch(p)
+        }
+        fn path(&self) -> &str {
+            self.0.to_str().unwrap()
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    /* ---- helpers ---- */
+    fn parse(rx: &str) -> Box<Fsm> {
+        fsm_parse_regex(rx, None, None).expect("regex should compile")
+    }
+
+    fn drain_down(net: &Fsm, w: &str) -> Vec<String> {
+        let mut h = apply_init(net);
+        let mut o = Vec::new();
+        let mut r = apply_down(&mut h, Some(w));
+        while let Some(s) = r {
+            o.push(s);
+            r = apply_down(&mut h, None);
+        }
+        o
+    }
+    fn drain_up(net: &Fsm, w: &str) -> Vec<String> {
+        let mut h = apply_init(net);
+        let mut o = Vec::new();
+        let mut r = apply_up(&mut h, Some(w));
+        while let Some(s) = r {
+            o.push(s);
+            r = apply_up(&mut h, None);
+        }
+        o
+    }
+
+    fn sigma_pairs(net: &Fsm) -> Vec<(i32, Option<String>)> {
+        let mut v = Vec::new();
+        let mut s = net.sigma.as_deref();
+        while let Some(x) = s {
+            if x.number == -1 {
+                break;
+            }
+            v.push((x.number, x.symbol.clone()));
+            s = x.next.as_deref();
+        }
+        v
+    }
+
+    /* Transition table (state_no, in, out, target, final) up to the sentinel. */
+    fn state_lines(net: &Fsm) -> Vec<(i32, i16, i16, i32, i8)> {
+        let mut v = Vec::new();
+        let mut i = 0usize;
+        while net.states[i].state_no != -1 {
+            let s = &net.states[i];
+            v.push((s.state_no, s.r#in, s.out, s.target, s.final_state));
+            i += 1;
+        }
+        v
+    }
+
+    /* Net equality on states/sigma/flags/name (start_state is recomputed by the
+    reader and intentionally not compared). */
+    fn assert_net_eq(a: &Fsm, b: &Fsm) {
+        assert_eq!(a.name, b.name, "name");
+        assert_eq!(a.arity, b.arity, "arity");
+        assert_eq!(a.arccount, b.arccount, "arccount");
+        assert_eq!(a.statecount, b.statecount, "statecount");
+        assert_eq!(a.linecount, b.linecount, "linecount");
+        assert_eq!(a.finalcount, b.finalcount, "finalcount");
+        assert_eq!(a.pathcount, b.pathcount, "pathcount");
+        assert_eq!(a.is_deterministic, b.is_deterministic, "is_deterministic");
+        assert_eq!(a.is_pruned, b.is_pruned, "is_pruned");
+        assert_eq!(a.is_minimized, b.is_minimized, "is_minimized");
+        assert_eq!(a.is_epsilon_free, b.is_epsilon_free, "is_epsilon_free");
+        assert_eq!(a.is_loop_free, b.is_loop_free, "is_loop_free");
+        assert_eq!(a.is_completed, b.is_completed, "is_completed");
+        assert_eq!(a.arcs_sorted_in, b.arcs_sorted_in, "arcs_sorted_in");
+        assert_eq!(a.arcs_sorted_out, b.arcs_sorted_out, "arcs_sorted_out");
+        assert_eq!(sigma_pairs(a), sigma_pairs(b), "sigma");
+        assert_eq!(state_lines(a), state_lines(b), "states");
+    }
+
+    fn add_sig(net: &mut Fsm, syms: &[(i32, &str)]) {
+        for (n, s) in syms {
+            sigma_add_number(net.sigma.as_deref_mut().unwrap(), s, *n);
+        }
+    }
+
+    fn sent() -> FsmState {
+        FsmState {
+            state_no: -1,
+            r#in: -1,
+            out: -1,
+            target: -1,
+            final_state: -1,
+            start_state: -1,
+        }
+    }
+
+    /* A hand-built a:b transducer whose field values mirror the C `save stack`
+    output (so foma_net_print emits an exact, known byte image). */
+    fn craft_ab_net(name: &str) -> Box<Fsm> {
+        let mut net = fsm_create(name);
+        net.arity = 2;
+        net.arccount = 1;
+        net.statecount = 2;
+        net.linecount = 3;
+        net.finalcount = 1;
+        net.pathcount = 1;
+        net.is_deterministic = 1;
+        net.is_pruned = 1;
+        net.is_minimized = 1;
+        net.is_epsilon_free = 1;
+        net.is_loop_free = 1;
+        net.is_completed = 2;
+        net.arcs_sorted_in = 0;
+        net.arcs_sorted_out = 0;
+        add_sig(&mut net, &[(3, "a"), (4, "b")]);
+        net.states = vec![
+            FsmState {
+                state_no: 0,
+                r#in: 3,
+                out: 4,
+                target: 1,
+                final_state: 0,
+                start_state: 1,
+            },
+            FsmState {
+                state_no: 1,
+                r#in: -1,
+                out: -1,
+                target: -1,
+                final_state: 1,
+                start_state: 0,
+            },
+            sent(),
+        ];
+        net
+    }
+
+    /* The exact uncompressed foma wire image of craft_ab_net("test"). */
+    const AB_FOMA_TEXT: &str = "##foma-net 1.0##\n##props##\n2 1 2 3 1 1 1 1 1 1 1 2 test\n##sigma##\n3 a\n4 b\n##states##\n0 3 4 1 0\n1 -1 -1 1\n-1 -1 -1 -1 -1\n##end##\n";
+
+    fn read_first_bytes(path: &str, n: usize) -> Vec<u8> {
+        let mut v = vec![0u8; n];
+        let mut f = File::open(path).unwrap();
+        f.read_exact(&mut v).unwrap();
+        v
+    }
+
+    /* =============================== tests =============================== */
+
+    // [spec:foma:def:io.binaryline/test]
+    #[test]
+    fn binaryline_struct_holds_fields() {
+        /* Dead struct, never read by any function — pin its shape for id coverage. */
+        let b = Binaryline {
+            r#type: 1,
+            state: 2,
+            r#in: 3,
+            target: 4,
+            out: 5,
+            symbol: 6,
+            name: Some("n".to_string()),
+            value: None,
+        };
+        assert_eq!((b.r#type, b.state, b.r#in, b.target, b.out, b.symbol), (1, 2, 3, 4, 5, 6));
+        assert_eq!(b.name.as_deref(), Some("n"));
+        assert!(b.value.is_none());
+    }
+
+    // [spec:foma:sem:io.escape-print-fn/test]
+    #[test]
+    fn escape_print_quotes_and_passthrough() {
+        /* No quote → single write of the whole string. */
+        let mut a: Vec<u8> = Vec::new();
+        escape_print(&mut a, "abc");
+        assert_eq!(a, b"abc");
+        /* Contains a quote → byte-by-byte, each `"` becomes `\"`; backslashes
+        pass through unescaped (documented asymmetry). */
+        let mut b: Vec<u8> = Vec::new();
+        escape_print(&mut b, "he\"l\\o");
+        assert_eq!(b, b"he\\\"l\\o");
+    }
+
+    // [spec:foma:def:io.io-buf-handle/test]
+    // [spec:foma:sem:io.io-init-fn/test]
+    #[test]
+    fn io_init_zeroes_handle() {
+        let h = io_init();
+        assert!(h.io_buf.is_none());
+        assert_eq!(h.io_buf_ptr, 0);
+    }
+
+    // [spec:foma:sem:io.io-free-fn/test]
+    #[test]
+    fn io_free_consumes_handle() {
+        let mut h = io_init();
+        h.io_buf = Some(vec![1, 2, 3]);
+        /* frees io_buf and the handle (consumed by value) */
+        io_free(h);
+    }
+
+    // [spec:foma:sem:io.io-gets-fn/test]
+    #[test]
+    fn io_gets_reads_lines_then_sticks_at_end() {
+        let mut h = IoBufHandle {
+            io_buf: Some(b"ab\ncd\0".to_vec()),
+            io_buf_ptr: 0,
+        };
+        let mut t = String::new();
+        assert_eq!(io_gets(&mut h, &mut t), 2);
+        assert_eq!(t, "ab");
+        assert_eq!(io_gets(&mut h, &mut t), 2);
+        assert_eq!(t, "cd");
+        /* at end-of-buffer every call returns 0 with an empty target (sticky) */
+        assert_eq!(io_gets(&mut h, &mut t), 0);
+        assert_eq!(t, "");
+        assert_eq!(io_gets(&mut h, &mut t), 0);
+        assert_eq!(t, "");
+    }
+
+    // [spec:foma:sem:io.explode-line-fn/test]
+    #[test]
+    fn explode_line_fields_and_overrun() {
+        let mut v = Vec::new();
+        assert_eq!(explode_line("0 3 4 1 0", &mut v), 5);
+        assert_eq!(v, vec![0, 3, 4, 1, 0]);
+        /* empty line yields one field of value 0 */
+        assert_eq!(explode_line("", &mut v), 1);
+        assert_eq!(v, vec![0]);
+        /* consecutive spaces yield an empty field converted to 0 */
+        assert_eq!(explode_line("1  2", &mut v), 3);
+        assert_eq!(v, vec![1, 0, 2]);
+        /* >5 fields: the growable Vec absorbs the overrun (DEVIATION) */
+        assert_eq!(explode_line("1 2 3 4 5 6", &mut v), 6);
+        assert_eq!(v, vec![1, 2, 3, 4, 5, 6]);
+    }
+
+    // [spec:foma:sem:io.spacedtext-get-next-line-fn/test]
+    #[test]
+    fn spacedtext_get_next_line_splits_destructively() {
+        let mut text = b"ab\ncd\0".to_vec();
+        let mut cur = 0usize;
+        let i1 = spacedtext_get_next_line(&mut text, &mut cur).unwrap();
+        assert_eq!(cstr_at(&text, i1), "ab");
+        assert_eq!(cur, 3);
+        let i2 = spacedtext_get_next_line(&mut text, &mut cur).unwrap();
+        assert_eq!(cstr_at(&text, i2), "cd");
+        assert_eq!(cur, 5);
+        /* on the terminating '\0' → None */
+        assert!(spacedtext_get_next_line(&mut text, &mut cur).is_none());
+    }
+
+    // [spec:foma:sem:io.spacedtext-get-next-token-fn/test]
+    #[test]
+    fn spacedtext_get_next_token_and_trailing_empty() {
+        let mut text = b"a bb\0".to_vec();
+        let mut cur = 0usize;
+        let t1 = spacedtext_get_next_token(&mut text, &mut cur).unwrap();
+        assert_eq!(cstr_at(&text, t1), "a");
+        let t2 = spacedtext_get_next_token(&mut text, &mut cur).unwrap();
+        assert_eq!(cstr_at(&text, t2), "bb");
+        assert!(spacedtext_get_next_token(&mut text, &mut cur).is_none());
+        /* trailing spaces before the line end yield one final empty token */
+        let mut t = b"a  \0".to_vec();
+        let mut c = 0usize;
+        let q1 = spacedtext_get_next_token(&mut t, &mut c).unwrap();
+        assert_eq!(cstr_at(&t, q1), "a");
+        let q2 = spacedtext_get_next_token(&mut t, &mut c).unwrap();
+        assert_eq!(cstr_at(&t, q2), "");
+        assert!(spacedtext_get_next_token(&mut t, &mut c).is_none());
+    }
+
+    // [spec:foma:sem:io.foma-net-print-fn/test]
+    // [spec:foma:sem:fomalib.foma-net-print-fn/test]
+    #[test]
+    fn foma_net_print_exact_wire_image() {
+        let net = craft_ab_net("test");
+        let mut buf: Vec<u8> = Vec::new();
+        assert_eq!(foma_net_print(&net, &mut buf), 1);
+        assert_eq!(String::from_utf8(buf).unwrap(), AB_FOMA_TEXT);
+    }
+
+    // [spec:foma:sem:io.foma-net-print-fn/test]
+    #[test]
+    fn foma_net_print_cmatrix_section() {
+        let mut net = craft_ab_net("cm");
+        cmatrix_init(&mut net);
+        net.medlookup.as_mut().unwrap().confusion_matrix[1] = 7;
+        let mut buf: Vec<u8> = Vec::new();
+        foma_net_print(&net, &mut buf);
+        let s = String::from_utf8(buf).unwrap();
+        /* (sigma_max+1)^2 = 25 integer lines between ##cmatrix## and ##end## */
+        assert!(s.contains("##cmatrix##\n"));
+        let body = &s[s.find("##cmatrix##\n").unwrap() + 12..s.find("##end##").unwrap()];
+        assert_eq!(body.lines().count(), 25);
+    }
+
+    // [spec:foma:sem:io.io-net-read-fn/test]
+    #[test]
+    fn io_net_read_parses_wire_image() {
+        let mut buf = AB_FOMA_TEXT.as_bytes().to_vec();
+        buf.push(0);
+        let mut h = IoBufHandle {
+            io_buf: Some(buf),
+            io_buf_ptr: 0,
+        };
+        let (net, name) = io_net_read(&mut h).unwrap();
+        assert_eq!(name, "test");
+        assert_net_eq(&net, &craft_ab_net("test"));
+    }
+
+    // [spec:foma:sem:io.io-net-read-fn/test]
+    #[test]
+    fn io_net_read_header_error_returns_none() {
+        let mut h = IoBufHandle {
+            io_buf: Some(b"garbage\0".to_vec()),
+            io_buf_ptr: 0,
+        };
+        assert!(io_net_read(&mut h).is_none());
+    }
+
+    // [spec:foma:sem:io.fsm-write-binary-file-fn/test]
+    // [spec:foma:sem:fomalib.fsm-write-binary-file-fn/test]
+    // [spec:foma:sem:io.fsm-read-binary-file-fn/test]
+    // [spec:foma:sem:fomalib.fsm-read-binary-file-fn/test]
+    #[test]
+    fn binary_round_trip_acceptor_transducer_qmark() {
+        for rx in ["[a b c]", "a:b", "?", "a:b|?"] {
+            let mut net = parse(rx);
+            net.name = "rt".to_string();
+            let f = Scratch::new("bin");
+            /* 0 = success */
+            assert_eq!(fsm_write_binary_file(&net, f.path()), 0);
+            /* gzip magic 1f 8b in the file */
+            assert_eq!(read_first_bytes(f.path(), 2), vec![0x1f, 0x8b]);
+            let back = fsm_read_binary_file(f.path()).unwrap();
+            assert_net_eq(&net, &back);
+        }
+    }
+
+    // [spec:foma:sem:io.fsm-write-binary-file-fn/test]
+    // [spec:foma:sem:fomalib.fsm-write-binary-file-fn/test]
+    #[test]
+    fn fsm_write_binary_file_open_failure_returns_1() {
+        let net = craft_ab_net("x");
+        assert_eq!(
+            fsm_write_binary_file(&net, "/nonexistent_dir_zzz/deep/file.foma"),
+            1
+        );
+    }
+
+    // [spec:foma:sem:io.fsm-write-binary-file-fn/test]
+    // [spec:foma:sem:io.fsm-read-binary-file-fn/test]
+    #[test]
+    fn binary_round_trip_with_cmatrix() {
+        let mut net = parse("[a b]");
+        net.name = "cm".to_string();
+        cmatrix_init(&mut net);
+        net.medlookup.as_mut().unwrap().confusion_matrix[2] = 9;
+        let f = Scratch::new("cm");
+        assert_eq!(fsm_write_binary_file(&net, f.path()), 0);
+        let back = fsm_read_binary_file(f.path()).unwrap();
+        assert_net_eq(&net, &back);
+        assert_eq!(
+            net.medlookup.as_ref().unwrap().confusion_matrix,
+            back.medlookup.as_ref().unwrap().confusion_matrix
+        );
+    }
+
+    // [spec:foma:sem:io.io-gz-file-to-mem-fn/test]
+    // [spec:foma:sem:io.fsm-read-binary-file-fn/test]
+    #[test]
+    fn read_uncompressed_foma_file_sniff_fallback() {
+        /* Plain (uncompressed) .foma bytes must still parse via the sniff-fallback. */
+        let f = Scratch::new("plain");
+        {
+            let mut file = File::create(f.path()).unwrap();
+            file.write_all(AB_FOMA_TEXT.as_bytes()).unwrap();
+        }
+        let net = fsm_read_binary_file(f.path()).unwrap();
+        assert_net_eq(&net, &craft_ab_net("test"));
+    }
+
+    // [spec:foma:sem:io.fsm-read-binary-file-fn/test]
+    // [spec:foma:sem:fomalib.fsm-read-binary-file-fn/test]
+    #[test]
+    fn read_c_foma_fixture_bytes() {
+        /* Bytes captured from /opt/homebrew/bin/foma `save stack` for `a:b`
+        (net name is a pointer-derived "7F50986"); our reader must parse it. */
+        const C_AB: &[u8] = &[
+            0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13, 0x53, 0x56, 0x4e, 0xcb,
+            0xcf, 0x4d, 0xd4, 0xcd, 0x4b, 0x2d, 0x51, 0x30, 0xd4, 0x33, 0x50, 0x56, 0xe6, 0x52,
+            0x56, 0x2e, 0x28, 0xca, 0x2f, 0x28, 0x06, 0xb2, 0x8c, 0x14, 0x0c, 0x15, 0x8c, 0x14,
+            0x8c, 0x81, 0x24, 0x32, 0x34, 0x52, 0x30, 0x77, 0x33, 0x35, 0xb0, 0xb4, 0x30, 0x03,
+            0xaa, 0x2c, 0xce, 0x4c, 0xcf, 0x4d, 0x04, 0xaa, 0x34, 0x56, 0x48, 0xe4, 0x32, 0x51,
+            0x48, 0x02, 0x89, 0x94, 0x24, 0x96, 0xa4, 0x82, 0x34, 0x1b, 0x00, 0x35, 0x9a, 0x00,
+            0x95, 0x1b, 0x70, 0x19, 0x2a, 0xe8, 0x82, 0x91, 0x21, 0x97, 0x2e, 0x8c, 0x09, 0x46,
+            0x40, 0xd5, 0xa9, 0x79, 0x29, 0x40, 0xa5, 0x00, 0xcc, 0x74, 0xaf, 0x15, 0x83, 0x00,
+            0x00, 0x00,
+        ];
+        let f = Scratch::new("cfix");
+        {
+            let mut file = File::create(f.path()).unwrap();
+            file.write_all(C_AB).unwrap();
+        }
+        let net = fsm_read_binary_file(f.path()).unwrap();
+        assert_eq!(net.name, "7F50986");
+        assert_eq!(net.arity, 2);
+        assert_eq!(net.statecount, 2);
+        assert_eq!(sigma_pairs(&net), vec![(3, Some("a".into())), (4, Some("b".into()))]);
+    }
+
+    // [spec:foma:sem:io.fsm-read-binary-file-multiple-init-fn/test]
+    // [spec:foma:sem:io.fsm-read-binary-file-multiple-fn/test]
+    // [spec:foma:sem:fomalib.fsm-read-binary-file-multiple-fn/test]
+    #[test]
+    fn binary_multiple_iterates_all_nets_then_none() {
+        let n1 = craft_ab_net("n1");
+        let n2 = craft_ab_net("n2");
+        let f = Scratch::new("multi");
+        {
+            let file = File::create(f.path()).unwrap();
+            let mut enc = GzEncoder::new(file, Compression::default());
+            foma_net_print(&n1, &mut enc);
+            foma_net_print(&n2, &mut enc);
+            enc.finish().unwrap();
+        }
+        let mut handle = fsm_read_binary_file_multiple_init(f.path());
+        assert!(handle.is_some());
+        let a = fsm_read_binary_file_multiple(&mut handle).unwrap();
+        assert_eq!(a.name, "n1");
+        let b = fsm_read_binary_file_multiple(&mut handle).unwrap();
+        assert_eq!(b.name, "n2");
+        /* NULL return frees the handle: caller's Option becomes None */
+        assert!(fsm_read_binary_file_multiple(&mut handle).is_none());
+        assert!(handle.is_none());
+    }
+
+    // [spec:foma:sem:io.fsm-read-binary-file-multiple-init-fn/test]
+    #[test]
+    fn binary_multiple_init_missing_file_none() {
+        let mut p = std::env::temp_dir();
+        p.push("foma_io_absent_zzz.foma");
+        let _ = std::fs::remove_file(&p);
+        assert!(fsm_read_binary_file_multiple_init(p.to_str().unwrap()).is_none());
+    }
+
+    // [spec:foma:sem:io.save-defined-fn/test]
+    // [spec:foma:sem:fomalib.save-defined-fn/test]
+    // [spec:foma:sem:io.load-defined-fn/test]
+    // [spec:foma:sem:fomalib.load-defined-fn/test]
+    #[test]
+    fn save_and_load_defined_round_trip() {
+        let mut def = defined_networks_init();
+        add_defined(&mut def, Some(parse("a:b")), "T1");
+        add_defined(&mut def, Some(parse("[c d]")), "T2");
+        let f = Scratch::new("def");
+        assert_eq!(save_defined(&mut def, f.path()), 1);
+        /* gzip magic present */
+        assert_eq!(read_first_bytes(f.path(), 2), vec![0x1f, 0x8b]);
+
+        let mut def2 = defined_networks_init();
+        assert_eq!(load_defined(&mut def2, f.path()), 1);
+        let t1 = find_defined(&mut def2, "T1").expect("T1 reloaded");
+        assert_eq!(drain_down(t1, "a"), vec!["b".to_string()]);
+        let t2 = find_defined(&mut def2, "T2").expect("T2 reloaded");
+        assert_eq!(drain_down(t2, "cd"), vec!["cd".to_string()]);
+    }
+
+    // [spec:foma:sem:io.load-defined-fn/test]
+    // [spec:foma:sem:fomalib.load-defined-fn/test]
+    #[test]
+    fn load_defined_missing_file_returns_0() {
+        let mut def = defined_networks_init();
+        let mut p = std::env::temp_dir();
+        p.push("foma_io_absent_def_zzz.foma");
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(load_defined(&mut def, p.to_str().unwrap()), 0);
+    }
+
+    // [spec:foma:sem:io.net-print-att-fn/test]
+    // [spec:foma:sem:fomalib.net-print-att-fn/test]
+    // [spec:foma:sem:io.read-att-fn/test]
+    // [spec:foma:sem:fomalib.read-att-fn/test]
+    #[test]
+    fn att_round_trip_and_exact_bytes() {
+        /* net_print_att emits arcs first, then final-state lines. */
+        let net = craft_ab_net("att");
+        let mut buf: Vec<u8> = Vec::new();
+        assert_eq!(net_print_att(&net, &mut buf), 1);
+        assert_eq!(buf, b"0\t1\ta\tb\n1\n");
+
+        /* read_att parses that image back into an equivalent transducer. */
+        let f = Scratch::new("att");
+        {
+            let mut file = File::create(f.path()).unwrap();
+            file.write_all(&buf).unwrap();
+        }
+        let back = read_att(f.path()).unwrap();
+        assert_eq!(drain_down(&back, "a"), vec!["b".to_string()]);
+        assert_eq!(drain_up(&back, "b"), vec!["a".to_string()]);
+    }
+
+    // [spec:foma:sem:io.read-att-fn/test]
+    // [spec:foma:sem:fomalib.read-att-fn/test]
+    #[test]
+    fn read_att_missing_file_none() {
+        let mut p = std::env::temp_dir();
+        p.push("foma_io_absent_att_zzz.att");
+        let _ = std::fs::remove_file(&p);
+        assert!(read_att(p.to_str().unwrap()).is_none());
+    }
+
+    // [spec:foma:sem:io.foma-write-prolog-fn/test]
+    // [spec:foma:sem:fomalib.foma-write-prolog-fn/test]
+    // [spec:foma:sem:io.fsm-read-prolog-fn/test]
+    // [spec:foma:sem:fomalib.fsm-read-prolog-fn/test]
+    #[test]
+    fn prolog_round_trip() {
+        let mut net = parse("a:b");
+        net.name = "rt".to_string();
+        let f = Scratch::new("prolog");
+        assert_eq!(foma_write_prolog(&mut net, Some(f.path())), 1);
+        let back = fsm_read_prolog(f.path()).unwrap();
+        assert_eq!(drain_down(&back, "a"), vec!["b".to_string()]);
+        assert_eq!(drain_up(&back, "b"), vec!["a".to_string()]);
+    }
+
+    // [spec:foma:sem:io.foma-write-prolog-fn/test]
+    // [spec:foma:sem:fomalib.foma-write-prolog-fn/test]
+    #[test]
+    fn foma_write_prolog_outside_qmark_escape_bug() {
+        /* Craft an arc epsilon:"?" where the out-symbol number (3) > 2 but the
+        in-symbol number (0) is NOT > 2. The escape test reads stateptr->in
+        instead of stateptr->out, so the literal "?" out-symbol is left
+        UNescaped — pin `"0":"?"` (a fixed version would write `"0":"%?"`). */
+        let mut net = fsm_create("bug");
+        net.arity = 2;
+        add_sig(&mut net, &[(3, "?")]);
+        net.states = vec![
+            FsmState {
+                state_no: 0,
+                r#in: 0,
+                out: 3,
+                target: 1,
+                final_state: 0,
+                start_state: 1,
+            },
+            FsmState {
+                state_no: 1,
+                r#in: -1,
+                out: -1,
+                target: -1,
+                final_state: 1,
+                start_state: 0,
+            },
+            sent(),
+        ];
+        let f = Scratch::new("prologbug");
+        foma_write_prolog(&mut net, Some(f.path()));
+        let s = std::fs::read_to_string(f.path()).unwrap();
+        assert!(s.contains("arc(bug, 0, 1, \"0\":\"?\")."), "got:\n{}", s);
+        assert!(!s.contains("\"%?\""));
+    }
+
+    // [spec:foma:sem:io.fsm-read-text-file-fn/test]
+    // [spec:foma:sem:fomalib.fsm-read-text-file-fn/test]
+    // [spec:foma:sem:io.file-to-mem-fn/test]
+    // [spec:foma:sem:fomalib.file-to-mem-fn/test]
+    #[test]
+    fn read_text_file_word_list() {
+        let f = Scratch::new("text");
+        {
+            let mut file = File::create(f.path()).unwrap();
+            /* blank lines skipped; final line without trailing newline kept */
+            file.write_all(b"cat\ndog\n\nfish").unwrap();
+        }
+        let net = fsm_read_text_file(f.path()).unwrap();
+        assert_eq!(drain_down(&net, "cat"), vec!["cat".to_string()]);
+        assert_eq!(drain_down(&net, "dog"), vec!["dog".to_string()]);
+        assert_eq!(drain_down(&net, "fish"), vec!["fish".to_string()]);
+        assert!(drain_down(&net, "ca").is_empty());
+    }
+
+    // [spec:foma:sem:io.fsm-read-spaced-text-file-fn/test]
+    // [spec:foma:sem:fomalib.fsm-read-spaced-text-file-fn/test]
+    #[test]
+    fn read_spaced_text_file_records() {
+        let f = Scratch::new("spaced");
+        {
+            let mut file = File::create(f.path()).unwrap();
+            /* record 1: single line → identity "foo"; record 2: two lines →
+            transducer "ab":"cd"; record 3: "%0" → literal "0". */
+            file.write_all(b"f o o\n\na b\nc d\n\n%0\n").unwrap();
+        }
+        let net = fsm_read_spaced_text_file(f.path()).unwrap();
+        assert_eq!(drain_down(&net, "foo"), vec!["foo".to_string()]);
+        assert_eq!(drain_down(&net, "ab"), vec!["cd".to_string()]);
+        assert_eq!(drain_down(&net, "0"), vec!["0".to_string()]);
+    }
+
+    // [spec:foma:sem:io.fsm-read-spaced-text-file-fn/test]
+    // [spec:foma:sem:io.fsm-read-text-file-fn/test]
+    #[test]
+    fn spaced_and_text_readers_missing_file_none() {
+        let mut p = std::env::temp_dir();
+        p.push("foma_io_absent_txt_zzz");
+        let _ = std::fs::remove_file(&p);
+        assert!(fsm_read_spaced_text_file(p.to_str().unwrap()).is_none());
+        assert!(fsm_read_text_file(p.to_str().unwrap()).is_none());
+    }
+
+    // [spec:foma:sem:io.file-to-mem-fn/test]
+    // [spec:foma:sem:fomalib.file-to-mem-fn/test]
+    #[test]
+    fn file_to_mem_normal_short_and_bom() {
+        /* normal read: content + trailing '\0' */
+        let f = Scratch::new("f2m");
+        {
+            let mut file = File::create(f.path()).unwrap();
+            file.write_all(b"abc\n").unwrap();
+        }
+        assert_eq!(file_to_mem(f.path()).unwrap(), b"abc\n\0");
+
+        /* short (<4 byte) non-BOM file still reads (DEVIATION: bytes past the
+        end read as 0, so no false BOM here) */
+        let g = Scratch::new("f2m");
+        {
+            let mut file = File::create(g.path()).unwrap();
+            file.write_all(b"hi").unwrap();
+        }
+        assert_eq!(file_to_mem(g.path()).unwrap(), b"hi\0");
+
+        /* UTF-8 BOM → rejected outright (returns None) */
+        let h = Scratch::new("f2m");
+        {
+            let mut file = File::create(h.path()).unwrap();
+            file.write_all(&[0xEF, 0xBB, 0xBF, b'x']).unwrap();
+        }
+        assert!(file_to_mem(h.path()).is_none());
+
+        /* empty file → check_BOM's leading-NUL branch reports UTF-32BE → None
+        (the <4-byte DEVIATION) */
+        let e = Scratch::new("f2m");
+        {
+            File::create(e.path()).unwrap();
+        }
+        assert!(file_to_mem(e.path()).is_none());
+
+        /* missing file → None */
+        let mut p = std::env::temp_dir();
+        p.push("foma_io_absent_f2m_zzz");
+        let _ = std::fs::remove_file(&p);
+        assert!(file_to_mem(p.to_str().unwrap()).is_none());
+    }
+
+    // [spec:foma:def:io.bom/test]
+    // [spec:foma:sem:io.check-bom-fn/test]
+    #[test]
+    fn check_bom_matches_and_nul_quirks() {
+        assert_eq!(check_BOM(&[0xEF, 0xBB, 0xBF]).unwrap().name, Some("UTF-8"));
+        /* any leading '\0' matches UTF-32BE immediately */
+        assert_eq!(check_BOM(&[0x00, 0x41, 0x42, 0x43]).unwrap().name, Some("UTF-32BE"));
+        /* FF FE 00 <any> classified UTF-32LE (4th byte never checked; UTF-32LE
+        precedes UTF16-LE) */
+        assert_eq!(check_BOM(&[0xFF, 0xFE, 0x00, 0x99]).unwrap().name, Some("UTF-32LE"));
+        /* FF FE <non-NUL> → UTF16-LE */
+        assert_eq!(check_BOM(&[0xFF, 0xFE, 0x41, 0x42]).unwrap().name, Some("UTF16-LE"));
+        assert_eq!(check_BOM(&[0xFE, 0xFF, 0x41, 0x42]).unwrap().name, Some("UTF16-BE"));
+        assert!(check_BOM(b"hello").is_none());
+    }
+
+    // [spec:foma:sem:io.io-get-regular-file-size-fn/test]
+    // [spec:foma:sem:io.io-get-file-size-fn/test]
+    #[test]
+    fn file_sizes_regular_and_plain() {
+        let f = Scratch::new("sz");
+        {
+            let mut file = File::create(f.path()).unwrap();
+            file.write_all(b"hello\n").unwrap();
+        }
+        assert_eq!(io_get_regular_file_size(f.path()), 6);
+        /* non-gzip → io_get_file_size returns the on-disk size */
+        assert_eq!(io_get_file_size(f.path()), 6);
+        /* failures return 0 (DEVIATION vs C NULL-deref) */
+        assert_eq!(io_get_regular_file_size("/no/such/file/zzz"), 0);
+        assert_eq!(io_get_file_size("/no/such/file/zzz"), 0);
+    }
+
+    // [spec:foma:sem:io.io-get-gz-file-size-fn/test]
+    // [spec:foma:sem:io.io-get-file-size-fn/test]
+    #[test]
+    fn file_sizes_gzip_trailer() {
+        let payload = b"hello world\n"; // 12 bytes uncompressed
+        let f = Scratch::new("gzsz");
+        {
+            let file = File::create(f.path()).unwrap();
+            let mut enc = GzEncoder::new(file, Compression::default());
+            enc.write_all(payload).unwrap();
+            enc.finish().unwrap();
+        }
+        /* ISIZE trailer == uncompressed length */
+        assert_eq!(io_get_gz_file_size(f.path()), payload.len());
+        /* gzip file → io_get_file_size delegates to the trailer size */
+        assert_eq!(io_get_file_size(f.path()), payload.len());
+        assert_eq!(io_get_gz_file_size("/no/such/file/zzz"), 0);
+    }
+
+    // [spec:foma:sem:io.io-gz-file-to-mem-fn/test]
+    #[test]
+    fn io_gz_file_to_mem_gzip_and_plain() {
+        let payload = b"abcdef";
+        /* gzip path */
+        let g = Scratch::new("g2m");
+        {
+            let file = File::create(g.path()).unwrap();
+            let mut enc = GzEncoder::new(file, Compression::default());
+            enc.write_all(payload).unwrap();
+            enc.finish().unwrap();
+        }
+        let mut hg = io_init();
+        assert_eq!(io_gz_file_to_mem(&mut hg, g.path()), payload.len());
+        assert_eq!(hg.io_buf.as_deref().unwrap(), b"abcdef\0");
+        assert_eq!(hg.io_buf_ptr, 0);
+
+        /* plain path (sniff-fallback) */
+        let p = Scratch::new("g2m");
+        {
+            let mut file = File::create(p.path()).unwrap();
+            file.write_all(payload).unwrap();
+        }
+        let mut hp = io_init();
+        assert_eq!(io_gz_file_to_mem(&mut hp, p.path()), payload.len());
+        assert_eq!(hp.io_buf.as_deref().unwrap(), b"abcdef\0");
+
+        /* missing/empty file → 0 */
+        let mut hm = io_init();
+        assert_eq!(io_gz_file_to_mem(&mut hm, "/no/such/file/zzz"), 0);
+    }
+
+    // [spec:foma:sem:fomalib.save-stack-att-fn/test]
+    #[test]
+    #[should_panic(expected = "dead prototype")]
+    fn save_stack_att_is_dead_prototype() {
+        save_stack_att();
+    }
+}
