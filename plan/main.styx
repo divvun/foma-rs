@@ -347,16 +347,43 @@ children (
             {
                 id w3-constructions
                 title "Tests: constructions FSM algebra (~71 fns)"
+                sealed true
+                log (
+                    {
+                        at 2026-07-05T00:03:13.606394Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
+                    }
+                )
             }
 
             {
                 id w3-flags-define-rewrite
                 title "Tests: flags, define, rewrite (~40 fns)"
+                sealed true
+                log (
+                    {
+                        at 2026-07-05T00:03:13.633174Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Done (nplan complete)"
+                    }
+                )
             }
 
             {
                 id w3-apply-spelling
                 title "Tests: apply, spelling runtime (~73 fns)"
+                sealed true
+                log (
+                    {
+                        at 2026-07-05T00:03:13.657251Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Done (nplan complete)"
+                    }
+                )
             }
 
             {
