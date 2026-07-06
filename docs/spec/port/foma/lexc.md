@@ -65,5 +65,5 @@
 
 > [spec:foma:sem:lexc.lexc-trim-fn]
 > Implemented in foma/lexc.l (not lexcread.c); also used by the interface lexer. In-place trim of matched lexer text (`LEXICON Name` tails, `name =` definition heads, `Target ;` continuations). Two phases: (1) starting at the last byte (index strlen(s)-1) and moving backward, overwrite every trailing ';', '=', ' ' or '\t' with '\0', stopping at the first byte that is none of these; (2) skip leading ' ', '\t' and '\n' bytes, then shift the remaining bytes — including the final copied NUL terminator — to the front of the buffer.
-> Latent bug: phase 1 has no lower bound; if the string is empty or consists solely of trimmable characters it reads (and NUL-writes) bytes before the start of the buffer until a non-trimmable byte happens to appear (buffer underrun, UB). The lexer's patterns always supply at least one non-trimmable character, so this is not hit in practice.
+> Phase 1 is bounded at index 0 in the port. The C loop had no lower bound, so an empty or all-trimmable string underran the buffer (reading and NUL-writing bytes before its start until a non-trimmable byte happened to appear — UB); the lexer's patterns always supply at least one non-trimmable character so this was not hit in practice, and safe Rust simply stops the backward scan at index 0.
 
