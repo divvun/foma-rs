@@ -437,6 +437,15 @@ children (
             {
                 id w4-conventions
                 title "Wave-4 API design: context handles over thread_locals, error type, module split map, bug-fix policy"
+                sealed true
+                log (
+                    {
+                        at 2026-07-06T10:01:59.696667Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Done (nplan complete)"
+                    }
+                )
             }
 
             {
