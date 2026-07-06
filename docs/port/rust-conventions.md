@@ -137,3 +137,92 @@ carry the header id (e.g. `fomalib.fsm`) plus any duplicate per-file id.
   derive expected values, but tests must not invoke it at runtime.
 - Never annotate aspirationally: the facet goes in only once the test exists
   and passes (`cargo test` green is part of every Wave-3 concern's gate).
+
+## Wave 4: idiomatize
+
+The sem rules are the behavioral spec; the 546 ported tests are the
+oracle. Refactor freely while (a) every sem rule stays covered on the
+target side and (b) tests stay green. Intended divergence = update the
+rule body, bump `+N` in the rule header AND the target annotation, and
+update the test deliberately. The C-side annotation goes stale — that is
+recorded history, not an error.
+
+### API model
+
+- **Reentrancy**: library modules lose their `thread_local!` state.
+  - dynarray's `fsm_state_*` builder statics → an owned `FsmBuilder`
+    struct (`fsm_state_init` → `FsmBuilder::new`, methods take `&mut self`;
+    old free functions become thin deprecated-free wrappers only if a
+    caller still needs them — otherwise update the callers).
+  - determinize/minimize/constructions scratch pools → locals or
+    algorithm structs; nothing survives a call.
+  - `define`'s `G_DEFINES`/`G_DEFINES_F` → a caller-owned `Definitions`
+    registry passed `&mut` (regex already takes it as a param — make
+    every path explicit).
+  - CLI state (network stack, prompt/apply mode, g_* option globals)
+    moves into a `Session` struct owned by the binaries; `iface_*`
+    functions become methods or take `&mut Session`.
+- **Errors**: library code never calls `exit()` and never panics on
+  user input. Introduce `FomaError` (thiserror-style enum, hand-rolled —
+  no new deps) + `Result<T, FomaError>`. `exit(1)` sites in the library
+  (int_stack overflow, io fatal paths) → `Result` with rule bumps.
+  Binaries translate errors to exit codes and messages.
+- **Apply API**: `apply_down`/`apply_up`/`apply_words` etc. gain
+  iterator front-ends (`ApplyHandle::down(word) -> impl Iterator<Item=String>`)
+  wrapping the resume protocol; the C-shaped functions stay as thin
+  wrappers so annotations and tests keep a stable home.
+- **Names**: keep the C snake_case names for the public surface;
+  idiomatic signatures (`&str`, `Result`, iterators, `Option`). No trait
+  hierarchies; no generics beyond `Read`/`Write` in io.
+- **Representation**: the sentinel-terminated `Vec<FsmState>` line table
+  and `Sigma` list stay in Wave 4 (changing the core representation is
+  redesign, not idiomatization — record as future work).
+
+### Module split map (annotations move with their functions)
+
+- `constructions.rs` → `constructions/` submodules: `helpers`,
+  `merge_sigma`, `triplet_hash`, `products`, `boolean`, `closure`,
+  `derived` (quotients/priority unions/ignore/…); `constructions.rs`
+  re-exports the public surface so callers don't churn.
+- `iface.rs` → `iface/` submodules by command family (`stack_ops`,
+  `unary`, `binary`, `apply_cmds`, `print`, `io_cmds`, `tests_cmds`,
+  `variables`); public surface re-exported.
+- Other modules stay single files.
+
+### Documented-bug policy (per concern, every flagged bug gets ONE of)
+
+1. **Fix** — when the bug is a genuine defect (wrong result, crash,
+   corruption): fix code, rewrite the sem rule body, bump `+N`, update
+   tests. Canonical fixes: `stack_turn` infinite loop (implement the
+   evident intent: reverse the stack); `fsm_isuniversal` unsatisfiable
+   condition (implement the evident universality test); `flag_eliminate`
+   `|`-for-`&` filter (use `&`; masked in practice); `iface_conc` stray
+   "dd" debug print (delete); `iface_print_defined` stray `)` (fix
+   format); `iface_show_variable` BOOL-formatter (print by type);
+   `iface_random_pairs` wrong limit global (use g_list_random_limit);
+   `iface_extract_number` "-5"→5 (parse sign); `sigma_sort`
+   uninitialized replacearray (error on absent numbers); lexc
+   `#`-numbering collision; `fsm_letter_machine` utf8skip(in) on output
+   side; io `check_BOM` NUL false-matches; prolog writer's out-side `?`
+   escape typo; `iface_words_file` sticky static applyer;
+   `utf8strlen`/`decode_quoted`/`streqrep` non-termination on malformed
+   input (return error/lossy instead); buffer-size quirks that panic
+   (grow instead).
+2. **Keep** — when C compatibility outweighs (wire formats, hash
+   functions, tokenization, `fsm_lenient_compose`'s actual `.P. A`
+   semantics, sigma numbering conventions): keep behavior, delete the
+   obsolete DEVIATION/bug commentary only where it no longer applies,
+   and leave the rule unbumped.
+3. **Obsolete in Rust** (leaks, double-frees, uninit reads that safe
+   Rust already neutralized): prune the DEVIATION comments that
+   documented pure memory-management hazards; no rule change.
+
+`exit(1)`-on-overflow stacks, "Implementation pending" stubs
+(`fsm_sequentialize`, `fsm_bimachine`) and dead prototypes stay as-is
+(honest unimplemented errors now via `FomaError::Unimplemented`, bumped).
+
+### Per-concern gate
+
+`cargo test -p foma` green + `nplan spec uncovered` empty on the target
+side + every intended divergence carries a `+N` bump in both the rule
+header and the target annotation.
