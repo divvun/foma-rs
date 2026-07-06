@@ -592,6 +592,15 @@ children (
                 id w4-publish
                 title "Publishing prep: crate layout, portable nfst deps, license headers, README, CI"
                 deps (w4-cli)
+                sealed true
+                log (
+                    {
+                        at 2026-07-06T14:02:49.816047Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
+                    }
+                )
             }
         )
     }
