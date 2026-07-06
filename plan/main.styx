@@ -512,12 +512,30 @@ children (
                 id w4-flags-define-rewrite
                 title "Idiomatize flags, define, rewrite + bug fixes (flag_eliminate | filter)"
                 deps (w4-constructions)
+                sealed true
+                log (
+                    {
+                        at 2026-07-06T13:06:12.023685Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
+                    }
+                )
             }
 
             {
                 id w4-apply-spelling
                 title "Idiomatize apply, spelling (iterator-based apply API) + bug fixes"
                 deps (w4-constructions)
+                sealed true
+                log (
+                    {
+                        at 2026-07-06T13:06:12.055342Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Done (nplan complete)"
+                    }
+                )
             }
 
             {
@@ -539,6 +557,15 @@ children (
                 id w4-lexcread
                 title "Idiomatize lexcread (arena → owned graph where safe) + bug fixes"
                 deps (w4-constructions)
+                sealed true
+                log (
+                    {
+                        at 2026-07-06T13:06:12.082426Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Done (nplan complete)"
+                    }
+                )
             }
 
             {
