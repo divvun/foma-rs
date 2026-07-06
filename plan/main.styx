@@ -452,6 +452,15 @@ children (
                 id w4-base-utils
                 title "Idiomatize mem, utf8, int_stack, stringhash, trie, sigma + bug fixes"
                 deps (w4-conventions)
+                sealed true
+                log (
+                    {
+                        at 2026-07-06T10:30:46.55819Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
+                    }
+                )
             }
 
             {
