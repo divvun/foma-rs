@@ -482,6 +482,15 @@ children (
                 id w4-graph-algorithms
                 title "Idiomatize determinize, minimize, topsort, reverse, coaccessible, extract + bug fixes"
                 deps (w4-structures-dynarray)
+                sealed true
+                log (
+                    {
+                        at 2026-07-06T11:43:10.963247Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
+                    }
+                )
             }
 
             {
