@@ -1248,13 +1248,12 @@
 > [spec:foma:def:foma.purge-quantifier-fn]
 > void purge_quantifier (char *string)
 
-> [spec:foma:sem:foma.purge-quantifier-fn]
-> Implemented in foma/structures.c. Walks the global singly-linked `quantifiers` list with a
-> trailing pointer; every node whose name strcmp-equals string is unlinked (q_prev->next =
-> q->next, or the list head `quantifiers` is advanced when the match is first). Nothing is
-> freed — the node and its strdup'ed name leak. The trailing pointer still advances onto a
-> node just unlinked, so with two ADJACENT nodes of the same name the second is spliced out of
-> the dead node rather than the live list and survives (latent bug). No output; safe on an
+> [spec:foma:sem:foma.purge-quantifier-fn+1]
+> Implemented in foma/structures.c. Walks the global singly-linked `quantifiers` list and unlinks
+> EVERY node whose name strcmp-equals string; removed nodes and their names are dropped (the C
+> leaked them). Wave 4 fix: the C trailing pointer advanced onto a node it had just unlinked, so
+> with two ADJACENT same-name nodes the second was spliced out of the dead node rather than the
+> live list and survived; this removes all matching nodes, adjacent or not. No output; safe on an
 > empty list.
 
 > [spec:foma:def:foma.rl-gets-fn]
@@ -1425,7 +1424,7 @@
 > [spec:foma:def:foma.union-quantifiers-fn]
 > struct fsm *union_quantifiers()
 
-> [spec:foma:sem:foma.union-quantifiers-fn]
+> [spec:foma:sem:foma.union-quantifiers-fn+1]
 > Implemented in foma/structures.c. Builds and returns a fresh fsm (caller owns it) from the
 > global `quantifiers` list: fsm_create("") with flags set deterministic/pruned/minimized/
 > epsilon-free = YES and loop-free/completed = NO via fsm_update_flags. Each quantifier name
@@ -1435,9 +1434,12 @@
 > marked both initial and final — with in = out = symlo+i and target 0, i.e. a one-state
 > machine where every quantifier symbol labels a SELF-LOOP (so it actually accepts any
 > sequence of quantifier symbols including the empty string, despite the comment claiming a
-> plain union of single symbols); then the -1 sentinel line. Sets arccount = linecount = syms
-> and statecount = finalcount = 1. With no quantifiers defined the state array holds only the
-> sentinel line (a machine with no states) while statecount/finalcount still claim 1.
+> plain union of single symbols); then the -1 sentinel line. Sets arccount = syms and
+> statecount = finalcount = 1. Wave 4 fix: linecount = syms+1, INCLUDING the sentinel line per
+> fsm_count's convention (was: syms, excluding it); every caller recounts via fsm_count before
+> reading linecount, so no downstream value changed. With no quantifiers defined the state array
+> holds only the sentinel line (a machine with no states, linecount 1) while statecount/finalcount
+> still claim 1.
 
 > [spec:foma:def:foma.view-net-fn]
 > int view_net(struct fsm *net)

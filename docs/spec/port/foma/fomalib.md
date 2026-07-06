@@ -1040,12 +1040,14 @@
 > [spec:foma:def:fomalib.fsm-copy-fn]
 > fsm *fsm_copy(struct fsm *net)
 
-> [spec:foma:sem:fomalib.fsm-copy-fn]
-> Copies a network. NULL input returns NULL. Allocates a new struct fsm and memcpy's the whole
-> struct (name, counts, flags — and the medlookup pointer, which stays aliased rather than deep
-> copied: destroying both nets double-frees it). Calls fsm_count(net) on the SOURCE to refresh its
-> linecount, then gives the copy its own sigma (sigma_copy) and its own state array (malloc + memcpy
-> of linecount lines, sentinel included). The source is otherwise untouched; caller owns the copy.
+> [spec:foma:sem:fomalib.fsm-copy-fn+1]
+> Copies a network. A &mut borrow is never NULL; NULL-able callers check at the call site.
+> Wave 4 fix: calls fsm_count(net) on the SOURCE FIRST to refresh its counts, THEN captures the
+> now-fresh name/counts/flags into a new struct fsm — the C memcpy'd the whole struct before
+> fsm_count ran, leaving the copy's counts stale. The copy gets its own sigma (sigma_copy) and its
+> own state array (malloc + memcpy of linecount lines, sentinel included); medlookup is deep-cloned
+> rather than aliased (the C shared it — a double-free hazard). The source is otherwise untouched;
+> caller owns the copy.
 
 > [spec:foma:def:fomalib.fsm-create-fn]
 > fsm *fsm_create(char *name)
@@ -1597,15 +1599,15 @@
 > [spec:foma:def:fomalib.fsm-isuniversal-fn]
 > FEXPORT int fsm_isuniversal(struct fsm *net)
 
-> [spec:foma:sem:fomalib.fsm-isuniversal-fn]
-> Intended to test whether the language is ?* (universal). Minimizes net (the possibly-new
-> pointer is kept only locally — never returned or freed, so the minimized net leaks and the
-> caller's pointer may be stale) and runs fsm_compact on it (removes sigma symbols distributed
-> identically to IDENTITY), then pattern-matches the state array against the canonical
-> universal machine: line 0 a final start state with an IDENTITY:IDENTITY (2:2) self-loop to
-> state 0, line 1 the -1 sentinel, and sigma_max < 3 (no real symbols). BUG (literal behavior):
-> the condition conjoins (fsm+1)->state_no == 0 with (fsm+1)->state_no == -1, which is
-> unsatisfiable, so the function ALWAYS returns 0.
+> [spec:foma:sem:fomalib.fsm-isuniversal-fn+1]
+> Tests whether the language is ?* (universal). Minimizes net (the compacted result is dropped —
+> neither returned nor destroyed) and runs fsm_compact on it, then pattern-matches the state array
+> against the canonical universal machine: line 0 a final state with an IDENTITY:IDENTITY (2:2)
+> self-loop to state 0, line 1 the -1 sentinel, and sigma_max < 3 (no real symbols); returns 1 on a
+> match, else 0.
+> Wave 4 fix: the C condition conjoined (fsm+1)->state_no == 0 with (fsm+1)->state_no == -1
+> (unsatisfiable → always returned 0); the erroneous == 0 conjunct is dropped, implementing the
+> evident universality test.
 
 > [spec:foma:def:fomalib.fsm-kleene-plus-fn]
 > fsm *fsm_kleene_plus(struct fsm *net)

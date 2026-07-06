@@ -1,11 +1,13 @@
-//! foma/structures.c — literal Wave-2 (bug-for-bug) port per
+//! foma/structures.c — Wave-4 idiomatization of the Wave-2 port per
 //! docs/port/rust-conventions.md. Sem rules: docs/spec/port/foma/structures.md
 //! (per-file ids) plus the fomalib.h / foma.h / fomalibconf.h prototype ids.
 //!
 //! The fsm line table is the sentinel-terminated `Vec<FsmState>` of types.rs;
 //! C pointer walks become index walks with identical stop conditions.
 //! Consuming (`Box<Fsm>`) vs borrowing (`&Fsm`/`&mut Fsm`) conventions follow
-//! each function's sem rule.
+//! each function's sem rule. Wave 4 fixed four documented bugs (fsm_isuniversal,
+//! purge_quantifier, union_quantifiers' linecount, fsm_copy's stale counts —
+//! each `+1`-bumped) and pruned obsolete memory-hazard DEVIATION notes.
 
 use std::cell::RefCell;
 
@@ -157,9 +159,8 @@ pub fn fsm_sort_arcs(net: &mut Fsm, direction: i32) {
 // [spec:foma:sem:fomalibconf.map-firstlines-fn]
 pub fn map_firstlines(net: &Fsm) -> Vec<StateArray> {
     let mut sold: i32 = -1;
-    /* C: malloc((statecount+1) entries) — uninitialized.
-    DEVIATION from C (uninitialized malloc; entries for state numbers that
-    never appear read as index 0 here instead of garbage pointers) */
+    /* C malloc'd (statecount+1) uninitialized entries; zeroed here, so a
+    state number that never appears reads as index 0 rather than garbage. */
     let mut sa: Vec<StateArray> =
         vec![StateArray { transitions: 0 }; (net.statecount + 1) as usize];
     let fsm = &net.states;
@@ -337,9 +338,8 @@ pub fn fsm_create(name: &str) -> Box<Fsm> {
         name,
         arity: 1,
         arccount: 0,
-        /* C leaves statecount, linecount, finalcount, pathcount and
-        is_completed uninitialized (malloc garbage).
-        DEVIATION from C (uninitialized reads are UB; initialized to 0 here) */
+        /* C left statecount, linecount, finalcount, pathcount and
+        is_completed as malloc garbage; zero-initialized here. */
         statecount: 0,
         linecount: 0,
         finalcount: 0,
@@ -465,22 +465,28 @@ pub fn fsm_empty() -> Vec<FsmState> {
 }
 
 // [spec:foma:def:structures.fsm-isuniversal-fn]
-// [spec:foma:sem:structures.fsm-isuniversal-fn]
+// [spec:foma:sem:structures.fsm-isuniversal-fn+1]
 // [spec:foma:def:fomalib.fsm-isuniversal-fn]
-// [spec:foma:sem:fomalib.fsm-isuniversal-fn]
+// [spec:foma:sem:fomalib.fsm-isuniversal-fn+1]
 pub fn fsm_isuniversal(net: Box<Fsm>) -> i32 {
-    /* destructive: consumes/replaces the argument; C then leaks the
-    minimized net (neither returned nor destroyed) — dropped here */
+    /* destructive: consumes/replaces the argument; the minimized+compacted
+    net is dropped (C leaked it, neither returning nor destroying it).
+
+    Wave 4 fix: the C condition ANDed `line1.state_no == 0` with
+    `line1.state_no == -1` (mutually exclusive → always 0). Implement the
+    evident universality test instead: after minimize+compact, the universal
+    language ?* is exactly the single state 0 that is final with an
+    IDENTITY:IDENTITY self-loop (target 0), followed immediately by the -1
+    sentinel, over an alphabet of only reserved symbols (sigma_max < 3). */
     let mut net = fsm_minimize(net);
     fsm_compact(&mut net);
     let fsm = &net.states;
-    /* the conjuncts fsm[1].state_no == 0 and fsm[1].state_no == -1 are
-    mutually exclusive, so this returns 0 for every input — identical to
-    upstream foma; ported literally */
-    if (fsm[0].target == 0 && fsm[0].final_state == 1 && fsm[1].state_no == 0)
-        && (fsm[0].r#in as i32 == IDENTITY && fsm[0].out as i32 == IDENTITY)
-        && (fsm[1].state_no == -1)
-        && (sigma_max(net.sigma.as_deref()) < 3)
+    if fsm[0].target == 0
+        && fsm[0].final_state == 1
+        && fsm[0].r#in as i32 == IDENTITY
+        && fsm[0].out as i32 == IDENTITY
+        && fsm[1].state_no == -1
+        && sigma_max(net.sigma.as_deref()) < 3
     {
         1
     } else {
@@ -649,8 +655,9 @@ pub fn fsm_isidentity(net: &mut Fsm) -> i32 {
     /* e) we encounter ? anywhere.                                              */
 
     /* C: struct discrepancy { short int *string; short int length;
-    _Bool visited; } — string is an owned Vec here (see the DEVIATION note
-    in the loop body); an empty Vec stands in for NULL */
+    _Bool visited; } — string is an owned Vec here (an empty Vec stands in
+    for NULL). Because each record owns its string, the C free-before-realloc
+    dance and its resulting use-after-free are simply absent. */
     #[derive(Clone)]
     struct Discrepancy {
         string: Vec<i16>,
@@ -680,7 +687,6 @@ pub fn fsm_isidentity(net: &mut Fsm) -> i32 {
     let mut factor: i32 = 0;
     let mut newlength: i32 = 1;
     let mut startfrom: i32 = 0;
-    let mut newstring: Option<Vec<i16>> = None;
     let mut failed = false;
 
     'stack_loop: while ptr_stack_isempty() == 0 {
@@ -763,16 +769,12 @@ pub fn fsm_isidentity(net: &mut Fsm) -> i32 {
                 startfrom = 0;
             }
 
-            if newstring.is_some() {
-                /* C: free(newstring); newstring = NULL; — when the previous
-                iteration descended into this state, that freed buffer IS
-                currd->string, and the copy loop below reads freed memory.
-                DEVIATION from C (use-after-free): the discrepancy records
-                own their strings here, so the copy reads live data */
-                newstring = None;
-            }
-            /* calloc(abs(newlength), sizeof(int)) — int-width slots used as
-            shorts */
+            /* C freed the previous newstring buffer here before this calloc;
+            when the previous iteration had descended into state v, that buffer
+            WAS currd->string, so C's copy loop below read freed memory. The
+            discrepancy records own their strings here (no shared buffer), so
+            there is nothing to free and nothing to alias.
+            calloc(abs(newlength), sizeof(int)) — int-width slots used as shorts */
             let mut newstring_v: Vec<i16> = vec![0; newlength.abs() as usize];
 
             let mut i: i32 = startfrom;
@@ -822,23 +824,20 @@ pub fn fsm_isidentity(net: &mut Fsm) -> i32 {
                     }
                     i += 1;
                 }
-                newstring = Some(newstring_v);
                 break 'nopop;
             } else {
                 /* Add discrepancy to target state */
                 discrepancy[vp as usize].length = newlength as i16;
-                /* C: targetd->string = newstring (aliased) — owned copy
-                here, see the DEVIATION note above */
-                discrepancy[vp as usize].string = newstring_v.clone();
-                newstring = Some(newstring_v);
+                /* C aliased targetd->string = newstring; the owned buffer is
+                moved into the record here (no clone, no shared pointer). */
+                discrepancy[vp as usize].string = newstring_v;
                 curr_ptr = state_array[vp as usize].transitions;
                 continue 'nopop; /* goto nopop */
             }
         }
     }
     /* success/fail epilogues: free(state_array); free(discrepancy);
-    fsm_destroy(tmp); free(newstring) — the frees are drops here */
-    let _ = newstring;
+    fsm_destroy(tmp); (C also freed the last newstring) — all drops here */
     if failed {
         ptr_stack_clear();
         fsm_destroy(tmp);
@@ -1181,17 +1180,18 @@ pub fn fsm_extract_nonidentity(net: Box<Fsm>) -> Box<Fsm> {
 }
 
 // [spec:foma:def:structures.fsm-copy-fn]
-// [spec:foma:sem:structures.fsm-copy-fn]
+// [spec:foma:sem:structures.fsm-copy-fn+1]
 // [spec:foma:def:fomalib.fsm-copy-fn]
-// [spec:foma:sem:fomalib.fsm-copy-fn]
+// [spec:foma:sem:fomalib.fsm-copy-fn+1]
 pub fn fsm_copy(net: &mut Fsm) -> Box<Fsm> {
-    /* C: returns NULL when net == NULL; a &mut borrow is never NULL —
-    NULL-able callers keep the check at the call site. Borrows (does not
-    consume) but mutates the SOURCE: fsm_count refreshes its counts. */
+    /* Borrows (does not consume) but mutates the SOURCE: fsm_count refreshes
+    its counts. A &mut borrow is never NULL — NULL-able callers keep the
+    check at the call site.
 
-    /* memcpy(net_copy, net, sizeof(struct fsm)): the scalar fields are
-    captured BEFORE the fsm_count refresh below and may be stale in the
-    copy; the verbatim-copied states/sigma pointers are replaced below */
+    Wave 4 fix: the C memcpy'd the whole struct BEFORE calling fsm_count(net),
+    so the copy captured stale statecount/linecount/arccount/finalcount. Here
+    fsm_count runs first, so the copy gets the same fresh counts as the source. */
+    fsm_count(net);
     let mut net_copy = Box::new(Fsm {
         name: net.name.clone(),
         arity: net.arity,
@@ -1210,13 +1210,12 @@ pub fn fsm_copy(net: &mut Fsm) -> Box<Fsm> {
         arcs_sorted_out: net.arcs_sorted_out,
         states: Vec::new(),
         sigma: None,
-        // DEVIATION from C (the memcpy leaves the medlookup pointer SHARED
-        // between source and copy — double-free hazard; deep copy here, as
-        // recorded in types.rs)
+        // The C memcpy left medlookup SHARED between source and copy (a
+        // double-free hazard); a deep clone here keeps them independent, as
+        // recorded in types.rs.
         medlookup: net.medlookup.clone(),
     });
 
-    fsm_count(net);
     net_copy.sigma = sigma_copy(net.sigma.as_deref());
     net_copy.states = fsm_state_copy(&net.states, net.linecount);
     net_copy
@@ -1301,9 +1300,9 @@ pub fn add_quantifier(string: &str) {
 }
 
 // [spec:foma:def:structures.union-quantifiers-fn]
-// [spec:foma:sem:structures.union-quantifiers-fn]
+// [spec:foma:sem:structures.union-quantifiers-fn+1]
 // [spec:foma:def:foma.union-quantifiers-fn]
-// [spec:foma:sem:foma.union-quantifiers-fn]
+// [spec:foma:sem:foma.union-quantifiers-fn+1]
 pub fn union_quantifiers() -> Box<Fsm> {
     /*     We create a FSM that simply accepts the union of all */
     /*     quantifier symbols */
@@ -1349,9 +1348,11 @@ pub fn union_quantifiers() -> Box<Fsm> {
     net.arccount = syms;
     net.statecount = 1;
     net.finalcount = 1;
-    /* quirk kept: EXCLUDES the sentinel line, unlike fsm_count's
-    convention; pathcount is left as fsm_create initialized it */
-    net.linecount = syms;
+    /* Wave 4 fix: include the sentinel line, matching fsm_count's linecount
+    convention (was: syms, excluding it). Every caller recounts via fsm_count
+    before reading linecount, so no downstream value changed. pathcount is
+    left as fsm_create initialized it. */
+    net.linecount = syms + 1;
     net
 }
 
@@ -1378,32 +1379,27 @@ pub fn find_quantifier(string: &str) -> Option<String> {
 }
 
 // [spec:foma:def:structures.purge-quantifier-fn]
-// [spec:foma:sem:structures.purge-quantifier-fn]
+// [spec:foma:sem:structures.purge-quantifier-fn+1]
 // [spec:foma:def:foma.purge-quantifier-fn]
-// [spec:foma:sem:foma.purge-quantifier-fn]
+// [spec:foma:sem:foma.purge-quantifier-fn+1]
 pub fn purge_quantifier(string: &str) {
-    /* C walks with a trailing q_prev pointer that advances onto the node it
-    just unlinked; a matching node's unlink (q_prev->next = q->next) is a
-    dead write into the removed node whenever q_prev itself was removed, so
-    of two CONSECUTIVE matching nodes only the first leaves the live list.
-    The cursor walk below reproduces exactly that observable result: a
-    matching node is unlinked iff the previous original node was NOT
-    removed. (C leaks the removed nodes and their names; dropped here.) */
+    /* Wave 4 fix: the C walked with a trailing q_prev pointer that advanced
+    onto the node it had just unlinked, so of two CONSECUTIVE matching nodes
+    only the first left the live list (the second unlink wrote into the
+    already-removed node). This removes EVERY matching node — the evident
+    intent. (C leaked the removed nodes and their names; dropped here.) */
     QUANTIFIERS.with(|qs| {
         let mut qs = qs.borrow_mut();
         let mut q: &mut Option<Box<DefinedQuantifiers>> = &mut qs;
-        let mut prev_removed = false;
         loop {
             let matched = match q.as_deref() {
                 None => break,
                 Some(node) => string == node.name.as_deref().unwrap(),
             };
-            if matched && !prev_removed {
+            if matched {
                 let node = q.take().unwrap();
                 *q = node.next;
-                prev_removed = true;
             } else {
-                prev_removed = false;
                 q = &mut q.as_deref_mut().unwrap().next;
             }
         }
@@ -1822,15 +1818,17 @@ mod tests {
         assert_eq!(fsm_destroy(net), 1);
     }
 
-    // [spec:foma:sem:structures.fsm-isuniversal-fn/test]
-    // [spec:foma:sem:fomalib.fsm-isuniversal-fn/test]
+    // [spec:foma:sem:structures.fsm-isuniversal-fn+1/test]
+    // [spec:foma:sem:fomalib.fsm-isuniversal-fn+1/test]
     #[test]
-    fn isuniversal_always_zero() {
-        // a genuinely universal net ?* STILL returns 0 (mutually-exclusive
-        // conjuncts line1.state_no==0 && line1.state_no==-1, ported literally)
-        assert_eq!(fsm_isuniversal(parse("?*")), 0);
+    fn isuniversal_detects_universal_language() {
+        // Wave 4 fix: the evident universality test — ?* IS universal -> 1
+        assert_eq!(fsm_isuniversal(parse("?*")), 1);
+        // non-universal languages -> 0
         assert_eq!(fsm_isuniversal(fsm_empty_set()), 0);
         assert_eq!(fsm_isuniversal(parse("a")), 0);
+        // a single identity symbol (not its closure) is not universal
+        assert_eq!(fsm_isuniversal(parse("?")), 0);
     }
 
     // [spec:foma:sem:structures.fsm-isempty-fn/test]
@@ -1981,8 +1979,8 @@ mod tests {
         assert_eq!(a2.out as i32, EPSILON); // untouched
     }
 
-    // [spec:foma:sem:structures.fsm-copy-fn/test]
-    // [spec:foma:sem:fomalib.fsm-copy-fn/test]
+    // [spec:foma:sem:structures.fsm-copy-fn+1/test]
+    // [spec:foma:sem:fomalib.fsm-copy-fn+1/test]
     #[test]
     fn copy_is_deep_and_refreshes_source_counts() {
         let mut net = fsm_identity();
@@ -1990,9 +1988,10 @@ mod tests {
         net.statecount = 999;
         net.finalcount = 888;
         let mut copy = fsm_copy(&mut net);
-        // copy captured the STALE scalar counts (before fsm_count refresh)
-        assert_eq!(copy.statecount, 999);
-        assert_eq!(copy.finalcount, 888);
+        // Wave 4 fix: fsm_count runs BEFORE the copy captures the scalars, so
+        // the copy gets the FRESH counts (was: the stale 999/888)
+        assert_eq!(copy.statecount, 2);
+        assert_eq!(copy.finalcount, 1);
         // the SOURCE was refreshed by fsm_count(net)
         assert_eq!(net.statecount, 2);
         assert_eq!(net.finalcount, 1);
@@ -2054,22 +2053,22 @@ mod tests {
         assert_eq!(find_quantifier("x"), None);
     }
 
-    // [spec:foma:sem:structures.purge-quantifier-fn/test]
-    // [spec:foma:sem:foma.purge-quantifier-fn/test]
+    // [spec:foma:sem:structures.purge-quantifier-fn+1/test]
+    // [spec:foma:sem:foma.purge-quantifier-fn+1/test]
     #[test]
-    fn purge_quantifier_consecutive_match_quirk() {
+    fn purge_quantifier_removes_all_matches() {
         clear_quantifiers();
-        // two CONSECUTIVE matches then a non-match: only the FIRST match is
-        // unlinked (the prev cursor advances onto the just-removed node)
+        // Wave 4 fix: two CONSECUTIVE matches then a non-match — BOTH matches
+        // are now unlinked (the C left the second linked)
         add_quantifier("a");
         add_quantifier("a");
         add_quantifier("b");
         purge_quantifier("a");
-        assert_eq!(count_quantifiers(), 2); // one "a" survives, plus "b"
-        assert_eq!(find_quantifier("a").as_deref(), Some("a"));
+        assert_eq!(count_quantifiers(), 1); // only "b" remains
+        assert_eq!(find_quantifier("a"), None);
         assert_eq!(find_quantifier("b").as_deref(), Some("b"));
 
-        // non-consecutive matches are both removed
+        // non-consecutive matches are also both removed
         clear_quantifiers();
         add_quantifier("a");
         add_quantifier("b");
@@ -2081,17 +2080,17 @@ mod tests {
         clear_quantifiers();
     }
 
-    // [spec:foma:sem:structures.union-quantifiers-fn/test]
-    // [spec:foma:sem:foma.union-quantifiers-fn/test]
+    // [spec:foma:sem:structures.union-quantifiers-fn+1/test]
+    // [spec:foma:sem:foma.union-quantifiers-fn+1/test]
     #[test]
-    fn union_quantifiers_shape_and_linecount_quirk() {
+    fn union_quantifiers_shape_and_linecount() {
         clear_quantifiers();
         add_quantifier("x");
         add_quantifier("y");
         let net = union_quantifiers();
-        // syms == 2: table has syms+1 = 3 lines but linecount EXCLUDES sentinel
+        // syms == 2: table has syms+1 = 3 lines; Wave 4 linecount INCLUDES sentinel
         assert_eq!(net.states.len(), 3);
-        assert_eq!(net.linecount, 2);
+        assert_eq!(net.linecount, 3);
         assert_eq!(net.arccount, 2);
         assert_eq!(net.statecount, 1);
         assert_eq!(net.finalcount, 1);
@@ -2104,12 +2103,13 @@ mod tests {
         assert_eq!(net.states[1].r#in, net.states[0].r#in + 1);
         assert_eq!(net.states[2].state_no, -1); // sentinel
 
-        // empty list: table is just the sentinel (no state 0), linecount 0
+        // empty list: table is just the sentinel (no state 0); linecount 1
+        // (the sentinel), per the Wave 4 convention fix
         clear_quantifiers();
         let empty = union_quantifiers();
         assert_eq!(empty.states.len(), 1);
         assert_eq!(empty.states[0].state_no, -1);
-        assert_eq!(empty.linecount, 0);
+        assert_eq!(empty.linecount, 1);
         assert_eq!(empty.arccount, 0);
         clear_quantifiers();
     }
