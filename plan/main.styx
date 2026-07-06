@@ -577,6 +577,15 @@ children (
                     w4-io
                     w4-lexcread
                 )
+                sealed true
+                log (
+                    {
+                        at 2026-07-06T13:50:29.107392Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
+                    }
+                )
             }
 
             {
