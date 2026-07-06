@@ -41,31 +41,15 @@ thread_local! {
 // [spec:foma:def:fomalibconf.xxstrndup-fn]
 // [spec:foma:sem:fomalibconf.xxstrndup-fn]
 pub fn xxstrndup(s: &str, n: usize) -> String {
-    // C: p = s; while (*p++ && n--); n = p - s - 1;
-    // Effective length = min(n, strlen(s)), scanning at most n + 1 bytes.
-    // The end of the &str stands in for the C NUL terminator.
+    // C: p = s; while (*p++ && n--); n = p - s - 1; — the copied length is
+    // min(n, strlen(s)), where strlen stops at an interior NUL.
     let bytes = s.as_bytes();
-    let mut n = n;
-    let mut p: usize = 0;
-    loop {
-        let c = if p < bytes.len() { bytes[p] } else { 0 };
-        p += 1;
-        if c == 0 {
-            break;
-        }
-        let old_n = n;
-        n = n.wrapping_sub(1);
-        if old_n == 0 {
-            break;
-        }
-    }
-    n = p - 1;
-    // C: malloc(n + 1) returning NULL yields a NULL result; in Rust
-    // allocation failure aborts, so that branch is unrepresentable.
+    let strlen = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    let end = strlen.min(n);
     // DEVIATION from C (a cut inside a UTF-8 codepoint would yield an invalid
     // byte string in C; String must be valid UTF-8, so lossy-decode — every
-    // foma call site cuts at symbol boundaries, where this is byte-identical)
-    String::from_utf8_lossy(&bytes[..n]).into_owned()
+    // foma call site cuts at symbol boundaries, where this is byte-identical).
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 
 // [spec:foma:def:mem.next-power-of-two-fn]

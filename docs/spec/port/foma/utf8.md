@@ -3,11 +3,11 @@
 > [spec:foma:def:utf8.decode-quoted-fn]
 > void decode_quoted(char *s)
 
-> [spec:foma:sem:utf8.decode-quoted-fn]
+> [spec:foma:sem:utf8.decode-quoted-fn+1]
 > In-place decoding of \uXXXX escapes in `s`. Let len=strlen(s). Two cursors i (read) and j (write) start at 0; loop while i < len:
-> If s[i]=='\\' (0x5c) AND len-i > 5 AND s[i+1]=='u' (0x75) AND the four bytes at s+i+2 pass `[spec:foma:sem:utf8.ishexstr-fn]`: call `[spec:foma:sem:utf8.utf8code16tostr-fn]` on s+i+2 to get a NUL-terminated UTF-8 byte string, copy its bytes to s[j..] advancing j per byte, then i += 6. The malloc'd conversion buffer is never freed (latent leak). Edge: the escape \\u0000 converts to an empty string (the leading NUL terminates the conversion buffer), so the escape is deleted from the output.
-> Otherwise copy one whole UTF-8 character: skip = utf8skip(s+i)+1 bytes, copying s[i]→s[j] and advancing both per byte. Latent bug: if `[spec:foma:sem:utf8.utf8skip-fn]` returns -1 (invalid lead byte), skip=0 so neither cursor advances — infinite loop on malformed input.
-> After the loop, s[j]=s[i] copies the terminating NUL. The string can only shrink or stay the same length (a \uXXXX escape is 6 bytes; its UTF-8 form ≤ 3), so no overflow.
+> If s[i]=='\\' (0x5c) AND len-i > 5 AND s[i+1]=='u' (0x75) AND the four bytes at s+i+2 pass `[spec:foma:sem:utf8.ishexstr-fn]`: call `[spec:foma:sem:utf8.utf8code16tostr-fn]` on s+i+2 to get a UTF-8 byte string, copy its bytes to s[j..] advancing j per byte, then i += 6. Edge: the escape \\u0000 converts to an empty string (the leading NUL terminates the conversion buffer), so the escape is deleted from the output.
+> Otherwise copy one whole UTF-8 character: skip = utf8skip(s+i)+1 bytes, copying s[i]→s[j] and advancing both per byte. Wave 4 fix: if `[spec:foma:sem:utf8.utf8skip-fn]` returns -1 (invalid lead byte) skip would be 0 (the C looped forever); the port forces skip to at least 1, so the malformed byte is copied through (lossy) and decoding terminates.
+> After the loop the string is truncated at j. It can only shrink or stay the same length (a \uXXXX escape is 6 bytes; its UTF-8 form ≤ 3), so no overflow.
 
 > [spec:foma:def:utf8.dequote-string-fn]
 > void dequote_string(char *s)
@@ -88,8 +88,8 @@
 > [spec:foma:def:utf8.utf8strlen-fn]
 > int utf8strlen(char *str)
 
-> [spec:foma:sem:utf8.utf8strlen-fn]
-> Counts UTF-8 characters: with len=strlen(str), walk i from 0 while str[i] != '\0' and i < len, advancing i by utf8skip(str+i)+1 each step and incrementing the count. Returns the count. Latent bug: on an invalid lead byte utf8skip returns -1, the advance is 0, and the loop never terminates. Also over-counts truncated multibyte sequences as one character while skipping past the NUL is prevented only by the i<len guard when the declared length overruns the string.
+> [spec:foma:sem:utf8.utf8strlen-fn+1]
+> Counts UTF-8 characters: with len=strlen(str), walk i from 0 while str[i] != '\0' and i < len, advancing i by utf8skip(str+i)+1 each step and incrementing the count. Returns the count. Wave 4 fix: on an invalid lead byte utf8skip returns -1, so the advance would be 0 (the C looped forever); the port forces the step to at least 1, counting the malformed byte as one character (lossy) so counting terminates. Truncated multibyte sequences are still over-counted as one character, bounded by the i<len guard.
 
 > [spec:foma:def:utf8.xstrrev-fn]
 > char *xstrrev(char *str)

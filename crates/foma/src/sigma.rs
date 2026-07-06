@@ -576,9 +576,9 @@ pub fn sigma_copy(sigma: Option<&Sigma>) -> Option<Box<Sigma>> {
 /* and sorts the sigma based on the symbol string contents        */
 
 // [spec:foma:def:sigma.sigma-sort-fn]
-// [spec:foma:sem:sigma.sigma-sort-fn]
+// [spec:foma:sem:sigma.sigma-sort-fn+1]
 // [spec:foma:def:fomalibconf.sigma-sort-fn]
-// [spec:foma:sem:fomalibconf.sigma-sort-fn]
+// [spec:foma:sem:fomalibconf.sigma-sort-fn+1]
 pub fn sigma_sort(net: &mut Fsm) -> i32 {
     let size = sigma_max(net.sigma.as_deref());
     if size < 0 {
@@ -606,9 +606,13 @@ pub fn sigma_sort(net: &mut Fsm) -> i32 {
     let max = i;
     /* qsort(ssort, max, sizeof(struct ssort), comp) with comp = ssortcmp */
     ssort.sort_by(|a, b| ssortcmp(a, b).cmp(&0));
-    // DEVIATION from C (entries for numbers absent from sigma stay uninitialized
-    // and are read if an arc carries such a label; Rust initializes them to 0)
-    let mut replacearray: Vec<i32> = vec![0; (size + 3) as usize];
+    // Wave 4 fix (sem +1): the C read replacearray slots for numbers absent
+    // from sigma while they were still uninitialized (garbage in C, collapsed
+    // to 0 by the Wave-2 port), silently corrupting any arc carrying such a
+    // label. Seed the table with the identity map so a label with no sigma
+    // entry is left unchanged rather than corrupted; present numbers are then
+    // overwritten with their sorted position.
+    let mut replacearray: Vec<i32> = (0..(size + 3)).collect();
     for i in 0..max {
         replacearray[ssort[i as usize].number as usize] = i + 3;
     }
@@ -1282,8 +1286,8 @@ mod tests {
 
     /* ---- sigma_sort ---- */
 
-    // [spec:foma:sem:sigma.sigma-sort-fn/test]
-    // [spec:foma:sem:fomalibconf.sigma-sort-fn/test]
+    // [spec:foma:sem:sigma.sigma-sort-fn+1/test]
+    // [spec:foma:sem:fomalibconf.sigma-sort-fn+1/test]
     #[test]
     fn sigma_sort_empty_sigma_returns_1_without_touching_states() {
         let mut net = fsm_create("t");
@@ -1291,8 +1295,8 @@ mod tests {
         assert!(net.states.is_empty());
     }
 
-    // [spec:foma:sem:sigma.sigma-sort-fn/test]
-    // [spec:foma:sem:fomalibconf.sigma-sort-fn/test]
+    // [spec:foma:sem:sigma.sigma-sort-fn+1/test]
+    // [spec:foma:sem:fomalibconf.sigma-sort-fn+1/test]
     #[test]
     fn sigma_sort_permutes_symbols_renumbers_from_3_and_rewrites_arcs() {
         let mut net = fsm_create("t");
@@ -1321,12 +1325,12 @@ mod tests {
         assert_eq!((net.states[1].r#in, net.states[1].out), (4, 0));
     }
 
-    // [spec:foma:sem:sigma.sigma-sort-fn/test]
-    // [spec:foma:sem:fomalibconf.sigma-sort-fn/test]
+    // [spec:foma:sem:sigma.sigma-sort-fn+1/test]
+    // [spec:foma:sem:fomalibconf.sigma-sort-fn+1/test]
     #[test]
-    fn sigma_sort_arc_label_absent_from_sigma_becomes_0_deviation() {
-        /* DEVIATION pin: C reads an uninitialized replacearray entry; the
-        Rust port zero-initializes, so the arc label collapses to 0 */
+    fn sigma_sort_arc_label_absent_from_sigma_kept_unchanged() {
+        /* Wave 4 fix: a label with no sigma entry is left unchanged (identity
+        map) instead of collapsing to a garbage/zero value. */
         let mut net = fsm_create("t");
         {
             let sig = net.sigma.as_deref_mut().unwrap();
@@ -1339,8 +1343,9 @@ mod tests {
             syms(net.sigma.as_deref()),
             vec![pair(3, "a"), pair(4, "b")]
         );
-        /* in=4 is absent from sigma → replacearray[4] == 0; out: b 3→4 */
-        assert_eq!((net.states[0].r#in, net.states[0].out), (0, 4));
+        /* in=4 is absent from sigma → replacearray[4] == 4 (identity, kept);
+        out: b 3→4 */
+        assert_eq!((net.states[0].r#in, net.states[0].out), (4, 4));
     }
 
     /* ---- sigma_cleanup ---- */

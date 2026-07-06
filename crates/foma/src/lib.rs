@@ -11,6 +11,7 @@ pub mod constructions;
 pub mod define;
 pub mod determinize;
 pub mod dynarray;
+pub mod error;
 pub mod extract;
 pub mod flags;
 pub mod iface;

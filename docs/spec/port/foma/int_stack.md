@@ -28,10 +28,10 @@
 > [spec:foma:def:int-stack.int-stack-isfull-fn]
 > int int_stack_isfull()
 
-> [spec:foma:sem:int-stack.int-stack-isfull-fn]
-> Returns 1 if the global int stack is at capacity, i.e. the static top index `top`
-> equals MAX_STACK - 1 where MAX_STACK is 2097152 (2^21), so full when `top == 2097151`;
-> otherwise returns 0. No state is modified.
+> [spec:foma:sem:int-stack.int-stack-isfull-fn+1]
+> Wave 4: the int stack grows unbounded (a `Vec`), so it is never at capacity —
+> always returns 0. The C fixed cap MAX_STACK (2097152, 2^21) and the
+> `top == MAX_STACK - 1` boundary are gone. No state is modified.
 
 > [spec:foma:def:int-stack.int-stack-pop-fn]
 > int int_stack_pop()
@@ -45,13 +45,11 @@
 > [spec:foma:def:int-stack.int-stack-push-fn]
 > void int_stack_push(int c)
 
-> [spec:foma:sem:int-stack.int-stack-push-fn]
-> Pushes `c` onto the global int stack. If the stack is full (int_stack_isfull, i.e.
-> `top == MAX_STACK - 1` with MAX_STACK = 2097152), prints "Stack full!\n" to stderr
-> and calls exit(1), terminating the process. Otherwise pre-increments the static top
-> index `top` and stores `c` at `a[top]`. The stack storage is a static array
-> `int a[MAX_STACK]` private to this module, with `static int top = -1` as the empty
-> sentinel.
+> [spec:foma:sem:int-stack.int-stack-push-fn+1]
+> Pushes `c` onto the global int stack, growing its backing `Vec` on demand.
+> Wave 4: the push is infallible and unbounded — the C `MAX_STACK` cap and the
+> "Stack full!\n" + exit(1) overflow path are gone. `int_stack_size` reports the
+> element count; the stack is empty only before the first push or after a clear.
 
 > [spec:foma:def:int-stack.int-stack-size-fn]
 > int int_stack_size ()
@@ -79,10 +77,10 @@
 > [spec:foma:def:int-stack.ptr-stack-isfull-fn]
 > int ptr_stack_isfull()
 
-> [spec:foma:sem:int-stack.ptr-stack-isfull-fn]
-> Returns 1 if the global pointer stack is at capacity, i.e. `ptr_stack_top` equals
-> MAX_PTR_STACK - 1 where MAX_PTR_STACK is 2097152 (2^21), so full when
-> `ptr_stack_top == 2097151`; otherwise returns 0. No state is modified.
+> [spec:foma:sem:int-stack.ptr-stack-isfull-fn+1]
+> Wave 4: the pointer stack grows unbounded (a `Vec`), so it is never at capacity —
+> always returns 0. The C fixed cap MAX_PTR_STACK (2097152, 2^21) and the
+> `ptr_stack_top == MAX_PTR_STACK - 1` boundary are gone. No state is modified.
 
 > [spec:foma:def:int-stack.ptr-stack-pop-fn]
 > void *ptr_stack_pop()
@@ -97,11 +95,8 @@
 > [spec:foma:def:int-stack.ptr-stack-push-fn]
 > void ptr_stack_push(void *ptr)
 
-> [spec:foma:sem:int-stack.ptr-stack-push-fn]
-> Pushes `ptr` onto the global pointer stack. If the stack is full (ptr_stack_isfull,
-> i.e. `ptr_stack_top == MAX_PTR_STACK - 1` with MAX_PTR_STACK = 2097152), prints
-> "Pointer stack full!\n" to stderr and calls exit(1). Otherwise pre-increments the
-> static top index `ptr_stack_top` and stores `ptr` at `ptr_stack[ptr_stack_top]`.
-> Storage is a static array `void *ptr_stack[MAX_PTR_STACK]` private to this module,
-> with `static int ptr_stack_top = -1` as the empty sentinel. The stack stores the
-> raw pointer only; it takes no ownership.
+> [spec:foma:sem:int-stack.ptr-stack-push-fn+1]
+> Pushes `ptr` (an index/handle token) onto the global pointer stack, growing its
+> backing `Vec` on demand. Wave 4: the push is infallible and unbounded — the C
+> `MAX_PTR_STACK` cap and the "Pointer stack full!\n" + exit(1) overflow path are
+> gone. The stack stores the token only; it takes no ownership.

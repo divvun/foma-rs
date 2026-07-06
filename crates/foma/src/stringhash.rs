@@ -92,11 +92,9 @@ pub fn sh_find_string(sh: &mut ShHandle, string: &str) -> Option<String> {
 // C never returns NULL here; the return is a clone of the interned copy
 // (see module doc).
 pub fn sh_find_add_string(sh: &mut ShHandle, string: &str, value: i32) -> String {
-    let s: Option<String> = sh_find_string(sh, string);
-    if s.is_none() {
-        sh_add_string(sh, string, value)
-    } else {
-        s.unwrap()
+    match sh_find_string(sh, string) {
+        Some(existing) => existing,
+        None => sh_add_string(sh, string, value),
     }
 }
 

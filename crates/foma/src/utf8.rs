@@ -15,14 +15,12 @@
 // C returns `s` (the same pointer) for chaining; here the buffer is
 // mutated in place.
 pub fn remove_trailing(s: &mut Vec<u8>, c: u8) {
-    let len: i32 = s.len() as i32 - 1;
-    let mut i: i32 = len;
-    while i >= 0 {
-        if s[i as usize] != c && s[i as usize] != b' ' && s[i as usize] != b'\t' {
+    while let Some(&last) = s.last() {
+        if last == c || last == b' ' || last == b'\t' {
+            s.pop();
+        } else {
             break;
         }
-        s.truncate(i as usize); /* C: *(s+i) = '\0' */
-        i -= 1;
     }
 }
 
@@ -38,13 +36,12 @@ pub fn trim(string: Option<&mut Vec<u8>>) {
         None => return, /* C: if (string == NULL) return(string); */
         Some(s) => s,
     };
-    let mut i: i32 = string.len() as i32 - 1;
-    while i >= 0 {
-        if string[i as usize] != b' ' && string[i as usize] != b'\t' {
+    while let Some(&last) = string.last() {
+        if last == b' ' || last == b'\t' {
+            string.pop();
+        } else {
             break;
         }
-        string.truncate(i as usize); /* C: *(string+i) = '\0' */
-        i -= 1;
     }
 }
 
@@ -54,23 +51,11 @@ pub fn trim(string: Option<&mut Vec<u8>>) {
 // [spec:foma:def:fomalibconf.xstrrev-fn]
 // [spec:foma:sem:fomalibconf.xstrrev-fn]
 // Byte-wise reversal: multi-byte UTF-8 characters are corrupted, exactly
-// as in C (see the utf8.xstrrev-fn sem rule). C returns `str`.
+// as in C (see the utf8.xstrrev-fn sem rule). C returns `str`; None/empty
+// are no-ops.
 pub fn xstrrev(str: Option<&mut Vec<u8>>) {
-    let str = match str {
-        None => return, /* C: if (! str ...) return str; */
-        Some(s) => s,
-    };
-    if str.is_empty() {
-        return; /* C: ... || ! *str */
-    }
-    let mut p1: usize = 0;
-    let mut p2: usize = str.len() - 1;
-    while p2 > p1 {
-        str[p1] ^= str[p2];
-        str[p2] ^= str[p1];
-        str[p1] ^= str[p2];
-        p1 += 1;
-        p2 -= 1;
+    if let Some(s) = str {
+        s.reverse();
     }
 }
 
@@ -78,42 +63,22 @@ pub fn xstrrev(str: Option<&mut Vec<u8>>) {
 // [spec:foma:sem:utf8.escape-string-fn]
 // [spec:foma:def:fomalibconf.escape-string-fn]
 // [spec:foma:sem:fomalibconf.escape-string-fn]
-// DEVIATION from C (no unterminated-buffer hazard in Rust): the C callocs
-// strlen(string)+j bytes — one byte short of room for the NUL terminator,
-// relying on calloc zeroing plus an exact fill. Building the same visible
-// bytes into a Vec yields the identical string content.
-// DEVIATION from C (C returns the caller's own pointer when there is
-// nothing to escape; here an owned copy is returned in that branch).
+// Byte semantics preserved (wire compat): a backslash is inserted before
+// every occurrence of `chr`. When there is nothing to escape the C returns
+// the caller's own pointer; here an owned copy of the input is returned.
 pub fn escape_string(string: &[u8], chr: u8) -> Vec<u8> {
-    let mut i: usize;
-    let mut j: usize = 0;
-    i = 0;
-    while i < string.len() {
-        if string[i] == chr {
-            j += 1;
-        }
-        i += 1;
+    let count = string.iter().filter(|&&b| b == chr).count();
+    if count == 0 {
+        return string.to_vec();
     }
-    if j > 0 {
-        /* C: newstring = calloc((strlen(string)+j),sizeof(char)); */
-        let mut newstring: Vec<u8> = vec![0; string.len() + j];
-        i = 0;
-        j = 0;
-        while i < string.len() {
-            if string[i] == chr {
-                newstring[j] = b'\\';
-                j += 1;
-                newstring[j] = chr;
-            } else {
-                newstring[j] = string[i];
-            }
-            i += 1;
-            j += 1;
+    let mut out: Vec<u8> = Vec::with_capacity(string.len() + count);
+    for &b in string {
+        if b == chr {
+            out.push(b'\\');
         }
-        newstring
-    } else {
-        string.to_vec()
+        out.push(b);
     }
+    out
 }
 
 /* Substitute first \n for \0 */
@@ -122,15 +87,8 @@ pub fn escape_string(string: &[u8], chr: u8) -> Vec<u8> {
 // [spec:foma:def:fomalibconf.strip-newline-fn]
 // [spec:foma:sem:fomalibconf.strip-newline-fn]
 pub fn strip_newline(s: &mut Vec<u8>) {
-    let len: i32 = s.len() as i32;
-    /* remove the null terminator */
-    let mut i: i32 = 0;
-    while i < len {
-        if s[i as usize] == b'\n' {
-            s.truncate(i as usize); /* C: s[i] = '\0' */
-            return;
-        }
-        i += 1;
+    if let Some(pos) = s.iter().position(|&b| b == b'\n') {
+        s.truncate(pos); /* C: s[pos] = '\0' */
     }
 }
 
@@ -159,12 +117,12 @@ pub fn dequote_string(s: &mut Vec<u8>) {
 /* Changing \uXXXX sequences to their unicode equivalents */
 
 // [spec:foma:def:utf8.decode-quoted-fn]
-// [spec:foma:sem:utf8.decode-quoted-fn]
+// [spec:foma:sem:utf8.decode-quoted-fn+1]
 // [spec:foma:def:fomalibconf.decode-quoted-fn]
-// [spec:foma:sem:fomalibconf.decode-quoted-fn]
-// Latent bug reproduced literally (see the utf8.decode-quoted-fn sem rule):
-// if utf8skip returns -1 on an invalid lead byte, skip == 0 and neither
-// cursor advances — infinite loop on malformed input.
+// [spec:foma:sem:fomalibconf.decode-quoted-fn+1]
+// Wave 4 fix: on a malformed lead byte utf8skip returns -1, so the C copied
+// zero bytes and neither cursor advanced (infinite loop). Here the copy is
+// forced to advance by at least one byte (lossy), so decoding terminates.
 pub fn decode_quoted(s: &mut Vec<u8>) {
     let len: i32 = s.len() as i32;
     let mut i: i32 = 0;
@@ -189,7 +147,10 @@ pub fn decode_quoted(s: &mut Vec<u8>) {
             }
             i += 6;
         } else {
-            let mut skip: i32 = utf8skip(&s[i as usize..]) + 1;
+            /* Copy one whole UTF-8 character. utf8skip+1 is its width; a
+            malformed lead byte yields 0, which the C looped on forever —
+            force at least one byte so both cursors advance (lossy). */
+            let mut skip: i32 = (utf8skip(&s[i as usize..]) + 1).max(1);
             while skip > 0 {
                 s[j as usize] = s[i as usize];
                 i += 1;
@@ -263,24 +224,24 @@ pub fn ishexstr(str: &[u8]) -> i32 {
 }
 
 // [spec:foma:def:utf8.utf8strlen-fn]
-// [spec:foma:sem:utf8.utf8strlen-fn]
+// [spec:foma:sem:utf8.utf8strlen-fn+1]
 // [spec:foma:def:fomalibconf.utf8strlen-fn]
-// [spec:foma:sem:fomalibconf.utf8strlen-fn]
-// Latent bug reproduced literally (see the utf8.utf8strlen-fn sem rule):
-// on an invalid lead byte utf8skip returns -1, the advance is 0, and the
-// loop never terminates.
+// [spec:foma:sem:fomalibconf.utf8strlen-fn+1]
+// Wave 4 fix: on a malformed lead byte utf8skip returns -1, so the C advance
+// was 0 and the loop never terminated. Here the step is forced to at least
+// one byte (lossy — an invalid byte counts as one character), so counting
+// terminates on any input.
 pub fn utf8strlen(str: &[u8]) -> i32 {
     let len: i32 = str.len() as i32;
     let mut i: i32 = 0;
-    let mut j: i32 = 0;
-    /* C: *(str+i) != '\0' && i < len — index >= len stands in for the NUL
-    (or, past it, for the out-of-bounds read whose value cannot matter
-    because the i < len guard fails anyway). */
-    while (if (i as usize) < str.len() { str[i as usize] } else { 0 }) != 0 && i < len {
-        i = i + utf8skip(&str[i as usize..]) + 1;
-        j += 1;
+    let mut count: i32 = 0;
+    /* Stop at an interior NUL (C uses strlen) or the end of the slice. */
+    while i < len && str[i as usize] != 0 {
+        let step = utf8skip(&str[i as usize..]) + 1;
+        i += step.max(1);
+        count += 1;
     }
-    j
+    count
 }
 
 /* Checks if the next character in the string is a combining character     */
@@ -373,13 +334,12 @@ pub fn utf8code16tostr(str: &[u8]) -> Option<Vec<u8>> {
 
 // [spec:foma:def:utf8.int2utf8str-fn]
 // [spec:foma:sem:utf8.int2utf8str-fn]
-// C returns a fresh NUL-terminated buffer, or NULL for codepoints >=
-// 0x10000 (leaking the already-malloc'd 5-byte buffer — a leak-only bug,
-// nothing to reproduce in Rust). NULL → None; the Vec holds the encoded
-// bytes without the trailing NUL (codepoint 0 yields the single byte 0,
-// which consumers treating the result as a C string see as empty).
+// Codepoints >= 0x10000 (no 4-byte support) return None; every other value
+// yields the encoded bytes without a trailing NUL (codepoint 0 yields the
+// single byte 0, which consumers treating the result as a C string see as
+// empty). Negative codepoints fall into the < 0x80 branch (truncated byte).
 pub fn int2utf8str(codepoint: i32) -> Option<Vec<u8>> {
-    let mut value: Vec<u8> = Vec::with_capacity(5); /* C: malloc(5) */
+    let mut value: Vec<u8> = Vec::with_capacity(5);
 
     if codepoint < 0x80 {
         /* Negative codepoints fall in here and produce a garbage
@@ -502,12 +462,11 @@ mod tests {
         assert_eq!(utf8iscombining(&[0xe1, 0xaa]), 0);
     }
 
-    // utf8strlen: counts UTF-8 chars for WELL-FORMED input only. The
-    // documented infinite loop on an invalid lead byte (utf8skip == -1 →
-    // advance 0) is pinned by code inspection at src/utf8.rs (the `i = i +
-    // utf8skip(..) + 1` step); it is NOT exercised here (running it hangs).
-    // [spec:foma:sem:utf8.utf8strlen-fn/test]
-    // [spec:foma:sem:fomalibconf.utf8strlen-fn/test]
+    // utf8strlen: counts UTF-8 chars. Wave 4 fix — a malformed lead byte
+    // (utf8skip == -1) no longer hangs; it advances one byte (lossy) and is
+    // counted as one character, so counting terminates on any input.
+    // [spec:foma:sem:utf8.utf8strlen-fn+1/test]
+    // [spec:foma:sem:fomalibconf.utf8strlen-fn+1/test]
     #[test]
     fn test_utf8strlen() {
         assert_eq!(utf8strlen(b""), 0);
@@ -517,6 +476,10 @@ mod tests {
         assert_eq!(utf8strlen(&[0xf0, 0x90, 0x8d, 0x88]), 1); // 𐍈 (4-byte)
         // mixed: 'a' + é + €
         assert_eq!(utf8strlen(&[0x61, 0xc3, 0xa9, 0xe2, 0x82, 0xac]), 3);
+        // Wave 4: malformed lead bytes terminate (lossy: one byte = one char)
+        assert_eq!(utf8strlen(&[0x80]), 1); // stray continuation byte
+        assert_eq!(utf8strlen(&[0xff, 0x41]), 2); // invalid lead + 'A'
+        assert_eq!(utf8strlen(&[0x80, 0x80, 0x80]), 3); // three stray bytes
     }
 
     // escape_string: backslash-escapes each `chr`; identity (owned copy) when
@@ -573,11 +536,11 @@ mod tests {
     }
 
     // decode_quoted: backslash-u XXXX decoding, U+0000 deletion, surrogate CESU-8,
-    // and the ">5 bytes remaining" gate. The infinite loop on a malformed lead
-    // byte (utf8skip == -1) is pinned by inspection at the `skip = utf8skip(..)
-    // + 1` else-branch; not exercised (would hang).
-    // [spec:foma:sem:utf8.decode-quoted-fn/test]
-    // [spec:foma:sem:fomalibconf.decode-quoted-fn/test]
+    // and the ">5 bytes remaining" gate. Wave 4 fix — a malformed lead byte
+    // (utf8skip == -1) no longer hangs; it is copied through one byte (lossy)
+    // and decoding terminates.
+    // [spec:foma:sem:utf8.decode-quoted-fn+1/test]
+    // [spec:foma:sem:fomalibconf.decode-quoted-fn+1/test]
     #[test]
     fn test_decode_quoted() {
         // no escapes → unchanged
@@ -604,6 +567,11 @@ mod tests {
         let mut s = vec![0x5c, 0x75, 0x30, 0x34, 0x31];
         decode_quoted(&mut s);
         assert_eq!(s, vec![0x5c, 0x75, 0x30, 0x34, 0x31]);
+        // Wave 4: a malformed lead byte no longer hangs — copied through one
+        // byte (lossy advance) and decoding terminates.
+        let mut s = vec![0xff, 0x41];
+        decode_quoted(&mut s);
+        assert_eq!(s, vec![0xff, 0x41]);
     }
 
     // streqrep: equal-length replacement of every match; no-match identity.
