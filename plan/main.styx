@@ -617,4 +617,80 @@ children (
             }
         )
     }
+
+    {
+        id wave-5-debug
+        title "Wave 5: eliminate remaining kept C bugs (bug-for-bug quirks → +N divergences)"
+        children (
+            {
+                id w5-correctness
+                title "Tier A: wrong output on valid input (6 correctness bugs)"
+                priority 0
+                log (
+                    {
+                        at 2026-07-06T23:32:28.196678Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Tier A — wrong output on VALID input. Each fix = a +1 sem-rule bump (established Wave-4 pattern).\nA1 apply.rs:1533 [apply.apply-append-fn] — multi-byte space symbol corrupted in printed output; `len += 1` ignores symbol byte length so subsequent appends overwrite all but its first byte. Fix: `len += space.len()`.\nA2 spelling.rs:197 [spelling.print-match-fn] — parent-chain walk truncates at an epsilon arc (in==0&&out==0) → incomplete MED alignment. Fix: gate on parent==-1 only, not the epsilon test.\nA3 spelling.rs:1120 [spelling.cmatrix-print-fn] — confusion-matrix diagonal cell emits single \"*\", under-filling column width → misaligned table. Fix: pad \"*\" to the symbol column width.\nA4 stack.rs:443 [stack.stack-rotate-fn / iface.iface-rotate-fn] — rotate/turn swaps only the ->fsm field; cached apply/med handles (ah/amedh) stay put and then operate on the swapped-away net. Fix: swap the handles alongside fsm, or invalidate them on rotate.\nA5 iface/apply_cmds.rs:412 [iface.iface-print-shortest-string-size-fn] (+ foma.md:620) — \"print shortest-string-size\" returns statecount-1 = LONGEST length for a minimal unary DFA. Fix: BFS/true shortest-path distance.\nA6 coaccessible.rs:10 [coaccessible.fsm-coaccessible-fn] — mapping[0]=0 set unconditionally → wrong renumber when state 0 is not coaccessible. Fix: only map state 0 when it is coaccessible."
+                    }
+                )
+            }
+
+            {
+                id w5-robustness
+                title "Tier C: crash/hang on malformed input → graceful errors (4 bugs)"
+                priority 1
+                log (
+                    {
+                        at 2026-07-06T23:32:34.860065Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Tier C — crash/hang on malformed/degenerate input. Rust already turned C's UB into panics/loops; goal is graceful FomaError instead.\nC1 sigma.rs:95,892 [sigma.sigma-add-special-fn] — code ∉{0,1,2} inserts a Sigma node with symbol:None → later deref panics. Fix: return FomaError (or reject) for non-reserved codes.\nC2 dynarray.rs:581 [dynarray.fsm-construct-copy-sigma-fn] — symbol number > 2× current size → single doubling insufficient → index panic. Fix: grow in a loop / reserve to max symbol number.\nC3 io.rs:1101 [io.io-net-read-fn] — binary sigma section truncated (never sees ##states##) → io_gets yields empty lines forever → INFINITE LOOP. Fix: bail on repeated empty lines / EOF sentinel.\nC4 utf8.rs:171 [utf8.streqrep-fn] — equal or overlapping old/new (e.g. streqrep(s,\"a\",\"a\")) → strstr always matches at 0 → INFINITE LOOP; also newstring shorter than oldstring reads past. Fix: advance search past each replacement; document len(new) <= len(old) contract."
+                    }
+                )
+            }
+
+            {
+                id w5-cli
+                title "Tier B: CLI/UX papercuts on valid input (5 bugs)"
+                priority 2
+                log (
+                    {
+                        at 2026-07-06T23:32:43.143589Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Tier B — CLI/UX papercuts on valid input.\nB1 iface/stack_ops.rs:129 [iface.iface-turn-fn] — \"turn stack\" calls stack_rotate (swap top/bottom only), NOT stack_turn (reverse whole stack); contradicts help \"turns stack upside down\". Fix: call stack_turn(). (Verify this wasn't already covered by the stack_turn +1 — that bump fixed the reversal impl; this is the wiring.)\nB2 iface/variables.rs:163 [iface.iface-set-variable-fn / iface.iface-show-variable-fn] — variable name match is strncmp over 8 bytes → any name sharing the first 8 chars collides (e.g. \"hopcroft-XYZ\" hits \"hopcroft-min\"). Fix: full strcmp.\nB3 flookup.rs:340 + cgflookup.rs:287 [flookup.main-fn / cgflookup.main-fn] — \"-I 4k\"/\"-I 4M\" never reach the k/M branches; atoi parses 4 and the suffix is dropped. Fix: parse k/K/m/M suffix (one root fix, both binaries).\nB4 cgflookup.rs:318 [cgflookup.main-fn] — \"-x\" appears in the usage/getopt string but has no case handler → prints usage and exits FAILURE. Fix: implement -x (match flookup) or drop from usage.\nB5 flookup.rs:248 [flookup.app-print-fn] — server-mode no-match prints \"?+\" vs stdin-mode \"+?\". Fix: emit \"+?\" consistently."
+                    }
+                )
+            }
+
+            {
+                id w5-degenerate
+                title "Tier D: dead code + degenerate-only correctness (4 bugs)"
+                priority 3
+                log (
+                    {
+                        at 2026-07-06T23:32:46.946807Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Tier D — dead code + degenerate/malformed-only correctness.\nD1 constructions/derived.rs:2020 [constructions.fsm-flatten-fn] — dead guard tests fsm_get_next_arc == -1, but that fn only returns 0/1; on an arc-free epsilon machine it proceeds to read an invalid arc. Fix: compare == 0 (end-of-arcs).\nD2 constructions/derived.rs:1215 [constructions.fsm-ignore-fn] — plain-copy branch adds the state offset to a -1 final-marker target on a non-minimized net2 → bogus state number. Fix: preserve target == -1 unchanged.\nD3 structures.rs:326 [structures.fsm-create-fn] + iface/stack_ops.rs:46 [iface.iface-name-net-fn] — 40-byte name-field truncation (no NUL in C). Fix: unbounded owned String for net names.\nD4 io.rs:1069 [io.io-net-read-fn] — when the name field is absent, sscanf leaves the buffer holding the props line → props reused as the net name. Fix: fall back to \"\" on missing field."
+                    }
+                )
+            }
+
+            {
+                id w5-cleanup
+                title "Tier E: heuristics, leaks, harmless (verify + tidy, ~9 items)"
+                priority 4
+                log (
+                    {
+                        at 2026-07-06T23:32:55.287344Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Tier E — no observable output change / likely already neutralized. Mostly VERIFY-then-tidy; several may already be fixed by Rust semantics (close as no-op if so).\nE1 minimize.rs:486 [minimize.fsm-minimize-brz-fn] — inv_t_count < inv_count comparison constant-folds false → touch-half-first heuristic never taken. Result is still CORRECT; pure Hopcroft-queue-policy inefficiency. Fix: recompute inv_t_count as the actual touched-subset sum (or leave, documented).\nE2 determinize.rs:1011 [determinize.fsm-determinize-fn] — nhash_load counts only occupied bucket heads, not chain nodes → load factor understated, rehash delayed. Result CORRECT; perf only. Fix: count every entry.\nE3 LEAKS — likely already no-ops under Rust owned Drop; confirm each and close if so: spelling.rs:124 (align_symbol reassign), spelling.rs:1146 (confusion_matrix reassign), constructions/derived.rs:2003 [fsm-context-restrict-fn] (clear_contexts(None) leaves LR list). If a field is an owned String/Vec/Box, reassignment already frees — no fix needed.\nE4 apply.rs:749 [apply.apply-index-fn] — final state block before the -1 sentinel never bucketed; fallback linear/binary search is correct → HARMLESS. Optional: bucket it for index completeness.\nE5 iface/common.rs:298 [iface.print-dot-fn] — C over-allocated printed[] (sizeof(ptr) per line); Rust Vec is correct → HARMLESS, close.\nE6 lexcread.rs:1562 [lexcread.lexc-*] — off-by-one leak of lenlist[maxlen] chain; no observable effect. Optional tidy."
+                    }
+                )
+            }
+        )
+    }
 )
