@@ -22,6 +22,12 @@ pub enum FomaError {
     /// A bounded resource was exhausted (e.g. a fixed-capacity stack in the
     /// C sources that called `exit(1)` on overflow).
     CapacityExceeded(&'static str),
+    /// A filesystem operation failed (open/read/write) where the C printed a
+    /// diagnostic and returned a NULL/sentinel. Carries a human-readable detail.
+    Io(String),
+    /// A serialized network or input file was structurally malformed for the
+    /// operation (bad header/field, or a rejected byte-order mark).
+    Format(String),
 }
 
 impl fmt::Display for FomaError {
@@ -30,6 +36,8 @@ impl fmt::Display for FomaError {
             FomaError::Unimplemented(what) => write!(f, "unimplemented: {what}"),
             FomaError::MalformedInput(msg) => write!(f, "malformed input: {msg}"),
             FomaError::CapacityExceeded(what) => write!(f, "capacity exceeded: {what}"),
+            FomaError::Io(msg) => write!(f, "io error: {msg}"),
+            FomaError::Format(msg) => write!(f, "format error: {msg}"),
         }
     }
 }

@@ -24,6 +24,7 @@ use flate2::write::GzEncoder;
 
 use crate::constructions::fsm_count;
 use crate::define::add_defined;
+use crate::error::FomaError;
 use crate::dynarray::{
     fsm_construct_add_arc, fsm_construct_add_symbol, fsm_construct_check_symbol,
     fsm_construct_done, fsm_construct_init, fsm_construct_set_final, fsm_construct_set_initial,
@@ -116,23 +117,6 @@ fn atoi(s: &str) -> i32 {
     atoll(s) as i32
 }
 
-/* C `strncmp` twin — stops at n bytes OR at a mutual '\0' (this NUL behavior is
-what makes check_BOM's false matches happen). Bytes past the end of `b` read as
-0, since check_BOM is called on a buffer that is not yet NUL-terminated. */
-fn strncmp(a: &[u8], b: &[u8], n: usize) -> i32 {
-    for i in 0..n {
-        let ca = a.get(i).copied().unwrap_or(0);
-        let cb = b.get(i).copied().unwrap_or(0);
-        if ca != cb {
-            return ca as i32 - cb as i32;
-        }
-        if ca == 0 {
-            return 0;
-        }
-    }
-    0
-}
-
 /* strncpy(dst, src, FSM_NAME_LEN): at most 40 bytes are copied, with no NUL
 terminator when the source is >= 40 bytes — reproduced as truncation to 40
 bytes per the conventions.
@@ -187,7 +171,7 @@ pub fn escape_print(stream: &mut dyn Write, string: &str) {
 }
 
 // [spec:foma:def:io.foma-write-prolog-fn]
-// [spec:foma:sem:io.foma-write-prolog-fn]
+// [spec:foma:sem:io.foma-write-prolog-fn+1]
 // [spec:foma:def:fomalib.foma-write-prolog-fn]
 // [spec:foma:sem:fomalib.foma-write-prolog-fn]
 pub fn foma_write_prolog(net: &mut Fsm, filename: Option<&str>) -> i32 {
@@ -296,10 +280,10 @@ pub fn foma_write_prolog(net: &mut Fsm, filename: Option<&str>) -> i32 {
         if instring == "?" && in_ > 2 {
             instring = "%?";
         }
-        /* BUG (kept): the out-side "?" escape tests stateptr->in > 2 instead of
-        stateptr->out > 2, so a literal "?" out-symbol is only escaped when the
-        in-symbol number is > 2 */
-        if outstring == "?" && in_ > 2 {
+        /* Wave 4 fix: the C out-side "?" escape tested stateptr->in > 2 (a copy
+        typo); test out_ > 2 so a literal "?" out-symbol is escaped by its own
+        symbol number, symmetrically with the in-side above. */
+        if outstring == "?" && out_ > 2 {
             outstring = "%?";
         }
 
@@ -603,8 +587,8 @@ pub fn spacedtext_get_next_token(text: &mut [u8], cursor: &mut usize) -> Option<
 // [spec:foma:sem:fomalib.fsm-read-spaced-text-file-fn]
 pub fn fsm_read_spaced_text_file(filename: &str) -> Option<Box<Fsm>> {
     let mut text = match file_to_mem(filename) {
-        None => return None,
-        Some(t) => t,
+        Err(_) => return None,
+        Ok(t) => t,
     };
     let mut th = fsm_trie_init();
     let mut cursor = 0usize;
@@ -693,8 +677,8 @@ pub fn fsm_read_spaced_text_file(filename: &str) -> Option<Box<Fsm>> {
 // [spec:foma:sem:fomalib.fsm-read-text-file-fn]
 pub fn fsm_read_text_file(filename: &str) -> Option<Box<Fsm>> {
     let mut text = match file_to_mem(filename) {
-        None => return None,
-        Some(t) => t,
+        Err(_) => return None,
+        Ok(t) => t,
     };
     let mut textp1 = 0usize;
     let mut th = fsm_trie_init();
@@ -779,19 +763,24 @@ pub fn fsm_read_binary_file_multiple_init(filename: &str) -> Option<Box<FsmReadB
 }
 
 // [spec:foma:def:io.fsm-read-binary-file-fn]
-// [spec:foma:sem:io.fsm-read-binary-file-fn]
+// [spec:foma:sem:io.fsm-read-binary-file-fn+1]
 // [spec:foma:def:fomalib.fsm-read-binary-file-fn]
 // [spec:foma:sem:fomalib.fsm-read-binary-file-fn]
-pub fn fsm_read_binary_file(filename: &str) -> Option<Box<Fsm>> {
+// Wave 4: returns `Result<Box<Fsm>, FomaError>` instead of the C NULL sentinel —
+// an unreadable/empty file is `Err(Io)`, a structurally malformed image is
+// `Err(Format)`. The single regex.rs caller adapts with `.ok()`.
+pub fn fsm_read_binary_file(filename: &str) -> Result<Box<Fsm>, FomaError> {
     let mut iobh = io_init();
     if io_gz_file_to_mem(&mut iobh, filename) == 0 {
         io_free(iobh);
-        return None;
+        return Err(FomaError::Io(format!(
+            "cannot read binary file '{filename}'"
+        )));
     }
     /* *net_name is strdup'd and never freed in C (leak); here it is dropped */
     let net = io_net_read(&mut iobh).map(|(n, _net_name)| n);
     io_free(iobh);
-    net
+    net.ok_or_else(|| FomaError::Format(format!("malformed foma binary file '{filename}'")))
 }
 
 // [spec:foma:def:io.save-defined-fn]
@@ -856,10 +845,9 @@ pub fn load_defined(def: &mut DefinedNetworks, filename: &str) -> i32 {
 
 // [spec:foma:def:io.explode-line-fn]
 // [spec:foma:sem:io.explode-line-fn]
-// DEVIATION from C: C writes fields into a fixed int[5] that a >5-field line
-// overruns (documented latent bug); here `values` is a growable Vec, so the
-// overrun becomes a longer Vec and io_net_read's switch default reports the
-// format error instead of corrupting the stack.
+// `values` is a growable Vec, so a states line with more than 5 fields (which
+// the C int[5] the sole caller passes would overrun) merely lengthens it and
+// io_net_read's switch default reports the format error.
 pub(crate) fn explode_line(buf: &str, values: &mut Vec<i32>) -> i32 {
     values.clear();
     let bytes = buf.as_bytes();
@@ -898,8 +886,10 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Option<(Box<Fsm>, String)> {
     let mut buf = String::new();
     let net_name: String;
     let mut lineint: Vec<i32> = Vec::new();
-    /* char last_final = '1' (49) — only consumed if the first states line has 2
-    or 3 fields, which well-formed files never produce */
+    /* char last_final = '1' (49) in C — a latent typo (an int 0/1 was surely
+    intended), kept as-is: it is only consumed when the first states line has 2
+    or 3 fields, which the writer never emits (line 1 always sets state_no), so
+    the value is unobservable for well-formed files and memory-safe either way. */
     let mut last_final: i8 = b'1' as i8;
 
     if io_gets(iobh, &mut buf) == 0 {
@@ -998,9 +988,9 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Option<(Box<Fsm>, String)> {
             break;
         }
         if buf.is_empty() {
-            /* NOTE (kept): at end-of-buffer io_gets keeps returning empty lines,
-            so a file truncated inside the sigma section loops forever, exactly
-            as in C (memory-safe, so ported literally) */
+            /* truly empty line: skipped. At end-of-buffer io_gets keeps yielding
+            empty lines, so a file truncated inside the sigma section loops
+            forever, exactly as in C (memory-safe, ported literally). */
             continue;
         }
         /* new_symbol = strstr(buf, " ") — a spaceless line NULL-derefs in C */
@@ -1314,22 +1304,29 @@ pub(crate) fn io_get_regular_file_size(filename: &str) -> usize {
         .unwrap_or(0)
 }
 
+/* zlib's gzopen reads plain (uncompressed) files transparently — gzdirect()
+reports which — but flate2's GzDecoder errors on non-gzip input, so we sniff the
+gzip magic ourselves (the two bytes gzdirect keys on) and fall back to a plain
+read. Reads two bytes from `file`, advancing its cursor; callers that must
+re-read the body seek back to the start afterwards. */
+fn is_gzip_magic<R: Read>(file: &mut R) -> bool {
+    let mut magic = [0u8; 2];
+    file.read_exact(&mut magic).is_ok() && magic == [0x1f, 0x8b]
+}
+
 // [spec:foma:def:io.io-get-file-size-fn]
 // [spec:foma:sem:io.io-get-file-size-fn]
 pub(crate) fn io_get_file_size(filename: &str) -> usize {
     /* C: gzopen(filename, "r"); if NULL return 0. gzdirect() == 1 (file is not
-    gzip data, read raw) → regular on-disk size; else → gzip trailer size.
-    flate2 has no gzdirect, so sniff the 1f 8b magic (what gzdirect keys on). */
+    gzip data, read raw) → regular on-disk size; else → gzip trailer size. */
     let mut file = match File::open(filename) {
         Ok(f) => f,
         Err(_) => return 0,
     };
-    let mut magic = [0u8; 2];
-    let is_gzip = file.read_exact(&mut magic).is_ok() && magic == [0x1f, 0x8b];
-    if !is_gzip {
-        io_get_regular_file_size(filename)
-    } else {
+    if is_gzip_magic(&mut file) {
         io_get_gz_file_size(filename)
+    } else {
+        io_get_regular_file_size(filename)
     }
 }
 
@@ -1341,15 +1338,12 @@ pub fn io_gz_file_to_mem(iobh: &mut IoBufHandle, filename: &str) -> usize {
         return 0;
     }
     /* C: malloc(size+1); gzopen "rb"; gzread(size); gzclose; buf[size]='\0'.
-    gzopen transparently decompresses gzip AND passes plain files through;
-    flate2's GzDecoder errors on non-gzip input, so sniff the magic and fall
-    back to a plain read. */
+    gzopen transparently decompresses gzip AND passes plain files through. */
     let mut file = match File::open(filename) {
         Ok(f) => f,
         Err(_) => return 0,
     };
-    let mut magic = [0u8; 2];
-    let is_gzip = file.read_exact(&mut magic).is_ok() && magic == [0x1f, 0x8b];
+    let is_gzip = is_gzip_magic(&mut file);
     let _ = file.seek(SeekFrom::Start(0));
     let mut content: Vec<u8> = Vec::new();
     if is_gzip {
@@ -1369,16 +1363,20 @@ pub fn io_gz_file_to_mem(iobh: &mut IoBufHandle, filename: &str) -> usize {
 }
 
 // [spec:foma:def:io.check-bom-fn]
-// [spec:foma:sem:io.check-bom-fn]
+// [spec:foma:sem:io.check-bom-fn+1]
 #[allow(non_snake_case)]
 pub(crate) fn check_BOM(buffer: &[u8]) -> Option<&'static Bom> {
-    /* for (bom = BOM_codes; bom->len; bom++) — see strncmp for the NUL-based
-    quirks (any leading '\0' → UTF-32BE; FF FE 00 → UTF-32LE) */
+    /* Wave 4 fix: the C compared each entry with strncmp(code, buffer, len),
+    which stops at a mutual NUL, so any buffer whose first byte was 0x00
+    false-matched the UTF-32BE entry (00 00 FE FF) and "FF FE 00 <any>"
+    false-matched UTF-32LE (the 4th byte was never checked). Compare the actual
+    `len` BOM bytes exactly instead; a buffer shorter than `len` cannot match. */
     for bom in BOM_CODES.iter() {
         if bom.len == 0 {
             break;
         }
-        if strncmp(&bom.code, buffer, bom.len as usize) == 0 {
+        let len = bom.len as usize;
+        if buffer.len() >= len && buffer[..len] == bom.code[..len] {
             return Some(bom);
         }
     }
@@ -1420,15 +1418,19 @@ static BOM_CODES: [Bom; 6] = [
 ];
 
 // [spec:foma:def:io.file-to-mem-fn]
-// [spec:foma:sem:io.file-to-mem-fn]
+// [spec:foma:sem:io.file-to-mem-fn+1]
 // [spec:foma:def:fomalib.file-to-mem-fn]
 // [spec:foma:sem:fomalib.file-to-mem-fn]
-pub fn file_to_mem(name: &str) -> Option<Vec<u8>> {
+// Wave 4: returns `Result<Vec<u8>, FomaError>` instead of the C `char *`/NULL
+// sentinel (the printed diagnostics are retained for CLI-output compatibility;
+// the typed error lets binaries distinguish open/read failures from a BOM
+// rejection). Callers that only care about success adapt with `.ok()`.
+pub fn file_to_mem(name: &str) -> Result<Vec<u8>, FomaError> {
     let mut infile = match File::open(name) {
         Ok(f) => f,
         Err(_) => {
             print!("Error opening file '{}'\n", name);
-            return None;
+            return Err(FomaError::Io(format!("cannot open file '{name}'")));
         }
     };
     /* fseek END + ftell → on-disk size */
@@ -1437,22 +1439,24 @@ pub fn file_to_mem(name: &str) -> Option<Vec<u8>> {
     let mut content = vec![0u8; numbytes];
     if infile.read_exact(&mut content).is_err() {
         print!("Error reading file '{}'\n", name);
-        return None;
+        return Err(FomaError::Io(format!("cannot read file '{name}'")));
     }
     /* check_BOM runs on the buffer BEFORE the '\0' terminator is written, as in
-    C. DEVIATION from C (for empty/short files C reads uninitialized bytes; here
-    bytes past the file end read as 0, so an empty file is reported UTF-32BE). */
+    C (bytes past the file end are absent, so a short file cannot false-match). */
     if let Some(bom) = check_BOM(&content) {
         print!(
             "{} BOM mark is detected in file '{}'.\n",
             bom.name.unwrap(),
             name
         );
-        return None;
+        return Err(FomaError::Format(format!(
+            "{} BOM in file '{name}'",
+            bom.name.unwrap()
+        )));
     }
     /* fclose (drop infile); buffer[numbytes] = '\0' */
     content.push(0);
-    Some(content)
+    Ok(content)
 }
 
 /* Dead prototype: declared in fomalib.h but never defined in any C source.
@@ -1810,7 +1814,7 @@ mod tests {
 
     // [spec:foma:sem:io.fsm-write-binary-file-fn/test]
     // [spec:foma:sem:fomalib.fsm-write-binary-file-fn/test]
-    // [spec:foma:sem:io.fsm-read-binary-file-fn/test]
+    // [spec:foma:sem:io.fsm-read-binary-file-fn+1/test]
     // [spec:foma:sem:fomalib.fsm-read-binary-file-fn/test]
     #[test]
     fn binary_round_trip_acceptor_transducer_qmark() {
@@ -1839,7 +1843,7 @@ mod tests {
     }
 
     // [spec:foma:sem:io.fsm-write-binary-file-fn/test]
-    // [spec:foma:sem:io.fsm-read-binary-file-fn/test]
+    // [spec:foma:sem:io.fsm-read-binary-file-fn+1/test]
     #[test]
     fn binary_round_trip_with_cmatrix() {
         let mut net = parse("[a b]");
@@ -1857,7 +1861,7 @@ mod tests {
     }
 
     // [spec:foma:sem:io.io-gz-file-to-mem-fn/test]
-    // [spec:foma:sem:io.fsm-read-binary-file-fn/test]
+    // [spec:foma:sem:io.fsm-read-binary-file-fn+1/test]
     #[test]
     fn read_uncompressed_foma_file_sniff_fallback() {
         /* Plain (uncompressed) .foma bytes must still parse via the sniff-fallback. */
@@ -1870,7 +1874,7 @@ mod tests {
         assert_net_eq(&net, &craft_ab_net("test"));
     }
 
-    // [spec:foma:sem:io.fsm-read-binary-file-fn/test]
+    // [spec:foma:sem:io.fsm-read-binary-file-fn+1/test]
     // [spec:foma:sem:fomalib.fsm-read-binary-file-fn/test]
     #[test]
     fn read_c_foma_fixture_bytes() {
@@ -2000,7 +2004,7 @@ mod tests {
         assert!(read_att(p.to_str().unwrap()).is_none());
     }
 
-    // [spec:foma:sem:io.foma-write-prolog-fn/test]
+    // [spec:foma:sem:io.foma-write-prolog-fn+1/test]
     // [spec:foma:sem:fomalib.foma-write-prolog-fn/test]
     // [spec:foma:sem:io.fsm-read-prolog-fn/test]
     // [spec:foma:sem:fomalib.fsm-read-prolog-fn/test]
@@ -2015,14 +2019,14 @@ mod tests {
         assert_eq!(drain_up(&back, "b"), vec!["a".to_string()]);
     }
 
-    // [spec:foma:sem:io.foma-write-prolog-fn/test]
+    // [spec:foma:sem:io.foma-write-prolog-fn+1/test]
     // [spec:foma:sem:fomalib.foma-write-prolog-fn/test]
     #[test]
-    fn foma_write_prolog_outside_qmark_escape_bug() {
+    fn foma_write_prolog_outside_qmark_escape_fixed() {
         /* Craft an arc epsilon:"?" where the out-symbol number (3) > 2 but the
-        in-symbol number (0) is NOT > 2. The escape test reads stateptr->in
-        instead of stateptr->out, so the literal "?" out-symbol is left
-        UNescaped — pin `"0":"?"` (a fixed version would write `"0":"%?"`). */
+        in-symbol number (0) is NOT > 2. Wave 4 fix: the out-side escape now
+        tests out_ > 2, so the literal "?" out-symbol IS escaped to "%?" —
+        pin `"0":"%?"` (the C typo left it unescaped as `"0":"?"`). */
         let mut net = fsm_create("bug");
         net.arity = 2;
         add_sig(&mut net, &[(3, "?")]);
@@ -2048,13 +2052,13 @@ mod tests {
         let f = Scratch::new("prologbug");
         foma_write_prolog(&mut net, Some(f.path()));
         let s = std::fs::read_to_string(f.path()).unwrap();
-        assert!(s.contains("arc(bug, 0, 1, \"0\":\"?\")."), "got:\n{}", s);
-        assert!(!s.contains("\"%?\""));
+        assert!(s.contains("arc(bug, 0, 1, \"0\":\"%?\")."), "got:\n{}", s);
+        assert!(!s.contains("\"0\":\"?\")"));
     }
 
     // [spec:foma:sem:io.fsm-read-text-file-fn/test]
     // [spec:foma:sem:fomalib.fsm-read-text-file-fn/test]
-    // [spec:foma:sem:io.file-to-mem-fn/test]
+    // [spec:foma:sem:io.file-to-mem-fn+1/test]
     // [spec:foma:sem:fomalib.file-to-mem-fn/test]
     #[test]
     fn read_text_file_word_list() {
@@ -2099,11 +2103,11 @@ mod tests {
         assert!(fsm_read_text_file(p.to_str().unwrap()).is_none());
     }
 
-    // [spec:foma:sem:io.file-to-mem-fn/test]
+    // [spec:foma:sem:io.file-to-mem-fn+1/test]
     // [spec:foma:sem:fomalib.file-to-mem-fn/test]
     #[test]
     fn file_to_mem_normal_short_and_bom() {
-        /* normal read: content + trailing '\0' */
+        /* normal read: content + trailing '\0' (Wave 4: Ok instead of Some) */
         let f = Scratch::new("f2m");
         {
             let mut file = File::create(f.path()).unwrap();
@@ -2111,8 +2115,8 @@ mod tests {
         }
         assert_eq!(file_to_mem(f.path()).unwrap(), b"abc\n\0");
 
-        /* short (<4 byte) non-BOM file still reads (DEVIATION: bytes past the
-        end read as 0, so no false BOM here) */
+        /* short (<4 byte) non-BOM file reads fine (the exact-match check_BOM
+        cannot false-match a buffer shorter than a BOM) */
         let g = Scratch::new("f2m");
         {
             let mut file = File::create(g.path()).unwrap();
@@ -2120,39 +2124,42 @@ mod tests {
         }
         assert_eq!(file_to_mem(g.path()).unwrap(), b"hi\0");
 
-        /* UTF-8 BOM → rejected outright (returns None) */
+        /* UTF-8 BOM → rejected outright as Err(Format) */
         let h = Scratch::new("f2m");
         {
             let mut file = File::create(h.path()).unwrap();
             file.write_all(&[0xEF, 0xBB, 0xBF, b'x']).unwrap();
         }
-        assert!(file_to_mem(h.path()).is_none());
+        assert!(matches!(file_to_mem(h.path()), Err(FomaError::Format(_))));
 
-        /* empty file → check_BOM's leading-NUL branch reports UTF-32BE → None
-        (the <4-byte DEVIATION) */
+        /* Wave 4: an empty file no longer false-matches UTF-32BE; it reads as
+        the lone terminating '\0' */
         let e = Scratch::new("f2m");
         {
             File::create(e.path()).unwrap();
         }
-        assert!(file_to_mem(e.path()).is_none());
+        assert_eq!(file_to_mem(e.path()).unwrap(), b"\0");
 
-        /* missing file → None */
+        /* missing file → Err(Io) */
         let mut p = std::env::temp_dir();
         p.push("foma_io_absent_f2m_zzz");
         let _ = std::fs::remove_file(&p);
-        assert!(file_to_mem(p.to_str().unwrap()).is_none());
+        assert!(matches!(file_to_mem(p.to_str().unwrap()), Err(FomaError::Io(_))));
     }
 
     // [spec:foma:def:io.bom/test]
-    // [spec:foma:sem:io.check-bom-fn/test]
+    // [spec:foma:sem:io.check-bom-fn+1/test]
     #[test]
-    fn check_bom_matches_and_nul_quirks() {
+    fn check_bom_exact_match_no_nul_false_positives() {
         assert_eq!(check_BOM(&[0xEF, 0xBB, 0xBF]).unwrap().name, Some("UTF-8"));
-        /* any leading '\0' matches UTF-32BE immediately */
-        assert_eq!(check_BOM(&[0x00, 0x41, 0x42, 0x43]).unwrap().name, Some("UTF-32BE"));
-        /* FF FE 00 <any> classified UTF-32LE (4th byte never checked; UTF-32LE
-        precedes UTF16-LE) */
-        assert_eq!(check_BOM(&[0xFF, 0xFE, 0x00, 0x99]).unwrap().name, Some("UTF-32LE"));
+        /* full 4-byte marks match exactly */
+        assert_eq!(check_BOM(&[0xFF, 0xFE, 0x00, 0x00]).unwrap().name, Some("UTF-32LE"));
+        assert_eq!(check_BOM(&[0x00, 0x00, 0xFE, 0xFF]).unwrap().name, Some("UTF-32BE"));
+        /* Wave 4 fix: a lone leading '\0' no longer false-matches UTF-32BE */
+        assert!(check_BOM(&[0x00, 0x41, 0x42, 0x43]).is_none());
+        assert!(check_BOM(&[0x00]).is_none());
+        /* Wave 4 fix: FF FE 00 <non-00> is UTF16-LE (not a UTF-32LE false match) */
+        assert_eq!(check_BOM(&[0xFF, 0xFE, 0x00, 0x99]).unwrap().name, Some("UTF16-LE"));
         /* FF FE <non-NUL> → UTF16-LE */
         assert_eq!(check_BOM(&[0xFF, 0xFE, 0x41, 0x42]).unwrap().name, Some("UTF16-LE"));
         assert_eq!(check_BOM(&[0xFE, 0xFF, 0x41, 0x42]).unwrap().name, Some("UTF16-BE"));

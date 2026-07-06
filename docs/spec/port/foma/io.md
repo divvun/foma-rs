@@ -18,17 +18,19 @@
 > [spec:foma:def:io.check-bom-fn]
 > BOM *check_BOM(char *buffer)
 
-> [spec:foma:sem:io.check-bom-fn]
+> [spec:foma:sem:io.check-bom-fn+1]
 > Compares the start of `buffer` against a static table of byte-order marks, in order:
 > UTF-8 (EF BB BF, len 3), UTF-32LE (FF FE 00 00, len 4), UTF-32BE (00 00 FE FF, len 4),
-> UTF16-LE (FF FE, len 2), UTF16-BE (FE FF, len 2). Each entry is tested with
-> strncmp(code, buffer, len); returns a pointer to the first matching table entry (whose
-> `name` field is the encoding name above), or NULL if none match.
-> Latent quirks from strncmp's NUL semantics: comparison stops when both bytes are '\0',
-> so FF FE 00 followed by any byte matches UTF-32LE (4th byte never checked), and because
-> UTF-32LE precedes UTF16-LE in the table, FF FE 00 is classified UTF-32LE while FF FE
-> followed by a non-NUL byte is UTF16-LE; similarly any buffer whose first byte is '\0'
-> matches the UTF-32BE entry immediately and is reported as "UTF-32BE".
+> UTF16-LE (FF FE, len 2), UTF16-BE (FE FF, len 2). Each entry's `len` bytes are compared
+> exactly against the buffer; returns a reference to the first matching table entry (whose
+> `name` field is the encoding name above), or None if none match. A buffer shorter than an
+> entry's `len` cannot match it.
+> Wave 4 fix: the C tested each entry with strncmp(code, buffer, len), which stops at a
+> mutual NUL, so any buffer whose first byte was 0x00 false-matched the UTF-32BE entry
+> (00 00 FE FF) and "FF FE 00 <any>" false-matched UTF-32LE (its 4th byte was never
+> checked, and UTF-32LE precedes UTF16-LE in the table). Comparing the actual bytes exactly
+> removes both false positives: a lone leading 0x00 no longer matches UTF-32BE, and
+> "FF FE 00 <non-00>" now classifies as UTF16-LE.
 
 > [spec:foma:def:io.escape-print-fn]
 > void escape_print(FILE *stream, char* string)
@@ -56,17 +58,20 @@
 > [spec:foma:def:io.file-to-mem-fn]
 > char *file_to_mem(char *name)
 
-> [spec:foma:sem:io.file-to-mem-fn]
-> Reads the whole file `name` into a freshly malloc'd NUL-terminated buffer and returns
-> it; used by the text and spaced-text readers. Steps: fopen(name, "r"); on failure print
-> "Error opening file '<name>'\n" to stdout and return NULL. Size = fseek to SEEK_END +
-> ftell, then rewind; malloc(size+1). If malloc fails or fread returns fewer than size
-> bytes, print "Error reading file '<name>'\n" and return NULL (buffer leaked, file left
-> open). Then run `[spec:foma:sem:io.check-bom-fn]` on the buffer: if any BOM is
-> detected, print "<encoding> BOM mark is detected in file '<name>'.\n" and return NULL —
-> BOM-prefixed files are rejected outright, not skipped past (and buffer + file handle
-> leak). Otherwise fclose, store '\0' at buffer[size], return buffer.
-> Latent: for an empty file the BOM check reads uninitialized bytes of the 1-byte buffer.
+> [spec:foma:sem:io.file-to-mem-fn+1]
+> Reads the whole file `name` into a freshly allocated NUL-terminated buffer; used by the
+> text and spaced-text readers. Steps: open `name`; on failure print "Error opening file
+> '<name>'\n" to stdout and fail. Size = on-disk length; allocate size+1. If the read is
+> short, print "Error reading file '<name>'\n" and fail. Then run
+> `[spec:foma:sem:io.check-bom-fn+1]` on the buffer: if any BOM is detected, print
+> "<encoding> BOM mark is detected in file '<name>'.\n" and fail — BOM-prefixed files are
+> rejected outright, not skipped past. Otherwise store '\0' at buffer[size] and return the
+> buffer.
+> Wave 4: returns `Result<Vec<u8>, FomaError>` instead of the C `char *`/NULL sentinel —
+> `Err(FomaError::Io(..))` for an open/read failure, `Err(FomaError::Format(..))` for a
+> rejected BOM, `Ok(bytes)` otherwise; the printed diagnostics are retained for CLI-output
+> compatibility. With the exact-match BOM check (`[spec:foma:sem:io.check-bom-fn+1]`) an
+> empty file no longer false-matches UTF-32BE and reads as the lone terminating '\0'.
 
 > [spec:foma:def:io.foma-net-print-fn]
 > int foma_net_print(struct fsm *net, gzFile outfile)
@@ -98,7 +103,7 @@
 > [spec:foma:def:io.foma-write-prolog-fn]
 > int foma_write_prolog (struct fsm *net, char *filename)
 
-> [spec:foma:sem:io.foma-write-prolog-fn]
+> [spec:foma:sem:io.foma-write-prolog-fn+1]
 > Writes `net` as prolog clauses to `filename`, or to stdout if filename is NULL; if
 > fopen(filename, "w") fails it prints "Error writing to file '<f>'. Using stdout.\n" and
 > falls back to stdout, and whenever filename != NULL it prints "Writing prolog to file
@@ -115,9 +120,11 @@
 > Then for every line with target != -1 emits `arc(<name>, <state_no>, <target>, ...`.
 > The in/out strings are "0" for symbol 0 (EPSILON), "?" for 1 (UNKNOWN) or 2 (IDENTITY),
 > else the sigma string; then literal-symbol escapes are applied: a sigma string "0"
-> (in > 0 / out > 0) becomes "%0"; a sigma string "?" with symbol number > 2 becomes
-> "%?" — but the out-side test reads stateptr->in > 2 instead of stateptr->out > 2
-> (latent bug: a literal "?" out-symbol is only escaped when the in-symbol number is > 2).
+> (in > 0 / out > 0) becomes "%0"; a sigma string "?" with symbol number > 2 becomes "%?".
+> Wave 4 fix: the C out-side "?" escape tested stateptr->in > 2 (a copy typo, so a literal
+> "?" out-symbol was only escaped when the in-symbol number was > 2); it now tests
+> stateptr->out > 2, symmetrically with the in side, so a literal "?" out-symbol is escaped
+> by its own symbol number.
 > Arc payload: arity 2 with in == out == IDENTITY → `"?").`; arity 2 with in == out and
 > in != UNKNOWN → single quoted symbol `"<in>").`; any other arity 2 → `"<in>":"<out>").`;
 > arity 1 → `"<in>").` — all symbol texts run through escape_print.
@@ -127,12 +134,16 @@
 > [spec:foma:def:io.fsm-read-binary-file-fn]
 > struct fsm *fsm_read_binary_file(char *filename)
 
-> [spec:foma:sem:io.fsm-read-binary-file-fn]
+> [spec:foma:sem:io.fsm-read-binary-file-fn+1]
 > Reads the first network from the foma binary file `filename`: create a handle with
 > `[spec:foma:sem:io.io-init-fn]`, load the whole (possibly gzipped) file into memory via
-> `[spec:foma:sem:io.io-gz-file-to-mem-fn]` (on 0, free the handle and return NULL),
-> parse one net with `[spec:foma:sem:io.io-net-read-fn]`, free the handle, and return the
-> net (NULL on parse failure). The strdup'd net-name out-parameter is never freed (leak).
+> `[spec:foma:sem:io.io-gz-file-to-mem-fn]`, parse one net with
+> `[spec:foma:sem:io.io-net-read-fn]`, free the handle, and return the net. The net-name
+> string that C strdup'd and leaked is dropped here.
+> Wave 4: returns `Result<Box<Fsm>, FomaError>` instead of the C NULL sentinel — an
+> unreadable or empty file (io_gz_file_to_mem == 0) is `Err(FomaError::Io(..))`, a
+> structurally malformed image (io_net_read returns None) is `Err(FomaError::Format(..))`,
+> and a parsed net is `Ok`.
 
 > [spec:foma:def:io.fsm-read-binary-file-multiple-fn]
 > struct fsm *fsm_read_binary_file_multiple(fsm_read_binary_handle fsrh)
@@ -178,7 +189,7 @@
 > Symbol decoding, in this order: arity-1 "?" → "@_IDENTITY_SYMBOL_@"; arity-2 "?" →
 > "@_UNKNOWN_SYMBOL_@" (each side independently); "0" → "@_EPSILON_SYMBOL_@"; "%0" →
 > "0"; "%?" → "?". Adds arc source→target with in:in (arity 1) or in:out (arity 2).
-> No `\"` unescaping is done, asymmetric with `[spec:foma:sem:io.foma-write-prolog-fn]`.
+> No `\"` unescaping is done, asymmetric with `[spec:foma:sem:io.foma-write-prolog-fn+1]`.
 > After EOF (or on the second network( line): closes the file; if a net was started, set
 > state 0 initial, fsm_construct_done, fsm_topsort (return value of topsort ignored —
 > relies on in-place update), and return the net; else return NULL.
@@ -188,7 +199,7 @@
 
 > [spec:foma:sem:io.fsm-read-spaced-text-file-fn]
 > Reads a spaced-text word list into a trie and returns fsm_trie_done(th) (deterministic,
-> minimized). Loads the whole file with `[spec:foma:sem:io.file-to-mem-fn]` (NULL →
+> minimized). Loads the whole file with `[spec:foma:sem:io.file-to-mem-fn+1]` (error →
 > return NULL). Records are separated by one or more blank lines; each record is either
 > one line (an identity word) or two consecutive lines (an upper/lower transducer pair) —
 > two adjacent non-blank lines are always consumed as a pair.
@@ -209,7 +220,7 @@
 
 > [spec:foma:sem:io.fsm-read-text-file-fn]
 > Reads a plain word list, one word per line, into a trie. Loads the file with
-> `[spec:foma:sem:io.file-to-mem-fn]` (NULL → return NULL), then splits the buffer on
+> `[spec:foma:sem:io.file-to-mem-fn+1]` (error → return None), then splits the buffer on
 > '\n' in place: each non-empty line is added with fsm_trie_add_word; empty lines are
 > skipped; a final segment without a trailing newline is included; iteration stops at the
 > terminating '\0'. Frees the buffer and returns fsm_trie_done(th) — the deterministic

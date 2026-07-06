@@ -1914,7 +1914,7 @@ pub fn fsm_lexc_parse_file(filename: &str, verbose: i32) -> Option<Box<Fsm>> {
     /* mystring = file_to_mem(filename); return fsm_lexc_parse_string(mystring,
     verbose). The C never frees mystring (documented leak); here the buffer is a
     Vec that drops at scope end — an observable no-op. */
-    let mystring = match file_to_mem(filename) {
+    let mystring = match file_to_mem(filename).ok() {
         Some(v) => v,
         /* C has no NULL check and hands NULL to the scanner (undefined
         behavior); file_to_mem already printed the error. DEVIATION from C: a

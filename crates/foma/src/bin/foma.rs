@@ -301,7 +301,7 @@ fn main() {
                 }
                 'f' => {
                     if let Some(a) = getoptarg(&args, &mut idx, &cur, &mut k) {
-                        if let Some(bytes) = file_to_mem(&a) {
+                        if let Ok(bytes) = file_to_mem(&a) {
                             INPUT_IS_FILE.with(|f| f.set(1));
                             my_interfaceparse(&String::from_utf8_lossy(&bytes));
                         }
@@ -314,7 +314,7 @@ fn main() {
                 }
                 'l' => {
                     if let Some(a) = getoptarg(&args, &mut idx, &cur, &mut k) {
-                        if let Some(bytes) = file_to_mem(&a) {
+                        if let Ok(bytes) = file_to_mem(&a) {
                             INPUT_IS_FILE.with(|f| f.set(1));
                             my_interfaceparse(&String::from_utf8_lossy(&bytes));
                         }
@@ -967,7 +967,7 @@ fn dispatch(line: &str) -> bool {
     // source <file>
     if pfx(w0, "source", 3) && ws.len() >= 2 {
         let file = arg_after(t, 1);
-        match file_to_mem(&file) {
+        match file_to_mem(&file).ok() {
             Some(bytes) => {
                 println!("Opening file '{}'.", file);
                 INPUT_IS_FILE.with(|f| f.set(1));

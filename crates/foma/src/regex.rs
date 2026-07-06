@@ -325,7 +325,7 @@ fn build_read_file(
 ) -> Option<Box<Fsm>> {
     match kind {
         /* regex.l @"…"/@bin"…": fsm_read_binary_file */
-        ReadKind::Binary => match fsm_read_binary_file(path) {
+        ReadKind::Binary => match fsm_read_binary_file(path).ok() {
             Some(n) => Some(n),
             None => {
                 eprintln!("*** Error reading binary file '{}'", path);
@@ -349,7 +349,7 @@ fn build_read_file(
         /* regex.l @re"…": file_to_mem then fsm_parse_regex_string (parse +
         minimize). */
         ReadKind::Regex => {
-            let bytes = match file_to_mem(path) {
+            let bytes = match file_to_mem(path).ok() {
                 Some(b) => b,
                 None => {
                     eprintln!("*** Error reading regex file '{}'", path);
