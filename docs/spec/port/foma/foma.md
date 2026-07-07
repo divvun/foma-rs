@@ -491,16 +491,16 @@
 > [spec:foma:def:foma.iface-print-cmatrix-att-fn]
 > void iface_print_cmatrix_att(char *filename)
 
-> [spec:foma:sem:foma.iface-print-cmatrix-att-fn]
+> [spec:foma:sem:foma.iface-print-cmatrix-att-fn+1]
 > Implemented in foma/iface.c. Requires >= 1 network on the stack. If the top FSM has no
 > medlookup handle or its medlookup->confusion_matrix is NULL, prints "No confusion matrix
 > defined.\n" and stops.
 > Otherwise: filename == NULL selects stdout; else fopen(filename, "w") followed by printing
-> "Writing confusion matrix to file '%s'.\n". The fopen result is NOT checked for NULL
-> (latent bug: an unwritable path passes a NULL FILE* to the printer and crashes).
-> Calls cmatrix_print_att(topfsm, outfile), emitting the confusion matrix as AT&T-format
-> transducer lines. The opened file is never fclosed (latent leak; output may stay unflushed
-> until process exit).
+> "Writing confusion matrix to file '%s'.\n". The C source did not check the fopen result
+> (latent bug: an unwritable path passed a NULL FILE* to the printer and crashed); instead, on
+> open failure report the error ("<name>: <strerror>\n" via perror) and return without writing.
+> On success calls cmatrix_print_att(topfsm, outfile), emitting the confusion matrix as AT&T-format
+> transducer lines; the file is closed on drop.
 
 > [spec:foma:def:foma.iface-print-cmatrix-fn]
 > void iface_print_cmatrix(void)

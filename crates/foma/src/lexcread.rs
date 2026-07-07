@@ -1058,17 +1058,23 @@ fn lexc_string_to_tokens(lx: &mut LexcCompiler, string: &[u8], intarr: &mut Vec<
 }
 
 // [spec:foma:def:lexcread.mystrncpy-fn]
-// [spec:foma:sem:lexcread.mystrncpy-fn]
+// [spec:foma:sem:lexcread.mystrncpy-fn+1]
 fn mystrncpy(dest: &mut [u8], src: &[u8], len: i32) {
-    let mut i = 0i32;
-    while i < len {
-        dest[i as usize] = src[i as usize];
-        if src[i as usize] == 0 {
+    let len = len.max(0) as usize;
+    let mut i = 0usize;
+    // Copy up to len bytes, stopping at NUL — but never read past src or write
+    // past dest. A truncated multi-byte UTF-8 tail at end-of-input can make len
+    // (skip+1) exceed the bytes actually available; C read past the end.
+    while i < len && i < src.len() && i < dest.len() {
+        dest[i] = src[i];
+        if src[i] == 0 {
             return;
         }
         i += 1;
     }
-    dest[i as usize] = 0;
+    if i < dest.len() {
+        dest[i] = 0;
+    }
 }
 
 /* Add MC to front of chain */
@@ -2292,7 +2298,9 @@ mod tests {
     }
 
     // Always NUL-terminates; stops early on a copied NUL; writes len+1 bytes.
-    // [spec:foma:sem:lexcread.mystrncpy-fn/test]
+    // A len longer than src (a truncated multi-byte UTF-8 tail) or reaching the
+    // end of dest must clamp to the buffer instead of reading/writing past it.
+    // [spec:foma:sem:lexcread.mystrncpy-fn+1/test]
     #[test]
     fn mystrncpy_terminates() {
         let mut dst = [0xAAu8; 8];
@@ -2301,6 +2309,16 @@ mod tests {
         let mut dst2 = [0xAAu8; 8];
         mystrncpy(&mut dst2, b"hi\0zz", 5);
         assert_eq!(&dst2[..3], b"hi\0");
+        // len exceeds src (truncated 2-byte sequence, only 1 byte available):
+        // copy what exists and NUL-terminate, no out-of-bounds read.
+        let mut dst3 = [0xAAu8; 8];
+        mystrncpy(&mut dst3, &[0xC3], 2);
+        assert_eq!(&dst3[..2], &[0xC3, 0]);
+        // len reaches the end of dest: terminate only where there is room, no
+        // out-of-bounds write.
+        let mut dst4 = [0xAAu8; 2];
+        mystrncpy(&mut dst4, b"xy", 2);
+        assert_eq!(&dst4[..2], b"xy");
     }
 
     // lexc_trim: strip trailing ;/=/space/tab, then leading space/tab/nl;

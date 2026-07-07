@@ -1055,9 +1055,9 @@ pub fn iface_print_net(netname: Option<&str>, filename: Option<&str>) {
 }
 
 // [spec:foma:def:iface.iface-print-cmatrix-att-fn]
-// [spec:foma:sem:iface.iface-print-cmatrix-att-fn]
+// [spec:foma:sem:iface.iface-print-cmatrix-att-fn+1]
 // [spec:foma:def:foma.iface-print-cmatrix-att-fn]
-// [spec:foma:sem:foma.iface-print-cmatrix-att-fn]
+// [spec:foma:sem:foma.iface-print-cmatrix-att-fn+1]
 pub fn iface_print_cmatrix_att(filename: Option<&str>) {
     if iface_stack_check(1) != 0 {
         let top = stack_find_top().unwrap();
@@ -1076,11 +1076,18 @@ pub fn iface_print_cmatrix_att(filename: Option<&str>) {
                     // C: outfile = fopen(name,"w"); message; result NOT NULL-checked.
                     let res = File::create(name);
                     print!("Writing confusion matrix to file '{}'.\n", name);
-                    // DEVIATION from C (unchecked fopen → NULL deref crash on
-                    // failure; expect() panics at the nearest safe point instead).
-                    let mut file = res.expect("Error opening output file");
-                    stack_entry_fsm(top, |f| cmatrix_print_att(f, &mut file));
-                    // C never fclose's the file (latent leak); Rust closes on drop.
+                    // C's unchecked fopen NULL-derefs on failure; report the error
+                    // and return instead of crashing, like the other file commands.
+                    match res {
+                        Ok(mut file) => {
+                            stack_entry_fsm(top, |f| cmatrix_print_att(f, &mut file));
+                            // C never fclose's the file (latent leak); Rust closes on drop.
+                        }
+                        Err(_) => {
+                            eprint!("{}: ", name);
+                            perror("Error opening output file.");
+                        }
+                    }
                 }
             }
         }

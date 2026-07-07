@@ -650,8 +650,8 @@ fn print_net_named_and_top_paths() {
 // integration tests.
 // [spec:foma:sem:iface.iface-print-cmatrix-fn/test]
 // [spec:foma:sem:foma.iface-print-cmatrix-fn/test]
-// [spec:foma:sem:iface.iface-print-cmatrix-att-fn/test]
-// [spec:foma:sem:foma.iface-print-cmatrix-att-fn/test]
+// [spec:foma:sem:iface.iface-print-cmatrix-att-fn+1/test]
+// [spec:foma:sem:foma.iface-print-cmatrix-att-fn+1/test]
 #[test]
 fn print_cmatrix_reports_missing_matrix() {
     stack_init();
@@ -662,6 +662,21 @@ fn print_cmatrix_reports_missing_matrix() {
     iface_print_cmatrix();
     iface_print_cmatrix_att(None);
     assert_eq!(stack_size(), 1); // net not consumed
+}
+
+// export cmatrix to an unwritable path: with a confusion matrix present, the
+// fopen failure is reported and the command returns without crashing (C's
+// unchecked fopen NULL-derefs). Net not consumed.
+// [spec:foma:sem:iface.iface-print-cmatrix-att-fn+1/test]
+// [spec:foma:sem:foma.iface-print-cmatrix-att-fn+1/test]
+#[test]
+fn print_cmatrix_att_unwritable_path_does_not_crash() {
+    stack_init();
+    let mut net = fsm_parse_regex("a b", None, None).unwrap();
+    crate::spelling::cmatrix_init(&mut net); // attach a confusion matrix
+    stack_add(net);
+    iface_print_cmatrix_att(Some("/foma_no_such_dir_xyz123/cm.att"));
+    assert_eq!(stack_size(), 1); // net not consumed, no panic
 }
 
 // print defined: g_defines None prints "No defined symbols."; a populated
@@ -1629,7 +1644,7 @@ fn print_net_static_writes_dump() {
 }
 
 // print_dot (static): writes a Graphviz digraph and returns 1.
-// [spec:foma:sem:iface.print-dot-fn/test]
+// [spec:foma:sem:iface.print-dot-fn+1/test]
 #[test]
 fn print_dot_static_writes_digraph() {
     let mut net = fsm_parse_regex("a b", None, None).unwrap();
@@ -1644,4 +1659,11 @@ fn print_dot_static_writes_digraph() {
         &s[..s.len().min(20)]
     );
     assert!(s.trim_end().ends_with("}"));
+    // Unwritable path (a file under a non-existent directory): report the error
+    // and return 1 instead of crashing.
+    let mut net = fsm_parse_regex("a b", None, None).unwrap();
+    assert_eq!(
+        print_dot(&mut net, Some("/foma_no_such_dir_xyz123/out.dot")),
+        1
+    );
 }

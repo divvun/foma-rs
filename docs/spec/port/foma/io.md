@@ -189,10 +189,14 @@
 > [spec:foma:def:io.fsm-read-prolog-fn]
 > struct fsm *fsm_read_prolog (char *filename)
 
-> [spec:foma:sem:io.fsm-read-prolog-fn]
+> [spec:foma:sem:io.fsm-read-prolog-fn+1]
 > Parses a prolog-format network from `filename`; returns NULL if fopen fails or if no
 > "network(" clause was seen. Reads lines of up to 1023 chars with fgets and recognizes
 > only lines that begin exactly with "network(", "final(", "symbol(", or "arc(".
+> The C source parsed each recognized line with unchecked strstr/strchr lookups (a missing
+> delimiter NULL-derefs; a "final("/"symbol("/"arc(" fact before any "network(" clause
+> dereferences a NULL handle). On any missing delimiter or absent net handle, print
+> "File format error in prolog file.\n" and return NULL instead of crashing.
 > network(: if one was already seen, prints "WARNING: prolog file contains multiple nets.
 > Only returning the first one.\n" (via perror) and stops reading; otherwise extracts the
 > name between "network(" and ")." and calls fsm_construct_init(name).
@@ -342,7 +346,7 @@
 > [spec:foma:def:io.io-net-read-fn]
 > struct fsm *io_net_read(struct io_buf_handle *iobh, char **net_name)
 
-> [spec:foma:sem:io.io-net-read-fn+2]
+> [spec:foma:sem:io.io-net-read-fn+3]
 > Parses one network in the foma text format from the handle's in-memory buffer (format
 > as written by `[spec:foma:sem:io.foma-net-print-fn]`). All lines are read with
 > `[spec:foma:sem:io.io-gets-fn]` into a stack buffer of READ_BUF_SIZE (4096) bytes.
@@ -366,7 +370,9 @@
 > an empty line / end of buffer first prints "File format error at sigma definition!\n",
 > destroys the net, returns NULL.
 > 4. Sigma lines are read until a line starting with '#': each is "<number> <string>",
-> split at the first space; an empty remainder means the symbol is a literal newline
+> split at the first space; a line with no space is a format error ("File format error in
+> sigma section!", net destroyed, NULL returned) rather than the C source's strstr NULL-deref.
+> An empty remainder means the symbol is a literal newline
 > "\n" (how a newline symbol survives the line-oriented format); each calls
 > sigma_add_number(net->sigma, string, number). Truly empty lines are skipped, but the read
 > cursor is checked for progress first: at end-of-buffer io_gets yields empty lines without

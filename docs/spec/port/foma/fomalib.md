@@ -744,7 +744,7 @@
 > [spec:foma:def:fomalib.fsm-coaccessible-fn]
 > fsm *fsm_coaccessible(struct fsm *net)
 
-> [spec:foma:sem:fomalib.fsm-coaccessible-fn+1]
+> [spec:foma:sem:fomalib.fsm-coaccessible-fn+2]
 > Prunes every state from which no final state is reachable; works in place on net->states and
 > returns the same net. Steps:
 > 1. Build an inverse-transition table: for each line with source s, target t, t != -1 and t != s,
@@ -753,10 +753,13 @@
 > 2. Mark coaccessible states: push each final state once onto the int stack, marking it (markcount
 > counts marks); then repeatedly pop a state and mark/push every unmarked state in its inverse list.
 > If markcount reaches statecount, the net is already pruned: clear the stack and skip step 3.
-> 3. Otherwise, if the start state (0) is itself not coaccessible then no path reaches a final, so
-> L = ∅: replace the state array with fsm_empty() (one non-final start state), destroy sigma and
-> replace it with a fresh empty sigma, zero linecount/arccount/statecount, set is_pruned, and
-> return. This subsumes the markcount == 0 (no finals) case, whose start is also not coaccessible.
+> 3. Otherwise, if the incoming coacc array is empty (statecount 0 — an already-empty machine) or the
+> start state (0) is itself not coaccessible, then no path reaches a final, so L = ∅: replace the
+> state array with fsm_empty() and produce the canonical empty machine in the well-formed
+> fsm_empty_set shape (one non-final start state, statecount 1, linecount 2, arccount 0), destroy
+> sigma and replace it with a fresh empty sigma, set is_pruned, and return. The empty-coacc guard
+> makes the function idempotent (re-pruning an already-empty machine returns here instead of
+> indexing coacc[0] out of bounds). This subsumes the markcount == 0 (no finals) case, whose start is also not coaccessible.
 > The C source instead set mapping[0] = 0 unconditionally and renumbered the surviving (orphaned)
 > coaccessible component from 1, producing a net with states but no start state; a disconnected
 > component can never make L non-empty when the start is pruned, so the empty machine is correct.
@@ -2083,12 +2086,15 @@
 > [spec:foma:def:fomalib.fsm-read-prolog-fn]
 > fsm *fsm_read_prolog(char *filename)
 
-> [spec:foma:sem:fomalib.fsm-read-prolog-fn]
+> [spec:foma:sem:fomalib.fsm-read-prolog-fn+1]
 > Reads a network from a prolog-fact text file (the format written by foma's prolog writer).
 > Returns NULL if the file can't be opened or contains no "network(" line. Lines are read
 > into a 1024-byte buffer (fgets, so longer lines are silently split) and dispatched by
 > prefix, parsed by naive substring scanning (no unescaping of \" inside quotes; a symbol
-> containing "). breaks the parse): "network(NAME)." starts the construction (a second
+> containing "). breaks the parse). The C source's substring lookups were unchecked (a missing
+> delimiter, or a fact before the first "network(" clause, NULL-derefs); on any missing
+> delimiter or absent net handle print "File format error in prolog file.\n" and return NULL
+> instead of crashing. "network(NAME)." starts the construction (a second
 > network( line prints a warning and stops reading — only the first net is returned);
 > "final(N, S)." marks state atoi of the text after the first space final; "symbol(N, \"S\")."
 > adds symbol S to the sigma if not present ("%0" is unescaped to "0") — this preserves

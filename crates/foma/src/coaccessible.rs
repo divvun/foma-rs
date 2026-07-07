@@ -31,9 +31,9 @@ pub struct Invtable {
 }
 
 // [spec:foma:def:coaccessible.fsm-coaccessible-fn]
-// [spec:foma:sem:coaccessible.fsm-coaccessible-fn+1]
+// [spec:foma:sem:coaccessible.fsm-coaccessible-fn+2]
 // [spec:foma:def:fomalib.fsm-coaccessible-fn]
-// [spec:foma:sem:fomalib.fsm-coaccessible-fn+1]
+// [spec:foma:sem:fomalib.fsm-coaccessible-fn+2]
 pub fn fsm_coaccessible(net: Box<Fsm>) -> Box<Fsm> {
     let mut net = net;
 
@@ -117,22 +117,27 @@ pub fn fsm_coaccessible(net: Box<Fsm>) -> Box<Fsm> {
     }
 
     if terminate == 0 {
-        // [spec:foma:sem:coaccessible.fsm-coaccessible-fn+1] if the start state
-        // (0) is itself not coaccessible, no path reaches a final, so L = ∅.
-        // Collapse to the canonical empty machine (single non-final start, fresh
-        // sigma, zeroed counts) — the same shape the no-final-states case yields —
-        // rather than C's renumbering of the orphaned coaccessible component into
-        // a net with no start state (the unconditional mapping[0] = 0 quirk).
-        // This subsumes the markcount == 0 (no finals) case, since that also has
-        // coacc[0] == 0.
-        if coacc[0] == 0 {
+        // [spec:foma:sem:coaccessible.fsm-coaccessible-fn+2] if the start state
+        // (0) is itself not coaccessible (or the machine is already empty), no
+        // path from the start reaches a final, so L = ∅. Return the canonical
+        // empty machine in the same well-formed shape fsm_empty_set produces: a
+        // single non-final start state (statecount 1, linecount 2) over a fresh
+        // empty sigma. The coacc.is_empty() guard makes the function idempotent
+        // — re-pruning an already-empty machine (which enters with statecount 0
+        // and so an empty coacc) returns here instead of indexing coacc[0] out
+        // of bounds. This subsumes the no-final-states case (markcount == 0 ⟹
+        // coacc[0] == 0). The C source instead set mapping[0] = 0 unconditionally
+        // ("state 0 always exists"), renumbering any orphaned coaccessible
+        // component into a startless net; a pruned start makes L empty regardless
+        // of a disconnected component, so the empty machine is the correct result.
+        if coacc.is_empty() || coacc[0] == 0 {
             net.states = fsm_empty();
             fsm_sigma_destroy(net.sigma.take());
             net.sigma = Some(sigma_create());
-            net.statecount = 0;
+            net.statecount = 1;
             net.finalcount = 0;
             net.arccount = 0;
-            net.linecount = 0;
+            net.linecount = 2;
             net.pathcount = 0;
             net.is_pruned = YES;
             return net;
@@ -297,31 +302,36 @@ mod tests {
         assert_eq!(net.is_pruned, YES);
     }
 
-    // [spec:foma:sem:coaccessible.fsm-coaccessible-fn+1/test]
-    // [spec:foma:sem:fomalib.fsm-coaccessible-fn+1/test]
+    // [spec:foma:sem:coaccessible.fsm-coaccessible-fn+2/test]
+    // [spec:foma:sem:fomalib.fsm-coaccessible-fn+2/test]
     #[test]
     fn coaccessible_empty_language_when_start_not_coaccessible() {
         /* State 0 (the start) is NOT coaccessible (its only arc reaches dead
         end 3); the 1 -b-> 2 (final) component is disconnected from the start.
         Since no path from the start reaches a final, L = ∅, so the result is
-        the canonical empty automaton (single non-final start state) — not a
-        renumbering of the orphaned component into a startless net (the old
-        unconditional mapping[0] = 0 quirk). */
+        the canonical empty automaton in the well-formed fsm_empty_set shape: a
+        single non-final start state, statecount 1, linecount 2, fresh sigma —
+        not a renumbering of the orphaned component into a startless net. */
         let mut h = fsm_construct_init("c");
         fsm_construct_add_arc(&mut h, 0, 3, "a", "a");
         fsm_construct_add_arc(&mut h, 1, 2, "b", "b");
         fsm_construct_set_final(&mut h, 2);
         fsm_construct_set_initial(&mut h, 0);
         let net = fsm_coaccessible(fsm_construct_done(h));
-        // Canonical empty machine: single non-final start, fresh sigma, zeroed
-        // counts — identical to the no-final-states case.
         assert_eq!(lines(&net), vec![(0, -1, -1, -1, 0, 1)]);
-        assert_eq!(net.statecount, 0);
-        assert_eq!(net.linecount, 0);
+        assert_eq!(net.statecount, 1);
+        assert_eq!(net.linecount, 2);
         assert_eq!(net.arccount, 0);
         let sigma = net.sigma.as_deref().unwrap();
         assert_eq!(sigma.number, -1, "fresh empty sigma");
         assert!(sigma.symbol.is_none());
+        assert_eq!(net.is_pruned, YES);
+        // Idempotent: re-pruning the empty machine (statecount 1 ⟹ non-empty
+        // coacc) returns the same shape instead of indexing coacc out of bounds.
+        let net = fsm_coaccessible(net);
+        assert_eq!(lines(&net), vec![(0, -1, -1, -1, 0, 1)]);
+        assert_eq!(net.statecount, 1);
+        assert_eq!(net.linecount, 2);
         assert_eq!(net.is_pruned, YES);
     }
 
@@ -378,12 +388,13 @@ mod tests {
         assert_eq!(net.is_pruned, YES);
     }
 
-    // [spec:foma:sem:coaccessible.fsm-coaccessible-fn/test]
-    // [spec:foma:sem:fomalib.fsm-coaccessible-fn/test]
+    // [spec:foma:sem:coaccessible.fsm-coaccessible-fn+2/test]
+    // [spec:foma:sem:fomalib.fsm-coaccessible-fn+2/test]
     #[test]
     fn coaccessible_no_finals_yields_empty_language_shape() {
         /* no final state at all: markcount == 0 -> canonical empty machine
-        with a fresh sigma and zeroed counts */
+        in the well-formed fsm_empty_set shape (statecount 1, linecount 2,
+        fresh sigma) */
         let mut net = fsm_create("");
         net.states = vec![
             FsmState {
@@ -406,8 +417,8 @@ mod tests {
         /* fsm_empty(): one non-final start state, no arcs */
         assert_eq!(lines(&net), vec![(0, -1, -1, -1, 0, 1)]);
         assert_eq!(net.states[1].state_no, -1);
-        assert_eq!(net.statecount, 0);
-        assert_eq!(net.linecount, 0);
+        assert_eq!(net.statecount, 1);
+        assert_eq!(net.linecount, 2);
         assert_eq!(net.arccount, 0);
         let sigma = net.sigma.as_deref().unwrap();
         assert_eq!(sigma.number, -1, "fresh empty sigma");

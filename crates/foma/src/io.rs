@@ -403,14 +403,27 @@ pub fn read_att(filename: &str) -> Option<Box<Fsm>> {
 }
 
 // [spec:foma:def:io.fsm-read-prolog-fn]
-// [spec:foma:sem:io.fsm-read-prolog-fn]
+// [spec:foma:sem:io.fsm-read-prolog-fn+1]
 // [spec:foma:def:fomalib.fsm-read-prolog-fn]
-// [spec:foma:sem:fomalib.fsm-read-prolog-fn]
+// [spec:foma:sem:fomalib.fsm-read-prolog-fn+1]
 pub fn fsm_read_prolog(filename: &str) -> Option<Box<Fsm>> {
-    /* Many strstr lookups below are unchecked in C (NULL-deref crash on a
-    malformed line); reproduced as .unwrap() (panic). The fixed C buffers
-    temp[1024]/in[128]/out[128] can overflow on long fields — here the extracted
-    Strings grow (DEVIATION, memory-safe). */
+    /* The C source's strstr/strchr lookups below were unchecked (NULL-deref
+    crash on a malformed line, or an out-of-order fact before the network
+    declaration). On any missing delimiter or absent net handle, report a format
+    error and return None instead of crashing. The fixed C buffers temp[1024]/
+    in[128]/out[128] can overflow on long fields — here the extracted Strings
+    grow (memory-safe). */
+    macro_rules! field {
+        ($e:expr) => {
+            match $e {
+                Some(v) => v,
+                None => {
+                    print!("File format error in prolog file.\n");
+                    return None;
+                }
+            }
+        };
+    }
     let mut has_net = 0i32;
     let prolog_file = match File::open(filename) {
         Ok(f) => f,
@@ -437,25 +450,25 @@ pub fn fsm_read_prolog(filename: &str) -> Option<Box<Fsm>> {
             } else {
                 has_net = 1;
             }
-            let temp_ptr = buf.find("network(").unwrap() + 8;
-            let temp_ptr2 = buf.find(").").unwrap();
+            let temp_ptr = field!(buf.find("network(")) + 8;
+            let temp_ptr2 = field!(buf.find(")."));
             let temp = &buf[temp_ptr..temp_ptr2];
             outh = Some(fsm_construct_init(temp));
         }
         if buf.starts_with("final(") {
-            let temp_ptr = buf.find(' ').unwrap() + 1;
-            let temp_ptr2 = buf[temp_ptr..].find(").").unwrap() + temp_ptr;
+            let temp_ptr = field!(buf.find(' ')) + 1;
+            let temp_ptr2 = field!(buf[temp_ptr..].find(").")) + temp_ptr;
             let temp = &buf[temp_ptr..temp_ptr2];
-            fsm_construct_set_final(outh.as_deref_mut().unwrap(), atoi(temp));
+            fsm_construct_set_final(field!(outh.as_deref_mut()), atoi(temp));
         }
         if buf.starts_with("symbol(") {
-            let temp_ptr = buf.find(", \"").unwrap() + 3;
-            let temp_ptr2 = buf[temp_ptr..].find("\").").unwrap() + temp_ptr;
+            let temp_ptr = field!(buf.find(", \"")) + 3;
+            let temp_ptr2 = field!(buf[temp_ptr..].find("\").")) + temp_ptr;
             let mut temp = buf[temp_ptr..temp_ptr2].to_string();
             if temp == "%0" {
                 temp = "0".to_string();
             }
-            let oh = outh.as_deref_mut().unwrap();
+            let oh = field!(outh.as_deref_mut());
             if fsm_construct_check_symbol(oh, &temp) == -1 {
                 fsm_construct_add_symbol(oh, &temp);
             }
@@ -472,26 +485,26 @@ pub fn fsm_read_prolog(filename: &str) -> Option<Box<Fsm>> {
             };
 
             /* Get source */
-            let mut temp_ptr = buf.find(' ').unwrap() + 1;
-            let mut temp_ptr2 = buf[temp_ptr..].find(',').unwrap() + temp_ptr;
+            let mut temp_ptr = field!(buf.find(' ')) + 1;
+            let mut temp_ptr2 = field!(buf[temp_ptr..].find(',')) + temp_ptr;
             let source = atoi(&buf[temp_ptr..temp_ptr2]);
 
             /* Get target */
-            temp_ptr = buf[temp_ptr2..].find(' ').unwrap() + temp_ptr2 + 1;
-            temp_ptr2 = buf[temp_ptr..].find(',').unwrap() + temp_ptr;
+            temp_ptr = field!(buf[temp_ptr2..].find(' ')) + temp_ptr2 + 1;
+            temp_ptr2 = field!(buf[temp_ptr..].find(',')) + temp_ptr;
             let target = atoi(&buf[temp_ptr..temp_ptr2]);
 
-            temp_ptr = buf[temp_ptr2..].find('"').unwrap() + temp_ptr2 + 1;
+            temp_ptr = field!(buf[temp_ptr2..].find('"')) + temp_ptr2 + 1;
             if arity == 2 {
-                temp_ptr2 = buf[temp_ptr..].find("\":").unwrap() + temp_ptr;
+                temp_ptr2 = field!(buf[temp_ptr..].find("\":")) + temp_ptr;
             } else {
-                temp_ptr2 = buf[temp_ptr..].find("\").").unwrap() + temp_ptr;
+                temp_ptr2 = field!(buf[temp_ptr..].find("\").")) + temp_ptr;
             }
             in_ = buf[temp_ptr..temp_ptr2].to_string();
 
             if arity == 2 {
-                temp_ptr = buf[temp_ptr2..].find(":\"").unwrap() + temp_ptr2 + 2;
-                temp_ptr2 = buf[temp_ptr..].find("\").").unwrap() + temp_ptr;
+                temp_ptr = field!(buf[temp_ptr2..].find(":\"")) + temp_ptr2 + 2;
+                temp_ptr2 = field!(buf[temp_ptr..].find("\").")) + temp_ptr;
                 out_ = buf[temp_ptr..temp_ptr2].to_string();
             }
             if arity == 1 && in_ == "?" {
@@ -522,7 +535,7 @@ pub fn fsm_read_prolog(filename: &str) -> Option<Box<Fsm>> {
                 out_ = "?".to_string();
             }
 
-            let oh = outh.as_deref_mut().unwrap();
+            let oh = field!(outh.as_deref_mut());
             if arity == 1 {
                 fsm_construct_add_arc(oh, source, target, &in_, &in_);
             } else {
@@ -989,7 +1002,7 @@ pub(crate) fn explode_line(buf: &str, values: &mut Vec<i32>) -> i32 {
 /* / ##states## / ...TRANSITIONS... / ##end## (see foma/io.c for the full note) */
 
 // [spec:foma:def:io.io-net-read-fn]
-// [spec:foma:sem:io.io-net-read-fn+2]
+// [spec:foma:sem:io.io-net-read-fn+3]
 // C signature: struct fsm *io_net_read(io_buf_handle *iobh, char **net_name).
 // Here the net and its name are returned together; None ↔ NULL return.
 pub fn io_net_read(iobh: &mut IoBufHandle) -> Option<(Box<Fsm>, String)> {
@@ -1064,7 +1077,7 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Option<(Box<Fsm>, String)> {
         if toks.len() > 11 {
             extras = atoi(toks[11]);
         }
-        // [spec:foma:sem:io.io-net-read-fn+2] a missing name field yields an empty
+        // [spec:foma:sem:io.io-net-read-fn+3] a missing name field yields an empty
         // name. C's sscanf left the buffer holding the whole props line, so that
         // line became the net name.
         let name = if toks.len() > 12 {
@@ -1099,7 +1112,7 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Option<(Box<Fsm>, String)> {
             break;
         }
         if buf.is_empty() {
-            // [spec:foma:sem:io.io-net-read-fn+2] a truly empty line is skipped,
+            // [spec:foma:sem:io.io-net-read-fn+3] a truly empty line is skipped,
             // but at end-of-buffer io_gets yields empty lines without advancing
             // the cursor; if no progress was made the file is truncated inside the
             // sigma section, so fail instead of looping forever (C hung here).
@@ -1110,8 +1123,16 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Option<(Box<Fsm>, String)> {
             }
             continue;
         }
-        /* new_symbol = strstr(buf, " ") — a spaceless line NULL-derefs in C */
-        let p = buf.find(' ').unwrap();
+        /* new_symbol = strstr(buf, " ") — a spaceless line NULL-derefs in C;
+        report a format error and bail instead, like the other sigma-section errors. */
+        let p = match buf.find(' ') {
+            Some(p) => p,
+            None => {
+                print!("File format error in sigma section!\n");
+                fsm_destroy(net);
+                return None;
+            }
+        };
         let number_str = &buf[..p];
         let new_symbol = &buf[p + 1..];
         let n = atoi(number_str);
@@ -2152,8 +2173,8 @@ mod tests {
 
     // [spec:foma:sem:io.foma-write-prolog-fn+1/test]
     // [spec:foma:sem:fomalib.foma-write-prolog-fn/test]
-    // [spec:foma:sem:io.fsm-read-prolog-fn/test]
-    // [spec:foma:sem:fomalib.fsm-read-prolog-fn/test]
+    // [spec:foma:sem:io.fsm-read-prolog-fn+1/test]
+    // [spec:foma:sem:fomalib.fsm-read-prolog-fn+1/test]
     #[test]
     fn prolog_round_trip() {
         let mut net = parse("a:b");
@@ -2163,6 +2184,27 @@ mod tests {
         let back = fsm_read_prolog(f.path()).unwrap();
         assert_eq!(drain_down(&back, "a"), vec!["b".to_string()]);
         assert_eq!(drain_up(&back, "b"), vec!["a".to_string()]);
+    }
+
+    // A malformed prolog file returns None instead of crashing (the C source's
+    // unchecked strstr/strchr lookups NULL-deref on a missing delimiter, and a
+    // fact before the first "network(" clause dereferences a NULL handle).
+    // [spec:foma:sem:io.fsm-read-prolog-fn+1/test]
+    // [spec:foma:sem:fomalib.fsm-read-prolog-fn+1/test]
+    #[test]
+    fn prolog_malformed_returns_none_not_panic() {
+        // "network(" line missing the ")." terminator.
+        let f = Scratch::new("prolog_bad_net");
+        std::fs::write(f.path(), "network(bad\n").unwrap();
+        assert!(fsm_read_prolog(f.path()).is_none());
+        // A well-formed arc fact before any "network(" clause: NULL handle.
+        let g = Scratch::new("prolog_bad_order");
+        std::fs::write(g.path(), "arc(0, 0, 1, \"a\":\"b\").\n").unwrap();
+        assert!(fsm_read_prolog(g.path()).is_none());
+        // "final(" line with no space delimiter.
+        let h = Scratch::new("prolog_bad_final");
+        std::fs::write(h.path(), "network(n).\nfinal(0).\n").unwrap();
+        assert!(fsm_read_prolog(h.path()).is_none());
     }
 
     // [spec:foma:sem:io.foma-write-prolog-fn+1/test]
@@ -2405,7 +2447,7 @@ mod tests {
         save_stack_att();
     }
 
-    // [spec:foma:sem:io.io-net-read-fn+2/test]
+    // [spec:foma:sem:io.io-net-read-fn+3/test]
     #[test]
     fn io_net_read_bails_on_truncated_sigma_section() {
         // Serialize a real net to text, then drop everything from "##states##"
@@ -2423,7 +2465,7 @@ mod tests {
         assert!(io_net_read(&mut iobh).is_none());
     }
 
-    // [spec:foma:sem:io.io-net-read-fn+2/test]
+    // [spec:foma:sem:io.io-net-read-fn+3/test]
     #[test]
     fn io_net_read_empty_name_when_field_absent() {
         // A net with an empty name serializes a props line with no name field, so
@@ -2438,5 +2480,25 @@ mod tests {
         iobh.io_buf_ptr = 0;
         let (net2, _name) = io_net_read(&mut iobh).expect("valid net should parse");
         assert_eq!(net2.name, "");
+    }
+
+    // A sigma line with no separating space returns None instead of crashing
+    // (C's strstr(buf, " ") NULL-derefs on a spaceless line).
+    // [spec:foma:sem:io.io-net-read-fn+3/test]
+    #[test]
+    fn io_net_read_bails_on_spaceless_sigma_line() {
+        let net = fsm_parse_regex("a b", None, None).unwrap();
+        let mut text: Vec<u8> = Vec::new();
+        foma_net_print(&net, &mut text);
+        let s = String::from_utf8(text).unwrap();
+        // Delete the separating space from the first sigma entry line ("N sym").
+        let sig_start = s.find("##sigma##\n").expect("sigma header") + "##sigma##\n".len();
+        let line_end = s[sig_start..].find('\n').expect("a sigma line") + sig_start;
+        let bad_line = s[sig_start..line_end].replacen(' ', "", 1);
+        let corrupted = format!("{}{}{}", &s[..sig_start], bad_line, &s[line_end..]);
+        let mut iobh = io_init();
+        iobh.io_buf = Some(corrupted.into_bytes());
+        iobh.io_buf_ptr = 0;
+        assert!(io_net_read(&mut iobh).is_none());
     }
 }

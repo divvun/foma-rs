@@ -224,8 +224,8 @@
 > [spec:foma:def:lexcread.mystrncpy-fn]
 > char *mystrncpy(char *dest, char *src, int len)
 
-> [spec:foma:sem:lexcread.mystrncpy-fn]
-> Copies up to `len` bytes from src to dest; if a NUL byte is copied it returns immediately (dest terminated there). Otherwise writes dest[len] = '\0' — i.e. writes len+1 bytes in total. Unlike strncpy it always NUL-terminates and never pads; returns dest.
+> [spec:foma:sem:lexcread.mystrncpy-fn+1]
+> Copies up to `len` bytes from src to dest; if a NUL byte is copied it returns immediately (dest terminated there). Otherwise writes dest[len] = '\0' — i.e. writes len+1 bytes in total. Unlike strncpy it always NUL-terminates and never pads; returns dest. The copy never reads past src or writes past dest: a truncated multi-byte UTF-8 tail at end-of-input can make len (skip+1) exceed the bytes actually available, and C read past the source buffer; here the loop stops at the shorter of len, src.len(), dest.len() and NUL-terminates in place when there is room.
 
 > [spec:foma:def:lexcread.statelist]
 > struct statelist {

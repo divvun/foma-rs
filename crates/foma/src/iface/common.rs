@@ -266,7 +266,7 @@ pub(crate) fn print_sigma<W: std::io::Write + ?Sized>(sigma: Option<&Sigma>, out
 }
 
 // [spec:foma:def:iface.print-dot-fn]
-// [spec:foma:sem:iface.print-dot-fn]
+// [spec:foma:sem:iface.print-dot-fn+1]
 pub(crate) fn print_dot(net: &mut Fsm, filename: Option<&str>) -> i32 {
     fsm_count(net);
     let mut finals = vec![0i16; net.statecount as usize];
@@ -281,8 +281,16 @@ pub(crate) fn print_dot(net: &mut Fsm, filename: Option<&str>) -> i32 {
     }
     let mut dotfile: Output = match filename {
         // C: `dotfile = fopen(filename,"w");` with NO NULL check (latent crash on
-        // failure). DEVIATION from C: expect() panics at the nearest safe point.
-        Some(name) => Output::File(File::create(name).expect("Error opening dot file")),
+        // failure). Report the error and return instead of crashing, matching the
+        // other file-writing commands (e.g. iface_write_att).
+        Some(name) => match File::create(name) {
+            Ok(f) => Output::File(f),
+            Err(_) => {
+                eprint!("{}: ", name);
+                perror("Error opening dot file.");
+                return 1;
+            }
+        },
         None => Output::Stdout(std::io::stdout()),
     };
     let _ = write!(dotfile, "digraph A {{\nrankdir = LR;\n");

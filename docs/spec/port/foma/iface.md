@@ -403,13 +403,14 @@
 > [spec:foma:def:iface.iface-print-cmatrix-att-fn]
 > void iface_print_cmatrix_att(char *filename)
 
-> [spec:foma:sem:iface.iface-print-cmatrix-att-fn]
+> [spec:foma:sem:iface.iface-print-cmatrix-att-fn+1]
 > "export cmatrix": requires ≥1 net. If top->fsm->medlookup or top->fsm->medlookup->confusion_matrix is
 > NULL, prints "No confusion matrix defined.\n". Otherwise: outfile = stdout when filename is NULL, else
-> fopen(filename, "w") plus message "Writing confusion matrix to file '%s'.\n"; the fopen result is NOT
-> checked for NULL (latent crash bug on open failure — document literal behavior). Calls
-> cmatrix_print_att(top->fsm, outfile). The opened file is never fclose'd (latent leak/flush reliance).
-> Net not consumed.
+> fopen(filename, "w") plus message "Writing confusion matrix to file '%s'.\n". The C source did not
+> check the fopen result (latent NULL-deref crash on open failure); instead, on open failure report the
+> error ("<name>: <strerror>\n" via perror) and return without writing, matching the other file-writing
+> commands. On success calls cmatrix_print_att(top->fsm, outfile); the file is closed on drop. Net not
+> consumed.
 
 > [spec:foma:def:iface.iface-print-cmatrix-fn]
 > void iface_print_cmatrix()
@@ -963,9 +964,11 @@
 > [spec:foma:def:iface.print-dot-fn]
 > static int print_dot(struct fsm *net, char *filename)
 
-> [spec:foma:sem:iface.print-dot-fn]
-> Writes `net` in Graphviz dot format to filename (fopen "w", no error check — NULL filename →
-> stdout). Steps: fsm_count(net); build a finals[] table indexed by state_no. Emit "digraph A {\n"
+> [spec:foma:sem:iface.print-dot-fn+1]
+> Writes `net` in Graphviz dot format to filename (fopen "w"; NULL filename → stdout). The C source
+> did not check the fopen result (latent NULL-deref crash on open failure); instead, on open failure
+> report the error ("<name>: <strerror>\n" via perror) and return 1 without writing, matching the other
+> file-writing commands. Steps: fsm_count(net); build a finals[] table indexed by state_no. Emit "digraph A {\n"
 > "rankdir = LR;\n"; then for each state 0..statecount-1 one line "node
 > [shape=doublecircle,style=filled] %i\n" if final else "node [shape=circle,style=filled] %i\n".
 > Then arcs: allocates a printed[] flag per transition line (calloc(linecount, sizeof(printed)) —

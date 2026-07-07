@@ -770,4 +770,31 @@ children (
             }
         )
     }
+
+    {
+        id wave-6-harden
+        title "Wave 6: harden latent panics → graceful failures (C-faithfulness dropped; +N divergences). fsm_coaccessible re-prune crash, print dot/cmatrix + read prolog + io_net_read + mystrncpy panics on unwritable/malformed input."
+        log (
+            {
+                at 2026-07-07T14:36:21.431635Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Doing (nplan_start)"
+            }
+
+            {
+                at 2026-07-07T14:36:37.791019Z
+                author "brendan@necessary.nu"
+                kind @decision
+                text "Port is complete, so bug-for-bug C faithfulness is no longer a constraint: latent panics kept only to mirror C's crash/NULL-deref behaviour are now real bugs to eliminate. This pass converts six input-reachable panics to graceful failures, each a +N sem bump with a test: (1) fsm_coaccessible +2 — the empty-language result is now the well-formed fsm_empty_set shape (statecount 1, linecount 2) and an empty-coacc guard makes it idempotent, fixing the confirmed `a & b ; prune` crash at coaccessible.rs:128; (2) print_dot +1 and (3) iface_print_cmatrix_att +1 — unwritable output path reports the error and returns instead of crashing the REPL, matching sibling file commands; (4) fsm_read_prolog +1 — malformed lines / facts before the network clause return None instead of NULL-deref; (5) io_net_read +3 — a spaceless sigma line returns a format error instead of NULL-deref; (6) mystrncpy +1 — a truncated multi-byte UTF-8 tail clamps to the buffer instead of reading past it. Left as-is: the 4 dead-prototype panic!s (genuinely uncallable) and the guarded internal-invariant expects in apply/spelling (only reachable via an already-corrupt binary net; silently skipping would mask corruption). 561 tests pass."
+            }
+
+            {
+                at 2026-07-07T14:36:45.091671Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Doing → Done (nplan_complete)"
+            }
+        )
+    }
 )
