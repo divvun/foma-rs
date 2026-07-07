@@ -20,7 +20,7 @@ use crate::types::{
     ApplyMedHandle, Astarnode, Fsm, IDENTITY, MED_DEFAULT_CUTOFF, MED_DEFAULT_LIMIT,
     MED_DEFAULT_MAX_HEAP_SIZE, Medlookup, Sigma,
 };
-use crate::utf8::{utf8skip, utf8strlen};
+use crate::utf8::utf8skip;
 
 /* C #defines local to spelling.c */
 const INITIAL_AGENDA_SIZE: i32 = 256;
@@ -790,7 +790,7 @@ pub fn apply_med(medh: &mut ApplyMedHandle, word: Option<&str>) -> Option<String
             medh.heapcount = 0;
 
             medh.wordlen = wbytes.len() as i32; /* strlen(word) */
-            medh.utf8len = utf8strlen(wbytes);
+            medh.utf8len = w.chars().count() as i32;
             /* free previous intword + malloc utf8len+1 ints */
             medh.intword = vec![0i32; (medh.utf8len + 1) as usize];
 

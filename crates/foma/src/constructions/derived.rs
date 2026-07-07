@@ -42,18 +42,18 @@ pub fn fsm_letter_machine(net: Box<Fsm>) -> Box<Fsm> {
         let mut source = fsm_get_arc_source(&inh);
         let mut target = fsm_get_arc_target(&inh);
 
-        if (innum > IDENTITY && utf8strlen(in_full.as_bytes()) > 1)
-            || (outnum > IDENTITY && utf8strlen(out_full.as_bytes()) > 1)
+        if (innum > IDENTITY && in_full.chars().count() > 1)
+            || (outnum > IDENTITY && out_full.chars().count() > 1)
         {
             let mut inlen = if innum <= IDENTITY {
                 1
             } else {
-                utf8strlen(in_full.as_bytes())
+                in_full.chars().count() as i32
             };
             let mut outlen = if outnum <= IDENTITY {
                 1
             } else {
-                utf8strlen(out_full.as_bytes())
+                out_full.chars().count() as i32
             };
             let steps = if inlen > outlen { inlen } else { outlen };
 
@@ -1285,7 +1285,7 @@ pub fn fsm_compact(net: &mut Fsm) {
         if s.number == -1 {
             break;
         }
-        if utf8strlen(s.symbol.as_deref().unwrap_or("").as_bytes()) > 1 {
+        if s.symbol.as_deref().unwrap_or("").chars().count() > 1 {
             potential[s.number as usize] = false;
         }
         sig = s.next.as_deref();

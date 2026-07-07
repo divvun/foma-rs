@@ -89,7 +89,7 @@
 > int utf8strlen(char *str)
 
 > [spec:foma:sem:utf8.utf8strlen-fn+1]
-> Counts UTF-8 characters: with len=strlen(str), walk i from 0 while str[i] != '\0' and i < len, advancing i by utf8skip(str+i)+1 each step and incrementing the count. Returns the count. On an invalid lead byte utf8skip returns -1, so the advance would be 0 (the C looped forever); the port forces the step to at least 1, counting the malformed byte as one character (lossy) so counting terminates. Truncated multibyte sequences are still over-counted as one character, bounded by the i<len guard.
+> Not ported: this is `str::chars().count()`. Every call site held a `&str` (or a `String`) and passed its `.as_bytes()` only to hand them here, so the byte-scan reimplementation was pointless — callers now count characters directly with `str::chars().count()` (cast to i32 only where a value flows into an existing i32). The C behaviour was: with len=strlen(str), walk i from 0 while str[i] != '\0' and i < len, advancing by utf8skip(str+i)+1 and incrementing a count; an invalid lead byte (utf8skip == -1) advanced 0 and looped forever, worked around by forcing a step of at least 1.
 
 > [spec:foma:def:utf8.xstrrev-fn]
 > char *xstrrev(char *str)

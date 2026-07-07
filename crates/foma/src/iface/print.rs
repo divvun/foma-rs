@@ -923,20 +923,15 @@ static GLOBAL_HELP: &[GlobalHelp] = &[
 // [spec:foma:def:foma.iface-help-fn]
 // [spec:foma:sem:foma.iface-help-fn]
 pub fn iface_help() {
-    let mut maxlen: i32 = 0;
+    let maxlen = GLOBAL_HELP
+        .iter()
+        .map(|gh| gh.name.chars().count())
+        .max()
+        .unwrap_or(0);
     for gh in GLOBAL_HELP {
-        let l = utf8strlen(gh.name.as_bytes());
-        maxlen = if maxlen < l { l } else { maxlen };
-    }
-    for gh in GLOBAL_HELP {
-        print!("{}", gh.name);
-        // padding loop runs from maxlen-len down to 0 inclusive → always >= 1 space
-        let mut i = maxlen - utf8strlen(gh.name.as_bytes());
-        while i >= 0 {
-            print!("{}", " ");
-            i -= 1;
-        }
-        print!("{}\n", gh.help);
+        // pad to maxlen + 1 columns so there is always at least one space
+        let pad = " ".repeat(maxlen + 1 - gh.name.chars().count());
+        print!("{}{}{}\n", gh.name, pad, gh.help);
     }
 }
 
@@ -945,24 +940,12 @@ pub fn iface_help() {
 // [spec:foma:def:foma.iface-apropos-fn]
 // [spec:foma:sem:foma.iface-apropos-fn]
 pub fn iface_apropos(s: &str) {
-    let mut maxlen: i32 = 0;
-    for gh in GLOBAL_HELP {
-        // strstr(x, s) != NULL ↔ x contains s as a byte substring
-        if gh.name.contains(s) || gh.help.contains(s) {
-            let l = utf8strlen(gh.name.as_bytes());
-            maxlen = if maxlen < l { l } else { maxlen };
-        }
-    }
-    for gh in GLOBAL_HELP {
-        if gh.name.contains(s) || gh.help.contains(s) {
-            print!("{}", gh.name);
-            let mut i = maxlen - utf8strlen(gh.name.as_bytes());
-            while i >= 0 {
-                print!("{}", " ");
-                i -= 1;
-            }
-            print!("{}\n", gh.help);
-        }
+    // strstr(x, s) != NULL ↔ x contains s as a substring
+    let matches = || GLOBAL_HELP.iter().filter(|gh| gh.name.contains(s) || gh.help.contains(s));
+    let maxlen = matches().map(|gh| gh.name.chars().count()).max().unwrap_or(0);
+    for gh in matches() {
+        let pad = " ".repeat(maxlen + 1 - gh.name.chars().count());
+        print!("{}{}{}\n", gh.name, pad, gh.help);
     }
 }
 

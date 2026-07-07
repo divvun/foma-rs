@@ -834,6 +834,14 @@ children (
                 id w7-utf8-io
                 title "Tier 2: utf8.rs std swaps (utf8strlen/ishexstr/streqrep/strip_newline/dequote_string); rewrite fsm_read_prolog parser (kill field! wall); FSM_NAME_LEN char-boundary truncation (fix codepoint splitting)."
                 priority 1
+                log (
+                    {
+                        at 2026-07-07T15:17:26.013793Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan_start)"
+                    }
+                )
             }
 
             {

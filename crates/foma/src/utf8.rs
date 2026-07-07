@@ -216,27 +216,6 @@ pub fn ishexstr(str: &[u8]) -> i32 {
     1
 }
 
-// [spec:foma:def:utf8.utf8strlen-fn]
-// [spec:foma:sem:utf8.utf8strlen-fn+1]
-// [spec:foma:def:fomalibconf.utf8strlen-fn]
-// [spec:foma:sem:fomalibconf.utf8strlen-fn+1]
-// Wave 4 fix: on a malformed lead byte utf8skip returns -1, so the C advance
-// was 0 and the loop never terminated. Here the step is forced to at least
-// one byte (lossy — an invalid byte counts as one character), so counting
-// terminates on any input.
-pub fn utf8strlen(str: &[u8]) -> i32 {
-    let len: i32 = str.len() as i32;
-    let mut i: i32 = 0;
-    let mut count: i32 = 0;
-    /* Stop at an interior NUL (C uses strlen) or the end of the slice. */
-    while i < len && str[i as usize] != 0 {
-        let step = utf8skip(&str[i as usize..]) + 1;
-        i += step.max(1);
-        count += 1;
-    }
-    count
-}
-
 /* Checks if the next character in the string is a combining character     */
 /* according to Unicode 7.0                                                */
 /* i.e. codepoints 0300-036F  Combining Diacritical Marks                  */
@@ -453,26 +432,6 @@ mod tests {
         assert_eq!(utf8iscombining(&[0xef, 0xb8, 0xae]), 0);
         // three-byte lead but s2 == 0 (NUL) → 0
         assert_eq!(utf8iscombining(&[0xe1, 0xaa]), 0);
-    }
-
-    // utf8strlen: counts UTF-8 chars. Wave 4 fix — a malformed lead byte
-    // (utf8skip == -1) no longer hangs; it advances one byte (lossy) and is
-    // counted as one character, so counting terminates on any input.
-    // [spec:foma:sem:utf8.utf8strlen-fn+1/test]
-    // [spec:foma:sem:fomalibconf.utf8strlen-fn+1/test]
-    #[test]
-    fn test_utf8strlen() {
-        assert_eq!(utf8strlen(b""), 0);
-        assert_eq!(utf8strlen(b"abc"), 3);
-        assert_eq!(utf8strlen(&[0xc3, 0xa9]), 1); // é (2-byte)
-        assert_eq!(utf8strlen(&[0xe2, 0x82, 0xac]), 1); // € (3-byte)
-        assert_eq!(utf8strlen(&[0xf0, 0x90, 0x8d, 0x88]), 1); // 𐍈 (4-byte)
-        // mixed: 'a' + é + €
-        assert_eq!(utf8strlen(&[0x61, 0xc3, 0xa9, 0xe2, 0x82, 0xac]), 3);
-        // Wave 4: malformed lead bytes terminate (lossy: one byte = one char)
-        assert_eq!(utf8strlen(&[0x80]), 1); // stray continuation byte
-        assert_eq!(utf8strlen(&[0xff, 0x41]), 2); // invalid lead + 'A'
-        assert_eq!(utf8strlen(&[0x80, 0x80, 0x80]), 3); // three stray bytes
     }
 
     // escape_string: backslash-escapes each `chr`; identity (owned copy) when
