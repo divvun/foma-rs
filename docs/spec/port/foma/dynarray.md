@@ -103,7 +103,7 @@
 > [spec:foma:def:dynarray.fsm-construct-done-fn]
 > struct fsm *fsm_construct_done(struct fsm_construct_handle *handle)
 
-> [spec:foma:sem:dynarray.fsm-construct-done-fn]
+> [spec:foma:sem:dynarray.fsm-construct-done-fn+1]
 > Finalizes a construction handle into a struct fsm.
 > 1. If handle->maxstate == -1, or numfinals == 0, or hasinitial == 0, return fsm_empty_set()
 >    immediately (the handle and its contents are NOT freed on this path).
@@ -116,8 +116,10 @@
 > 4. net = fsm_create(""); sprintf(net->name, "%X", rand()); free(net->sigma);
 >    fsm_state_close(net) (installs the built array and counts into net).
 > 5. net->sigma = fsm_construct_convert_sigma(handle). If handle->name != NULL,
->    strncpy(net->name, handle->name, 40) (no forced NUL terminator if the name is >= 40 chars) and
+>    set net->name from handle->name, capped at FSM_NAME_LEN (40) bytes and
 >    free(handle->name); else overwrite net->name with a new "%X"-formatted rand() value.
+>    The C strncpy'd exactly 40 bytes, which can split a UTF-8 codepoint; the cap is now
+>    rounded down to the nearest character boundary so the name stays valid UTF-8.
 > 6. Free every fsm_trans_list node for all fsm_state_list_size slots (not just up to maxstate);
 >    free every sigma-hash chain node hanging off each of the 1021 bucket heads (the inline heads
 >    are part of the array); then free fsm_sigma_list, fsm_sigma_hash, fsm_state_list, and the

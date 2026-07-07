@@ -957,7 +957,7 @@
 > [spec:foma:def:fomalib.fsm-construct-done-fn]
 > fsm *fsm_construct_done(struct fsm_construct_handle *handle)
 
-> [spec:foma:sem:fomalib.fsm-construct-done-fn]
+> [spec:foma:sem:fomalib.fsm-construct-done-fn+1]
 > Finalizes a construction handle into a struct fsm. If maxstate == -1, or no final state was ever
 > set, or no initial state was set, returns fsm_empty_set() immediately — in this path the handle
 > and its contents are leaked (not freed).
@@ -970,8 +970,9 @@
 > (fsm_state_close fills arity, state/arc/line/final counts, pathcount = unknown, and heuristic
 > determinism/epsilon-freeness flags). Attaches a sigma converted from the handle's sigma list
 > (entries in ascending number order; NULL-symbol slots skipped). net->name is set to the handle's
-> name if non-NULL (strncpy of at most 40 chars, not guaranteed NUL-terminated), else to a random
-> hex string.
+> name if non-NULL, capped at FSM_NAME_LEN (40) bytes, else to a random hex string. The C strncpy'd
+> exactly 40 bytes, which can split a UTF-8 codepoint; the cap is now rounded down to the nearest
+> character boundary so the name stays valid UTF-8.
 > Frees all transition nodes, hash-chain nodes, the sigma list, hash table, state list, and the
 > handle itself; then sigma_sort(net). If the emptiness tracking never fired, the built net is
 > destroyed and fsm_empty_set() returned; otherwise the net is returned (caller owns).

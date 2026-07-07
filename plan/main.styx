@@ -841,6 +841,20 @@ children (
                         kind @status
                         text "Todo → Doing (nplan_start)"
                     }
+
+                    {
+                        at 2026-07-07T15:28:45.847817Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Progress (commit 4c2bca0): utf8strlen deleted entirely — it was str::chars().count() reimplemented over bytes; all ~10 call sites inlined (cast to i32 only at genuine i32 sinks), help/apropos padding rewritten as \" \".repeat over usize. Remaining in this node: (1) FSM_NAME_LEN — truncate_name (io.rs) and fsm_construct_done (dynarray.rs) cut net names at 40 *bytes* + from_utf8_lossy, splitting codepoints for non-ASCII names; fix = char-boundary truncation within the 40-byte cap (a behaviour change → +N on io-net-read-fn / fsm-construct-done-fn). (2) fsm_read_prolog field!/.find().unwrap() wall → idiomatic str::strip_prefix parsing (cosmetic; it already works). Evaluated and LEFT as genuine byte-domain (not fuckery): streqrep (equal-length in-place replace on the regex byte buffer), dequote_string/decode_quoted (\\uXXXX wire decode), ishexstr (signed-char hex check, internal to decode_quoted), strip_newline (fgets line buffer), xstrrev (spec-pinned byte reversal), utf8skip/utf8iscombining/int2utf8str (UTF-8 primitives)."
+                    }
+
+                    {
+                        at 2026-07-07T19:25:42.744007Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan_complete)"
+                    }
                 )
             }
 

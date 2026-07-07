@@ -727,9 +727,9 @@ pub fn fsm_construct_convert_sigma(handle: &FsmConstructHandle) -> Option<Box<Si
 }
 
 // [spec:foma:def:dynarray.fsm-construct-done-fn]
-// [spec:foma:sem:dynarray.fsm-construct-done-fn]
+// [spec:foma:sem:dynarray.fsm-construct-done-fn+1]
 // [spec:foma:def:fomalib.fsm-construct-done-fn]
-// [spec:foma:sem:fomalib.fsm-construct-done-fn]
+// [spec:foma:sem:fomalib.fsm-construct-done-fn+1]
 pub fn fsm_construct_done(handle: Box<FsmConstructHandle>) -> Box<Fsm> {
     let mut handle = handle;
     if handle.maxstate == -1 || handle.numfinals == 0 || handle.hasinitial == 0 {
@@ -775,14 +775,15 @@ pub fn fsm_construct_done(handle: Box<FsmConstructHandle>) -> Box<Fsm> {
 
     net.sigma = fsm_construct_convert_sigma(&handle);
     if let Some(name) = handle.name.take() {
-        /* strncpy(net->name, handle->name, 40): at most 40 bytes are
-        copied, with no NUL terminator when the name is >= 40 bytes —
-        reproduced as truncation to 40 bytes per the conventions.
-        DEVIATION from C (a cut inside a UTF-8 codepoint is lossy-decoded;
-        C would keep the raw byte prefix) */
-        let bytes = name.as_bytes();
-        if bytes.len() > FSM_NAME_LEN {
-            net.name = String::from_utf8_lossy(&bytes[..FSM_NAME_LEN]).into_owned();
+        /* strncpy(net->name, handle->name, 40): at most 40 bytes are copied.
+        The C cut at exactly 40 bytes, which can split a UTF-8 codepoint; keep
+        the byte cap but round down to a character boundary. */
+        if name.len() > FSM_NAME_LEN {
+            let mut end = FSM_NAME_LEN;
+            while !name.is_char_boundary(end) {
+                end -= 1;
+            }
+            net.name = name[..end].to_string();
         } else {
             net.name = name;
         }
@@ -1615,18 +1616,25 @@ mod tests {
         assert_eq!(net.pathcount, 0);
     }
 
-    // [spec:foma:sem:dynarray.fsm-construct-done-fn/test]
-    // [spec:foma:sem:fomalib.fsm-construct-done-fn/test]
+    // [spec:foma:sem:dynarray.fsm-construct-done-fn+1/test]
+    // [spec:foma:sem:fomalib.fsm-construct-done-fn+1/test]
     #[test]
     fn fsm_construct_done_name_truncated_at_40() {
-        let longname: String = "a".repeat(50);
-        let mut h = fsm_construct_init(&longname);
-        fsm_construct_set_initial(&mut h, 0);
-        fsm_construct_set_final(&mut h, 1);
-        fsm_construct_add_arc(&mut h, 0, 1, "a", "a");
-        let net = fsm_construct_done(h);
-        assert_eq!(net.name.len(), FSM_NAME_LEN);
+        let build = |name: &str| {
+            let mut h = fsm_construct_init(name);
+            fsm_construct_set_initial(&mut h, 0);
+            fsm_construct_set_final(&mut h, 1);
+            fsm_construct_add_arc(&mut h, 0, 1, "a", "a");
+            fsm_construct_done(h)
+        };
+        // ASCII: exactly 40 bytes.
+        let net = build(&"a".repeat(50));
         assert_eq!(net.name, "a".repeat(FSM_NAME_LEN));
+        // Non-ASCII crossing the 40-byte cap mid-codepoint (é = 2 bytes at 39..41):
+        // round down to the char boundary (39) instead of splitting it.
+        let net = build(&format!("{}é", "a".repeat(39)));
+        assert_eq!(net.name, "a".repeat(39));
+        assert_eq!(net.name.len(), 39);
     }
 
     /* ---- reading family --------------------------------------------- */

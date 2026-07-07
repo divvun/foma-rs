@@ -140,17 +140,18 @@ fn atoi(s: &str) -> i32 {
     atoll(s) as i32
 }
 
-/* strncpy(dst, src, FSM_NAME_LEN): at most 40 bytes are copied, with no NUL
-terminator when the source is >= 40 bytes — reproduced as truncation to 40
-bytes per the conventions.
-DEVIATION from C (a cut inside a UTF-8 codepoint is lossy-decoded; C keeps the
-raw byte prefix). */
+/* strncpy(dst, src, FSM_NAME_LEN): at most 40 bytes are copied. The C cut at
+exactly 40 bytes, which can split a UTF-8 codepoint; keep the byte cap but round
+down to the nearest character boundary so the name stays valid UTF-8. */
 fn truncate_name(name: &str) -> String {
-    if name.as_bytes().len() > FSM_NAME_LEN {
-        String::from_utf8_lossy(&name.as_bytes()[..FSM_NAME_LEN]).into_owned()
-    } else {
-        name.to_string()
+    if name.len() <= FSM_NAME_LEN {
+        return name.to_string();
     }
+    let mut end = FSM_NAME_LEN;
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    name[..end].to_string()
 }
 
 /* strlen from a byte index into a NUL-terminated buffer image. */
