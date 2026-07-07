@@ -862,6 +862,21 @@ children (
                 id w7-apply-runtime
                 title "Tier 3: apply/spelling runtime — ApplyHandle instring/outstring Vec<u8>→String; delete buf_strcpy/buf_memcpy/buf_sprintf/outstring_result/cstr/wtail; MED print_match via char_indices; sigma-trie stays byte-level on .as_bytes()."
                 priority 2
+                log (
+                    {
+                        at 2026-07-07T19:26:13.89152Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan_start)"
+                    }
+
+                    {
+                        at 2026-07-07T19:36:46.227718Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan_complete)"
+                    }
+                )
             }
         )
     }

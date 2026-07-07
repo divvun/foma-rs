@@ -466,12 +466,8 @@ pub struct ApplyMedHandle {
     pub cm: Vec<i32>,
     // DEVIATION from C (aliases the caller's word — medh->word = word, no strdup; owned copy here)
     pub word: Option<String>,
-    /// C: malloc'd char buffer of instring_length bytes
-    pub instring: Vec<u8>,
-    pub instring_length: i32,
-    /// C: malloc'd char buffer of outstring_length bytes
-    pub outstring: Vec<u8>,
-    pub outstring_length: i32,
+    pub instring: String,
+    pub outstring: String,
     pub align_symbol: Option<String>,
     /// C: malloc'd array of heap_size ints
     pub heap: Vec<i32>,
@@ -602,15 +598,12 @@ pub struct ApplyHandle {
     pub apply_stack_ptr: i32,
     pub apply_stack_top: i32,
     pub oldflagneg: i32,
-    pub outstringtop: i32,
     pub iterate_old: i32,
     pub iterator: i32,
     /// Bit array: one bit per state that has a flag transition
     pub flagstates: Vec<u8>,
-    /// C: malloc'd char buffer of outstringtop bytes
-    pub outstring: Vec<u8>,
-    /// C: malloc'd char buffer of current_instring_length bytes
-    pub instring: Vec<u8>,
+    pub outstring: String,
+    pub instring: String,
     /// C: malloc'd array of sigma_size entries
     pub sigs: Vec<Sigs>,
     // DEVIATION from C (aliases a flag_list value string; owned copy here)

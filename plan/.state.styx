@@ -49,4 +49,5 @@ assertions (
     {id wave-6-harden, kind @complete, author "brendan@necessary.nu", at 2026-07-07T14:36:45.091671Z}
     {id w7-lexcread, kind @complete, author "brendan@necessary.nu", at 2026-07-07T15:16:06.706708Z}
     {id w7-utf8-io, kind @complete, author "brendan@necessary.nu", at 2026-07-07T19:25:42.744007Z}
+    {id w7-apply-runtime, kind @complete, author "brendan@necessary.nu", at 2026-07-07T19:36:46.227718Z}
 )

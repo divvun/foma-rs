@@ -394,20 +394,18 @@
 > whose in/out are 0/0), which also truncated the walk at any interior epsilon:epsilon step;
 > since the root is uniquely identified by parent == -1 and the parent chain is acyclic
 > (parents are strictly-earlier agenda indices), the label test is dropped.
-> Pass 1: push each n->in; if medh->outstring_length < 2*wordlen (wordlen = medh->wordlen,
-> the byte length), double outstring_length once and realloc — latent bug: a single
-> doubling may still be too small for a much longer word, and multi-byte symbols /
-> align_symbol expansion can exceed the 2*wordlen estimate anyway (possible buffer
-> overflow). Pop in path order, appending via sprintf at a running offset: sym > 2 emits
-> print_sym(sym, sigma); sym == 0 emits medh->align_symbol if set, else nothing; sym == 2
-> (IDENTITY) emits literal "@"; sym == 1 emits nothing.
-> Pass 2: identical walk pushing n->out; same conditional single doubling of
-> instring_length; maintain a byte cursor i into `word` starting at 0. Pop in order:
-> sym > 2 emits the sigma symbol and advances i by the codepoint length
-> utf8skip(word+i)+1; sym == 0 emits align_symbol if set (cursor unchanged); sym == 2
-> emits "*" if i > wordlen, otherwise copies the next UTF-8 codepoint verbatim from
-> word+i and advances i (this is how out-of-alphabet input characters survive
-> round-trip). Both buffers end NUL-terminated by the final sprintf.
+> medh->outstring and medh->instring are Strings; each pass clears its buffer and push_str's the
+> pieces (the C rebuilt from offset 0 into a byte buffer it grew by a single doubling of
+> out/instring_length — which could still be too small for a long word or multi-byte expansion, a
+> latent overflow). Pass 1: push each n->in, then pop in path order: sym > 2 pushes
+> print_sym(sym, sigma); sym == 0 pushes medh->align_symbol if set, else nothing; sym == 2
+> (IDENTITY) pushes literal "@"; sym == 1 pushes nothing.
+> Pass 2: identical walk pushing n->out; maintain a byte cursor i into `word` (a &str) starting at
+> 0. Pop in order: sym > 2 pushes the sigma symbol and advances i by the next character's byte
+> length (word[i..].chars().next().len_utf8()); sym == 0 pushes align_symbol if set (cursor
+> unchanged); sym == 2 pushes "*" if i > wordlen (the byte length), otherwise pushes the next
+> character of `word` verbatim and advances i (this is how out-of-alphabet input characters survive
+> round-trip).
 
 > [spec:foma:def:spelling.print-sym-fn]
 > char *print_sym(int sym, struct sigma *sigma)

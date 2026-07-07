@@ -36,7 +36,7 @@ use crate::mem::round_up_to_power_of_two;
 use crate::sigma::sigma_max;
 use crate::types::{
     APPLY_BINSEARCH_THRESHOLD, APPLY_INDEX_INPUT, ApplyHandle, ApplyStateIndex,
-    DEFAULT_OUTSTRING_SIZE, DEFAULT_STACK_SIZE, DOWN, ENUMERATE, EPSILON, FAIL, FLAG_CLEAR,
+    DEFAULT_STACK_SIZE, DOWN, ENUMERATE, EPSILON, FAIL, FLAG_CLEAR,
     FLAG_DISALLOW, FLAG_EQUAL, FLAG_NEGATIVE, FLAG_POSITIVE, FLAG_REQUIRE, FLAG_UNIFY, FlagList,
     FlagLookup, Fsm, IDENTITY, LOWER, RANDOM, SUCCEED, Searchstack, SigmaTrie, SigmaTrieArrays,
     SigmatchArray, Sigs, UNKNOWN, UP, UPPER,
@@ -74,39 +74,6 @@ fn bitset(a: &mut [u8], b: i32) {
 }
 fn bitnslots(nb: i32) -> usize {
     ((nb + 8 - 1) / 8) as usize
-}
-
-/* strcpy(buf+off, src): copy src bytes then a NUL terminator. */
-fn buf_strcpy(buf: &mut Vec<u8>, off: usize, src: &[u8]) {
-    let end = off + src.len();
-    // DEVIATION from C (C writes into a fixed malloc'd buffer and can overflow
-    // on the IDENTITY/space latent bugs; the Vec is grown to stay memory-safe)
-    if buf.len() < end + 1 {
-        buf.resize(end + 1, 0);
-    }
-    buf[off..end].copy_from_slice(src);
-    buf[end] = 0;
-}
-
-/* memcpy(buf+off, src, len): copy len bytes, no terminator. */
-fn buf_memcpy(buf: &mut Vec<u8>, off: usize, src: &[u8], len: usize) {
-    let end = off + len;
-    // DEVIATION from C (see buf_strcpy)
-    if buf.len() < end {
-        buf.resize(end, 0);
-    }
-    buf[off..end].copy_from_slice(&src[..len]);
-}
-
-/* Read h->outstring up to its NUL terminator as an owned String.
-DEVIATION from C (from_utf8_lossy; C hands back the raw byte pointer). */
-fn outstring_result(h: &ApplyHandle) -> String {
-    let end = h
-        .outstring
-        .iter()
-        .position(|&b| b == 0)
-        .unwrap_or(h.outstring.len());
-    String::from_utf8_lossy(&h.outstring[..end]).into_owned()
 }
 
 fn new_searchstack_frame() -> Searchstack {
@@ -418,7 +385,7 @@ pub fn apply_clear(mut h: Box<ApplyHandle>) {
     apply_clear_index(&mut h);
     h.last_net = None;
     h.iterator = 0;
-    h.outstring = Vec::new();
+    h.outstring = String::new();
     h.separator = None;
     h.epsilon_symbol = None;
     drop(h);
@@ -439,7 +406,7 @@ pub fn apply_updown(h: &mut ApplyHandle, word: Option<&str>) -> Option<String> {
     } else {
         h.iterate_old = 0;
         // C borrows the caller's word pointer; owned copy of the bytes here.
-        h.instring = word.unwrap().as_bytes().to_vec();
+        h.instring = word.unwrap().to_owned();
         apply_create_sigmatch(h);
 
         /* Remove old marks if necessary */
@@ -532,12 +499,11 @@ pub fn apply_init(net: &Fsm) -> Box<ApplyHandle> {
         apply_stack_ptr: 0,
         apply_stack_top: 0,
         oldflagneg: 0,
-        outstringtop: 0,
         iterate_old: 0,
         iterator: 0,
         flagstates: Vec::new(),
-        outstring: Vec::new(),
-        instring: Vec::new(),
+        outstring: String::new(),
+        instring: String::new(),
         sigs: Vec::new(),
         oldflagvalue: None,
         last_net: None,
@@ -554,7 +520,7 @@ pub fn apply_init(net: &Fsm) -> Box<ApplyHandle> {
     /* Init */
     h.iterate_old = 0;
     h.iterator = 0;
-    h.instring = Vec::new();
+    h.instring = String::new();
     h.flag_list = None;
     h.flag_lookup = Vec::new();
     h.obey_flags = 1;
@@ -566,8 +532,7 @@ pub fn apply_init(net: &Fsm) -> Box<ApplyHandle> {
     // C: h->last_net = net (borrowed). DEVIATION from C (owns a clone; the
     // handle never mutates it, so observably equivalent for application).
     h.last_net = Some(Box::new(net.clone()));
-    h.outstring = vec![0u8; DEFAULT_OUTSTRING_SIZE];
-    h.outstringtop = DEFAULT_OUTSTRING_SIZE as i32;
+    h.outstring = String::new();
     // *(h->outstring) = '\0' — already 0.
     h.gstates = 0; // net->states base
     h.gsigma = net.sigma.clone();
@@ -1161,22 +1126,19 @@ pub fn apply_follow_next_arc(h: &mut ApplyHandle) -> i32 {
 // [spec:foma:def:apply.apply-return-string-fn]
 // [spec:foma:sem:apply.apply-return-string-fn]
 pub fn apply_return_string(h: &mut ApplyHandle) -> Option<String> {
-    /* Stick a 0 to endpos to avoid getting old accumulated gunk strings */
-    let opos = h.opos as usize;
-    if h.outstring.len() <= opos {
-        h.outstring.resize(opos + 1, 0);
-    }
-    h.outstring[opos] = 0;
+    /* Cut at opos to avoid returning stale gunk a backtracked branch left beyond
+    it (C wrote a NUL at opos). opos is always a char boundary. */
+    h.outstring.truncate(h.opos as usize);
     if (h.mode & RANDOM) == RANDOM {
         /* To end or not to end */
         if rand() % 2 == 0 {
             apply_stack_clear(h);
             h.iterator = 0;
             h.iterate_old = 0;
-            return Some(outstring_result(h));
+            return Some(h.outstring.clone());
         }
     } else {
-        return Some(outstring_result(h));
+        return Some(h.outstring.clone());
     }
     None
 }
@@ -1371,9 +1333,10 @@ pub fn apply_net(h: &mut ApplyHandle) -> Option<String> {
         apply_stack_clear(h);
         h.iterator = 0;
         h.iterate_old = 0;
-        // RANDOM-mode stale-terminated buffer: outstring is whatever the last
-        // return-string wrote (empty on a fresh run). Literal behaviour.
-        return Some(outstring_result(h));
+        // RANDOM-mode fall-through: opos has been rewound by backtracking but
+        // outstring still holds the last complete word — return it whole (not the
+        // [0..opos] prefix).
+        return Some(h.outstring.clone());
     }
     apply_stack_clear(h);
     None
@@ -1384,159 +1347,90 @@ pub fn apply_net(h: &mut ApplyHandle) -> Option<String> {
 pub fn apply_append(h: &mut ApplyHandle, cptr: i32, sym: i32) -> i32 {
     let symin = l_in(h, cptr);
     let symout = l_out(h, cptr);
-    let mut astring: Vec<u8> = h.sigs[symin as usize]
-        .symbol
-        .as_deref()
-        .unwrap_or("")
-        .as_bytes()
-        .to_vec();
-    let mut alen = h.sigs[symin as usize].length;
-    let mut bstring: Vec<u8> = h.sigs[symout as usize]
-        .symbol
-        .as_deref()
-        .unwrap_or("")
-        .as_bytes()
-        .to_vec();
-    let mut blen = h.sigs[symout as usize].length;
-    let sep: Vec<u8> = h.separator.as_deref().unwrap_or("").as_bytes().to_vec();
-    let seplen = sep.len() as i32; /* strlen(h->separator) */
-    let mut len: i32;
 
-    while alen + blen + h.opos + 2 + seplen >= h.outstringtop {
-        let newtop = (h.outstringtop * 2) as usize;
-        h.outstring.resize(newtop, 0);
-        h.outstringtop *= 2;
-    }
-
-    // Track pointer-equality of astring/bstring (see module notes): true when
-    // both were suppressed to the "" literal, or when neither was and
-    // symin == symout (same sigs slot).
-    let mut a_empty_lit = false;
-    let mut b_empty_lit = false;
-
-    if h.has_flags != 0 && h.show_flags == 0 && h.flag_lookup[symin as usize].r#type != 0 {
-        astring = Vec::new();
-        alen = 0;
-        a_empty_lit = true;
-    }
-    if h.has_flags != 0 && h.show_flags == 0 && h.flag_lookup[symout as usize].r#type != 0 {
-        bstring = Vec::new();
-        blen = 0;
-        b_empty_lit = true;
-    }
+    // Flag suppression: a suppressed flag diacritic renders as the empty string.
+    let a_suppressed =
+        h.has_flags != 0 && h.show_flags == 0 && h.flag_lookup[symin as usize].r#type != 0;
+    let b_suppressed =
+        h.has_flags != 0 && h.show_flags == 0 && h.flag_lookup[symout as usize].r#type != 0;
+    let mut astring: String = if a_suppressed {
+        String::new()
+    } else {
+        h.sigs[symin as usize].symbol.as_deref().unwrap_or("").to_string()
+    };
+    let mut bstring: String = if b_suppressed {
+        String::new()
+    } else {
+        h.sigs[symout as usize].symbol.as_deref().unwrap_or("").to_string()
+    };
+    // Pointer-equality of the two display strings (see module notes): both
+    // suppressed, or neither suppressed and the same sigs slot.
     let astring_eq_bstring =
-        (a_empty_lit && b_empty_lit) || (!a_empty_lit && !b_empty_lit && symin == symout);
+        (a_suppressed && b_suppressed) || (!a_suppressed && !b_suppressed && symin == symout);
+    let sep = h.separator.as_deref().unwrap_or("").to_string();
 
-    len = 0;
+    // Build the append contiguously at opos, discarding whatever a prior
+    // (backtracked) branch left beyond it. opos always lands on a char boundary
+    // because every advance is a whole symbol / separator / space / IDENTITY span.
+    let start = h.opos as usize;
+    h.outstring.truncate(start);
 
     if (h.mode & ENUMERATE) == ENUMERATE {
-        /* Print both sides separated by colon (if printing "words") */
         if (h.mode & (UPPER | LOWER)) == (UPPER | LOWER) {
-            if astring_eq_bstring {
-                buf_strcpy(&mut h.outstring, h.opos as usize, &astring);
-                len = alen;
-            } else {
-                buf_strcpy(&mut h.outstring, h.opos as usize, &astring);
-                buf_strcpy(&mut h.outstring, (h.opos + alen) as usize, &sep);
-                buf_strcpy(
-                    &mut h.outstring,
-                    (h.opos + alen + seplen) as usize,
-                    &bstring,
-                );
-                len = alen + blen + seplen;
+            /* Print both sides, colon-separated (unless identical) */
+            h.outstring.push_str(&astring);
+            if !astring_eq_bstring {
+                h.outstring.push_str(&sep);
+                h.outstring.push_str(&bstring);
             }
-        }
-
-        /* Print one side only */
-        if (h.mode & (UPPER | LOWER)) != (UPPER | LOWER) {
-            if symin == EPSILON {
-                astring = Vec::new();
-                alen = 0;
-            }
-            if symout == EPSILON {
-                bstring = Vec::new();
-                blen = 0;
-            }
-            let pstring: &[u8];
-            if (h.mode & (UPPER | LOWER)) == UPPER {
-                pstring = &astring;
-                len = alen;
-            } else {
-                pstring = &bstring;
-                len = blen;
-            }
-            buf_memcpy(&mut h.outstring, h.opos as usize, pstring, len as usize);
-        }
-    }
-    if (h.mode & ENUMERATE) != ENUMERATE {
-        /* Print pairs is ON and symbols are different */
-        if h.print_pairs != 0 && (symin != symout) {
-            if symin == UNKNOWN && (h.mode & DOWN) == DOWN {
-                // C: strncpy(astring, instring+ipos, 1) — writes into the shared
-                // "?" literal (UB). DEVIATION from C: set the local display to
-                // the single input byte; the shared sigs entry is not mutated.
-                if (h.ipos as usize) < h.instring.len() {
-                    astring = vec![h.instring[h.ipos as usize]];
-                }
-            }
-            if symout == UNKNOWN && (h.mode & UP) == UP {
-                if (h.ipos as usize) < h.instring.len() {
-                    bstring = vec![h.instring[h.ipos as usize]];
-                }
-            }
-            buf_strcpy(&mut h.outstring, h.opos as usize, b"<");
-            buf_strcpy(&mut h.outstring, (h.opos + 1) as usize, &astring);
-            buf_strcpy(&mut h.outstring, (h.opos + alen + 1) as usize, &sep);
-            buf_strcpy(
-                &mut h.outstring,
-                (h.opos + alen + 1 + seplen) as usize,
-                &bstring,
-            );
-            buf_strcpy(
-                &mut h.outstring,
-                (h.opos + alen + blen + 1 + seplen) as usize,
-                b">",
-            );
-            len = alen + blen + 2 + seplen;
-        } else if sym == IDENTITY {
-            /* Apply up/down */
-            let idlen = h.sigmatch_array[h.ipos as usize].consumes;
-            // C: strncpy(outstring+opos, instring+ipos, idlen) then a NUL.
-            // Budget only covered alen+blen; buf_strcpy grows to stay safe.
-            let ip = h.ipos as usize;
-            let end = (ip + idlen as usize).min(h.instring.len());
-            let src: Vec<u8> = h.instring[ip..end].to_vec();
-            // reproduce copying exactly idlen bytes (zero-pad if input short)
-            let mut chunk = src;
-            chunk.resize(idlen as usize, 0);
-            buf_memcpy(&mut h.outstring, h.opos as usize, &chunk, idlen as usize);
-            let nul_at = (h.opos + idlen) as usize;
-            if h.outstring.len() <= nul_at {
-                h.outstring.resize(nul_at + 1, 0);
-            }
-            h.outstring[nul_at] = 0;
-            len = idlen;
-        } else if sym == EPSILON {
-            return 0;
         } else {
-            let pstring: &[u8];
-            if (h.mode & DOWN) == DOWN {
-                pstring = &bstring;
-                len = blen;
-            } else {
-                pstring = &astring;
-                len = alen;
-            }
-            buf_memcpy(&mut h.outstring, h.opos as usize, pstring, len as usize);
+            /* Print one side only; an EPSILON side contributes nothing */
+            let a = if symin == EPSILON { "" } else { astring.as_str() };
+            let b = if symout == EPSILON { "" } else { bstring.as_str() };
+            let pstring = if (h.mode & (UPPER | LOWER)) == UPPER { a } else { b };
+            h.outstring.push_str(pstring);
         }
+    } else if h.print_pairs != 0 && symin != symout {
+        /* Print pairs is ON and the symbols differ */
+        // C wrote a single input byte into the shared "?" literal (UB). Here the
+        // whole input character is used for an UNKNOWN side; sigs is not mutated.
+        if symin == UNKNOWN && (h.mode & DOWN) == DOWN {
+            if let Some(c) = h.instring[h.ipos as usize..].chars().next() {
+                astring = c.to_string();
+            }
+        }
+        if symout == UNKNOWN && (h.mode & UP) == UP {
+            if let Some(c) = h.instring[h.ipos as usize..].chars().next() {
+                bstring = c.to_string();
+            }
+        }
+        h.outstring.push('<');
+        h.outstring.push_str(&astring);
+        h.outstring.push_str(&sep);
+        h.outstring.push_str(&bstring);
+        h.outstring.push('>');
+    } else if sym == IDENTITY {
+        /* Apply up/down: copy the consumed input span verbatim (a whole sigma
+        symbol, so ipos..ipos+consumes lies on char boundaries) */
+        let idlen = h.sigmatch_array[h.ipos as usize].consumes as usize;
+        let ip = h.ipos as usize;
+        let end = (ip + idlen).min(h.instring.len());
+        let chunk = h.instring[ip..end].to_string();
+        h.outstring.push_str(&chunk);
+    } else if sym == EPSILON {
+        return 0;
+    } else {
+        let pstring = if (h.mode & DOWN) == DOWN { &bstring } else { &astring };
+        h.outstring.push_str(pstring);
     }
+
+    let mut len = (h.outstring.len() - start) as i32;
     if h.print_space != 0 && len > 0 {
-        let space: Vec<u8> = h.space_symbol.as_deref().unwrap_or("").as_bytes().to_vec();
-        buf_strcpy(&mut h.outstring, (h.opos + len) as usize, &space);
-        // [spec:foma:sem:apply.apply-append-fn+1] advance by the separator's full
-        // byte length (C did `len++`, so a multi-byte space symbol had all but its
-        // first byte overwritten by the next append).
-        len += space.len() as i32;
+        // A multi-byte space symbol survives: the return advances by the real
+        // number of bytes pushed (C's `len++` clobbered all but its first byte).
+        // [spec:foma:sem:apply.apply-append-fn+1]
+        h.outstring.push_str(h.space_symbol.as_deref().unwrap_or(""));
+        len = (h.outstring.len() - start) as i32;
     }
     len
 }
@@ -1812,7 +1706,7 @@ pub fn apply_create_sigmatch(h: &mut ApplyHandle) {
     if (h.mode & ENUMERATE) == ENUMERATE {
         return;
     }
-    let symbol: Vec<u8> = h.instring.clone();
+    let symbol: Vec<u8> = h.instring.as_bytes().to_vec();
     let inlen = symbol.len();
     h.current_instring_length = inlen as i32;
     if inlen as i32 >= h.sigmatch_array_size {
@@ -2134,8 +2028,7 @@ mod tests {
         assert_eq!(h.print_pairs, 0);
         assert_eq!(h.separator.as_deref(), Some(":"));
         assert_eq!(h.epsilon_symbol.as_deref(), Some("0"));
-        assert_eq!(h.outstringtop, DEFAULT_OUTSTRING_SIZE as i32);
-        assert_eq!(h.outstring.len(), DEFAULT_OUTSTRING_SIZE);
+        assert!(h.outstring.is_empty());
         assert_eq!(h.printcount, 1);
         assert_eq!(h.iterator, 0);
         assert_eq!(h.apply_stack_top, DEFAULT_STACK_SIZE as i32);
@@ -2192,7 +2085,7 @@ mod tests {
         let a = signum(&net, "a");
         let mut h = apply_init(&net);
         h.mode = DOWN;
-        h.instring = b"aabc".to_vec();
+        h.instring = "aabc".to_string();
         apply_create_sigmatch(&mut h);
         assert_eq!(h.current_instring_length, 4);
         // position 0: only "a" matches (1 byte)
@@ -2212,7 +2105,7 @@ mod tests {
         let a = signum(&net, "a");
         let mut h = apply_init(&net);
         h.mode = DOWN;
-        h.instring = b"abc".to_vec();
+        h.instring = "abc".to_string();
         apply_create_sigmatch(&mut h);
         h.ipos = 0;
         // token at 0 is "abc": matches abc (consumes 3), not a, epsilon consumes 0.

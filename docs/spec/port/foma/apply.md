@@ -36,8 +36,9 @@
 > in `[spec:foma:sem:apply.apply-return-string-fn]`). `sym` is the output-side symbol number for
 > the current direction. Reads the raw arc symbols symin = gstates[cptr].in and
 > symout = gstates[cptr].out and their display strings/lengths astring/alen, bstring/blen from
-> h->sigs. Growth policy: while alen + blen + opos + 2 + strlen(separator) >= h->outstringtop,
-> realloc outstring to double size and double outstringtop. If has_flags and show_flags is off,
+> h->sigs. h->outstring is a String: the append truncates it to opos (discarding whatever a
+> backtracked branch left beyond it — opos is always a char boundary) and then push_str's the
+> pieces below; the return len is the number of bytes appended. If has_flags and show_flags is off,
 > any side whose symbol is a flag diacritic is replaced by "" (length 0). Then:
 > ENUMERATE mode, both sides (UPPER and LOWER both set): if astring == bstring (pointer equality;
 > true when symin == symout) copy astring alone (len = alen); else copy astring + separator +
@@ -47,20 +48,18 @@
 > else bstring (memcpy of len bytes).
 > Non-ENUMERATE (real word application): (1) if print_pairs is on and symin != symout: emit
 > "<" + astring + separator + bstring + ">", len = alen + blen + 2 + strlen(separator); first, if
-> symin == UNKNOWN in DOWN mode (resp. symout == UNKNOWN in UP mode), strncpy 1 byte of the input
-> at instring+ipos into the sigma display string itself — this writes into the string literal "?"
-> installed for UNKNOWN (undefined behavior, latent crash) and truncates multibyte input to one
-> byte. (2) else if sym == IDENTITY: copy sigmatch_array[ipos].consumes bytes verbatim from
-> instring+ipos (the matched input token) plus one NUL after them; len = consumes. The growth
-> check above budgeted only alen + blen bytes (1 + 1 for "@"/"?"), so a token whose consumes
-> exceeds that can overflow outstring — latent buffer overflow. (3) else if sym == EPSILON:
-> return 0 immediately (nothing emitted). (4) else memcpy the display string of the output side
-> (bstring in DOWN mode, astring in UP mode).
-> Finally, if print_space is on and len > 0, strcpy h->space_symbol after the emitted bytes and
-> increment len by the space symbol's full byte length (strlen(space_symbol)), so a multi-byte
-> separator survives intact. The C source incremented len by exactly 1 regardless of the symbol's
-> length, overwriting all but the separator's first byte on the next append; single-byte separators
-> are unaffected either way.
+> symin == UNKNOWN in DOWN mode (resp. symout == UNKNOWN in UP mode), the display side is set to the
+> whole input character at instring[ipos..] (the C strncpy'd one byte into the shared "?" literal —
+> undefined behavior, and it truncated a multibyte character to one byte). (2) else if
+> sym == IDENTITY: push the matched input token verbatim — instring[ipos..ipos+consumes] (a whole
+> sigma symbol, so the span lies on char boundaries). (3) else if sym == EPSILON: return 0
+> immediately (nothing emitted). (4) else push the display string of the output side (bstring in
+> DOWN mode, astring in UP mode). Because outstring is a String, none of these can overflow (the C
+> budgeted only alen + blen bytes and could overrun on a long IDENTITY token).
+> Finally, if print_space is on and len > 0, push h->space_symbol after the emitted bytes; len is
+> recomputed from the real bytes pushed, so a multi-byte space symbol survives intact. The C source
+> incremented len by exactly 1 regardless of the symbol's length, overwriting all but its first byte
+> on the next append; single-byte space symbols are unaffected either way.
 
 > [spec:foma:def:apply.apply-at-last-arc-fn]
 > int apply_at_last_arc(struct apply_handle *h)

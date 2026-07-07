@@ -20,12 +20,10 @@ use crate::types::{
     ApplyMedHandle, Astarnode, Fsm, IDENTITY, MED_DEFAULT_CUTOFF, MED_DEFAULT_LIMIT,
     MED_DEFAULT_MAX_HEAP_SIZE, Medlookup, Sigma,
 };
-use crate::utf8::utf8skip;
 
 /* C #defines local to spelling.c */
 const INITIAL_AGENDA_SIZE: i32 = 256;
 const INITIAL_HEAP_SIZE: i32 = 256;
-const INITIAL_STRING_SIZE: i32 = 256;
 
 /* C: #define CHAR_BIT 8 (<limits.h>); used by BITNSLOTS */
 const CHAR_BIT: i32 = 8;
@@ -39,28 +37,6 @@ struct Sccinfo {
     on_t_stack: i32,
 }
 
-/* Read a NUL-terminated C buffer as an owned String (used by apply_med and the
-getters, mirroring the `char *` the C returns from medh->outstring/instring). */
-fn cstr(buf: &[u8]) -> String {
-    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-    String::from_utf8_lossy(&buf[..end]).into_owned()
-}
-
-/* sprintf-at-offset helper: write `bytes` then a NUL terminator at `at`,
-returning the number of bytes written (excluding the NUL), exactly like the
-sprintf return value the C accumulates into printptr.
-DEVIATION from C (the C relies on print_match's single-doubling of the
-out/instring buffer, which can be too small — a possible buffer overflow; here
-the buffer is grown as needed so the write stays memory-safe). */
-fn buf_sprintf(buf: &mut Vec<u8>, at: usize, bytes: &[u8]) -> i32 {
-    let end = at + bytes.len();
-    if buf.len() < end + 1 {
-        buf.resize(end + 1, 0);
-    }
-    buf[at..end].copy_from_slice(bytes);
-    buf[end] = 0;
-    bytes.len() as i32
-}
 
 /* (net + off) line-table field accessors. `off` is an index into the net's
 sentinel-terminated line table (a `struct fsm_state *` in C). */
@@ -153,7 +129,7 @@ pub fn apply_med_get_cost(medh: &ApplyMedHandle) -> i32 {
 // [spec:foma:def:fomalib.apply-med-get-instring-fn]
 // [spec:foma:sem:fomalib.apply-med-get-instring-fn]
 pub fn apply_med_get_instring(medh: &ApplyMedHandle) -> Option<String> {
-    Some(cstr(&medh.instring))
+    Some(medh.instring.clone())
 }
 
 // [spec:foma:def:spelling.apply-med-get-outstring-fn]
@@ -161,7 +137,7 @@ pub fn apply_med_get_instring(medh: &ApplyMedHandle) -> Option<String> {
 // [spec:foma:def:fomalib.apply-med-get-outstring-fn]
 // [spec:foma:sem:fomalib.apply-med-get-outstring-fn]
 pub fn apply_med_get_outstring(medh: &ApplyMedHandle) -> Option<String> {
-    Some(cstr(&medh.outstring))
+    Some(medh.outstring.clone())
 }
 
 // [spec:foma:def:spelling.apply-med-clear-fn]
@@ -178,18 +154,9 @@ pub fn apply_med_clear(medh: Option<Box<ApplyMedHandle>>) {
     drop(medh);
 }
 
-/* Return the tail of `word` at byte offset i; an index at/after the end yields
-an empty slice, standing in for the C reading the NUL terminator (byte 0). */
-fn wtail(word: &[u8], i: i32) -> &[u8] {
-    let ii = i as usize;
-    if ii <= word.len() { &word[ii..] } else { &[] }
-}
-
 // [spec:foma:def:spelling.print-match-fn]
 // [spec:foma:sem:spelling.print-match-fn+1]
-fn print_match(medh: &mut ApplyMedHandle, node: usize, sigma: Option<&Sigma>, word: &[u8]) {
-    let mut sym: i32;
-    let mut printptr: i32;
+fn print_match(medh: &mut ApplyMedHandle, node: usize, sigma: Option<&Sigma>, word: &str) {
     int_stack_clear();
     let wordlen = medh.wordlen;
     /* Pass 1: walk the parent chain pushing each n->in, terminating at the root.
@@ -204,24 +171,20 @@ fn print_match(medh: &mut ApplyMedHandle, node: usize, sigma: Option<&Sigma>, wo
         int_stack_push(medh.agenda[n].r#in);
         n = medh.agenda[n].parent as usize;
     }
-    printptr = 0;
-    if medh.outstring_length < 2 * wordlen {
-        medh.outstring_length *= 2;
-        medh.outstring.resize(medh.outstring_length as usize, 0);
-    }
+    /* Each pass rebuilds the buffer from scratch (C reset printptr to 0). */
+    medh.outstring.clear();
     while int_stack_isempty() == 0 {
         let s = int_stack_pop();
         if s > 2 {
-            let sy = print_sym(s, sigma).unwrap();
-            printptr += buf_sprintf(&mut medh.outstring, printptr as usize, sy.as_bytes());
+            medh.outstring.push_str(&print_sym(s, sigma).unwrap());
         }
         if s == 0 {
-            if let Some(al) = medh.align_symbol.clone() {
-                printptr += buf_sprintf(&mut medh.outstring, printptr as usize, al.as_bytes());
+            if let Some(al) = &medh.align_symbol {
+                medh.outstring.push_str(al);
             }
         }
         if s == 2 {
-            printptr += buf_sprintf(&mut medh.outstring, printptr as usize, b"@");
+            medh.outstring.push('@');
         }
     }
     /* Pass 2: same walk, pushing each n->out. [spec:foma:sem:spelling.print-match-fn+1] */
@@ -233,33 +196,28 @@ fn print_match(medh: &mut ApplyMedHandle, node: usize, sigma: Option<&Sigma>, wo
         int_stack_push(medh.agenda[n].out);
         n = medh.agenda[n].parent as usize;
     }
-    printptr = 0;
-    if medh.instring_length < 2 * wordlen {
-        medh.instring_length *= 2;
-        medh.instring.resize(medh.instring_length as usize, 0);
-    }
-    let mut i: i32 = 0;
+    medh.instring.clear();
+    let mut i: usize = 0; // byte offset into `word`
     while int_stack_isempty() == 0 {
-        sym = int_stack_pop();
+        let sym = int_stack_pop();
         if sym > 2 {
-            let sy = print_sym(sym, sigma).unwrap();
-            printptr += buf_sprintf(&mut medh.instring, printptr as usize, sy.as_bytes());
-            i += utf8skip(wtail(word, i)) + 1;
+            medh.instring.push_str(&print_sym(sym, sigma).unwrap());
+            i += word[i..].chars().next().map_or(0, |c| c.len_utf8());
         }
         if sym == 0 {
-            if let Some(al) = medh.align_symbol.clone() {
-                printptr += buf_sprintf(&mut medh.instring, printptr as usize, al.as_bytes());
+            if let Some(al) = &medh.align_symbol {
+                medh.instring.push_str(al);
             }
         }
         if sym == 2 {
-            if i > wordlen {
-                printptr += buf_sprintf(&mut medh.instring, printptr as usize, b"*");
+            if i as i32 > wordlen {
+                medh.instring.push('*');
             } else {
-                let thisskip = utf8skip(wtail(word, i)) + 1;
-                let end = (i as usize + thisskip as usize).min(word.len());
-                let chunk = word[i as usize..end].to_vec();
-                printptr += buf_sprintf(&mut medh.instring, printptr as usize, &chunk);
-                i += thisskip;
+                let w = word[i..].chars().next().map_or(0, |c| c.len_utf8());
+                let end = (i + w).min(word.len());
+                let chunk = word[i..end].to_string();
+                medh.instring.push_str(&chunk);
+                i += w;
             }
         }
     }
@@ -676,10 +634,8 @@ pub fn apply_med_init(net: &Fsm) -> Box<ApplyMedHandle> {
         nodes_expanded: 0,
         cm: Vec::new(),
         word: None,
-        instring: Vec::new(),
-        instring_length: 0,
-        outstring: Vec::new(),
-        outstring_length: 0,
+        instring: String::new(),
+        outstring: String::new(),
         align_symbol: None,
         heap: Vec::new(),
         intword: Vec::new(),
@@ -737,10 +693,8 @@ pub fn apply_med_init(net: &Fsm) -> Box<ApplyMedHandle> {
 
     fsm_create_letter_lookup(&mut medh, net);
 
-    medh.instring = vec![0u8; INITIAL_STRING_SIZE as usize];
-    medh.instring_length = INITIAL_STRING_SIZE;
-    medh.outstring = vec![0u8; INITIAL_STRING_SIZE as usize];
-    medh.outstring_length = INITIAL_STRING_SIZE;
+    medh.instring = String::new();
+    medh.outstring = String::new();
 
     medh.med_limit = MED_DEFAULT_LIMIT;
     medh.med_cutoff = MED_DEFAULT_CUTOFF;
@@ -794,27 +748,18 @@ pub fn apply_med(medh: &mut ApplyMedHandle, word: Option<&str>) -> Option<String
             /* free previous intword + malloc utf8len+1 ints */
             medh.intword = vec![0i32; (medh.utf8len + 1) as usize];
 
-            /* intword -> sigma numbers of word */
-            let mut i: i32 = 0;
-            let mut j: i32 = 0;
-            while i < medh.wordlen {
-                let thisskip = utf8skip(wtail(wbytes, i)) + 1;
-                let end = (i as usize + thisskip as usize).min(wbytes.len());
-                let temputf = &wbytes[i as usize..end];
-                let found = match std::str::from_utf8(temputf) {
-                    Ok(t) => sh_find_string(medh.sigmahash.as_mut().unwrap(), t),
-                    Err(_) => None,
+            /* intword -> sigma numbers of word, one entry per input character */
+            let mut j = 0usize;
+            let mut cbuf = [0u8; 4];
+            for c in w.chars() {
+                let ch = c.encode_utf8(&mut cbuf);
+                medh.intword[j] = match sh_find_string(medh.sigmahash.as_mut().unwrap(), ch) {
+                    Some(_) => sh_get_value(medh.sigmahash.as_ref().unwrap()),
+                    None => IDENTITY,
                 };
-                if found.is_some() {
-                    let val = sh_get_value(medh.sigmahash.as_ref().unwrap());
-                    medh.intword[j as usize] = val;
-                } else {
-                    medh.intword[j as usize] = IDENTITY;
-                }
-                i += thisskip;
                 j += 1;
             }
-            medh.intword[j as usize] = -1; /* sentinel */
+            medh.intword[j] = -1; /* sentinel */
 
             /* Insert (0,0) g = 0 */
             h = calculate_h(medh, &medh.intword, 0, 0);
@@ -873,11 +818,11 @@ pub fn apply_med(medh: &mut ApplyMedHandle, word: Option<&str>) -> Option<String
                         /* Found a match */
                         medh.curr_node_has_match = 1;
                         let sigma = medh.net.as_ref().unwrap().sigma.clone();
-                        let wordbytes = medh.word.clone().unwrap().into_bytes();
+                        let word = medh.word.clone().unwrap();
                         let off = medh.curr_agenda_offset as usize;
-                        print_match(medh, off, sigma.as_deref(), &wordbytes);
+                        print_match(medh, off, sigma.as_deref(), &word);
                         medh.nummatches += 1;
-                        return Some(cstr(&medh.outstring));
+                        return Some(medh.outstring.clone());
                     }
                 }
             }
@@ -1639,15 +1584,9 @@ mod tests {
         medh.agenda[3].r#in = c;
         medh.agenda[3].out = c;
         medh.agenda[3].parent = 2; // leaf carrying 'c'
-        print_match(&mut medh, 3, net.sigma.as_deref(), b"c");
-        let end = medh
-            .outstring
-            .iter()
-            .position(|&b| b == 0)
-            .unwrap_or(medh.outstring.len());
-        let out = String::from_utf8_lossy(&medh.outstring[..end]);
+        print_match(&mut medh, 3, net.sigma.as_deref(), "c");
         // pass 1 pushes ins [4, 0]; popped LIFO -> 0 (align "-") then 4 ("c").
-        assert_eq!(out, "-c");
+        assert_eq!(medh.outstring, "-c");
     }
 
     // [spec:foma:sem:spelling.cmatrix-print-fn+1/test]
