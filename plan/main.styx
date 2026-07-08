@@ -880,4 +880,43 @@ children (
             }
         )
     }
+
+    {
+        id wave-8-session
+        title "Wave 8: kill CLI global state — introduce a Session struct threaded &mut through dispatch → iface, replacing the network-stack / G_* options / define-registry thread_locals (re-entrant, embeddable). int_stack + regex parse-state scratch handled separately."
+        children (
+            {
+                id w8-stack
+                title "Tier 1: network stack → Session.stack. Create Session; move MAIN_STACK/ARENA in; stack_* wrappers take &mut Session; thread &mut Session through dispatch, ~100 iface_* fns, bins, and iface tests. Remove the stack thread_locals."
+                priority 0
+                log (
+                    {
+                        at 2026-07-08T16:39:29.93291Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan_start)"
+                    }
+
+                    {
+                        at 2026-07-08T16:43:02.403336Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "SCOPED + designed, not started (atomic change too large to land green safely at the tail of this session; a half-done threading breaks the build because a threaded &mut Session and any remaining global-backed stack call operate on DIFFERENT stacks — no per-file incrementalism possible).\n\nVerified scope (corrected: the earlier \"475\" was int_stack_* matching stack_*): the network stack is CLI-ONLY — 0 library calls; 100% funnelled through 18 wrapper fns in stack.rs; MAIN_STACK/ARENA never touched outside stack.rs. Real threading surface: ~197 non-test iface call sites, 260 iface test sites (64 tests, 58 direct stack_init, NOT funnelled through one helper), 13 bin sites, ~100 iface_* fns, + regex.rs (1 site). int_stack/ptr_stack are library algorithm-scratch (0 CLI calls) — a SEPARATE later concern, become owned structs, NOT Session.\n\nDesign (Option A — explicit threading, for re-entrancy/embeddability):\n1. stack.rs: `pub struct Session { main_stack: Option<usize>, arena: Vec<StackEntry> }` (+ options/defines in later tiers). Move MAIN_STACK/ARENA into fields. Convert the private helpers (main_stack(), e_next/e_number/e_previous/set_*, arena_alloc(_sentinel), walk_to_top, take_fsm/ah/amedh) and the 18 public fns (stack_init/add/pop/size/isempty/clear/rotate/turn/find_top/bottom/second/get_ah/get_med_ah/print + the 4 entry accessors stack_entry_fsm/ah/amedh/next) into `impl Session` methods (&self / &mut self). Session::new() creates an initialised empty stack.\n2. Every `pub fn iface_*` gains `session: &mut Session` as first param; body `stack_X(..)` -> `session.stack_X(..)`; nested iface_* calls thread `session`.\n3. bin/foma.rs: create `let mut session = Session::new();` in main; dispatch(line, &mut session) + the 3 helpers (try_zero_arg/try_print_family/try_test) take it; the 112 dispatch call sites pass it. flookup/cgflookup don't use the stack (standalone) — no change beyond any shared iface calls (they use apply directly).\n4. iface tests: each of the 64 tests gets `let mut session = Session::new();`; shared helpers push/push_topsorted/top_is/etc. take `&mut Session`; thread through all 240 stack_/iface_ calls. This is the bulk of the churn.\n5. Remove the MAIN_STACK/ARENA thread_locals + the free-fn facade; stack.md rule bodies note the file-static→Session change (the `main_stack becomes thread_local` notes get rewritten). No version bump if observable behaviour is unchanged (it is — same stack semantics), but the impl annotations move onto the methods.\n\nThen Tier 2 (options) adds G_* fields to Session (cascade: fsm_minimize reads G_MINIMAL/hopcroft — pass as params or Session ref; io G_ATT_EPSILON; lexc G_LEXC_ALIGN); Tier 3 (defines) adds defines/defines_f to Session (fsm_parse_regex already takes the defines param — just swap the ~21 iface/lexc thread_local reads for session.defines).\n\nEstimated ~1500-2500 LOC for Tier 1 alone. Best executed as a dedicated focused pass with fresh budget; the mechanical parts (signature + call-prefix rewrites) are scriptable per file, but the 64-test threading is fiddly and the whole tier must compile atomically."
+                    }
+                )
+            }
+
+            {
+                id w8-options
+                title "Tier 2: 21 G_* options (mem.rs) → Session fields. Reads are mostly at iface entry points + a few library sites (fsm_minimize G_MINIMAL/hopcroft, io G_ATT_EPSILON, lexc G_LEXC_ALIGN) — pass those as params where the cascade is small."
+                priority 1
+            }
+
+            {
+                id w8-defines
+                title "Tier 3: G_DEFINES/G_DEFINES_F (define registry) → Session. Already ~90% threaded (fsm_parse_regex takes a defines param); replace the ~21 iface/lexc thread_local reads with Session.defines. Fold in FSM_OPTIONS."
+                priority 2
+            }
+        )
+    }
 )

@@ -96,4 +96,5 @@ assertions (
     {id w7-lexcread, kind @complete, author "brendan@necessary.nu", at 2026-07-07T15:16:06.706708Z}
     {id w7-utf8-io, kind @complete, author "brendan@necessary.nu", at 2026-07-07T19:25:42.744007Z}
     {id w7-apply-runtime, kind @complete, author "brendan@necessary.nu", at 2026-07-07T19:36:46.227718Z}
+    {id w8-stack, kind @doing, author "brendan@necessary.nu", at 2026-07-08T16:39:29.93291Z}
 )
