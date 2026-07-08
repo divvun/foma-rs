@@ -20,7 +20,7 @@ pub fn iface_load_defined(filename: &str) {
 // [spec:foma:sem:iface.iface-read-att-fn]
 // [spec:foma:def:foma.iface-read-att-fn]
 // [spec:foma:sem:foma.iface-read-att-fn]
-pub fn iface_read_att(filename: &str) -> i32 {
+pub fn iface_read_att(session: &mut Session, filename: &str) -> i32 {
     print!("Reading AT&T file: {}\n", filename);
     match read_att(filename) {
         None => {
@@ -29,7 +29,7 @@ pub fn iface_read_att(filename: &str) -> i32 {
             1
         }
         Some(tempnet) => {
-            stack_add(tempnet);
+            session.stack_add(tempnet);
             0
         }
     }
@@ -39,7 +39,7 @@ pub fn iface_read_att(filename: &str) -> i32 {
 // [spec:foma:sem:iface.iface-read-prolog-fn]
 // [spec:foma:def:foma.iface-read-prolog-fn]
 // [spec:foma:sem:foma.iface-read-prolog-fn]
-pub fn iface_read_prolog(filename: &str) -> i32 {
+pub fn iface_read_prolog(session: &mut Session, filename: &str) -> i32 {
     print!("Reading prolog: {}\n", filename);
     match fsm_read_prolog(filename) {
         None => {
@@ -48,7 +48,7 @@ pub fn iface_read_prolog(filename: &str) -> i32 {
             1
         }
         Some(tempnet) => {
-            stack_add(tempnet);
+            session.stack_add(tempnet);
             0
         }
     }
@@ -58,7 +58,7 @@ pub fn iface_read_prolog(filename: &str) -> i32 {
 // [spec:foma:sem:iface.iface-read-spaced-text-fn]
 // [spec:foma:def:foma.iface-read-spaced-text-fn]
 // [spec:foma:sem:foma.iface-read-spaced-text-fn]
-pub fn iface_read_spaced_text(filename: &str) -> i32 {
+pub fn iface_read_spaced_text(session: &mut Session, filename: &str) -> i32 {
     match fsm_read_spaced_text_file(filename) {
         None => {
             eprint!("{}: ", filename);
@@ -66,7 +66,7 @@ pub fn iface_read_spaced_text(filename: &str) -> i32 {
             1
         }
         Some(net) => {
-            stack_add(fsm_topsort(fsm_minimize(net)));
+            session.stack_add(fsm_topsort(fsm_minimize(net)));
             0
         }
     }
@@ -76,7 +76,7 @@ pub fn iface_read_spaced_text(filename: &str) -> i32 {
 // [spec:foma:sem:iface.iface-read-text-fn]
 // [spec:foma:def:foma.iface-read-text-fn]
 // [spec:foma:sem:foma.iface-read-text-fn]
-pub fn iface_read_text(filename: &str) -> i32 {
+pub fn iface_read_text(session: &mut Session, filename: &str) -> i32 {
     match fsm_read_text_file(filename) {
         None => {
             eprint!("{}: ", filename);
@@ -84,7 +84,7 @@ pub fn iface_read_text(filename: &str) -> i32 {
             1
         }
         Some(net) => {
-            stack_add(fsm_topsort(fsm_minimize(net)));
+            session.stack_add(fsm_topsort(fsm_minimize(net)));
             0
         }
     }
@@ -115,11 +115,11 @@ pub fn iface_save_defined(filename: &str) {
 // [spec:foma:sem:iface.iface-write-att-fn]
 // [spec:foma:def:foma.iface-write-att-fn]
 // [spec:foma:sem:foma.iface-write-att-fn]
-pub fn iface_write_att(filename: Option<&str>) -> i32 {
-    if iface_stack_check(1) == 0 {
+pub fn iface_write_att(session: &mut Session, filename: Option<&str>) -> i32 {
+    if iface_stack_check(session, 1) == 0 {
         return 1;
     }
-    let top = stack_find_top().unwrap();
+    let top = session.stack_find_top().unwrap();
     let mut outfile: Output = match filename {
         None => Output::Stdout(std::io::stdout()),
         Some(name) => {
@@ -134,7 +134,7 @@ pub fn iface_write_att(filename: Option<&str>) -> i32 {
             }
         }
     };
-    stack_entry_fsm(top, |f| net_print_att(f, &mut outfile));
+    session.stack_entry_fsm(top, |f| net_print_att(f, &mut outfile));
     // fclose only when filename != NULL; stdout is not closed. Both drop here.
     0
 }
@@ -143,9 +143,9 @@ pub fn iface_write_att(filename: Option<&str>) -> i32 {
 // [spec:foma:sem:iface.iface-write-prolog-fn]
 // [spec:foma:def:foma.iface-write-prolog-fn]
 // [spec:foma:sem:foma.iface-write-prolog-fn]
-pub fn iface_write_prolog(filename: Option<&str>) {
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
-        stack_entry_fsm(top, |f| foma_write_prolog(f, filename));
+pub fn iface_write_prolog(session: &mut Session, filename: Option<&str>) {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
+        session.stack_entry_fsm(top, |f| foma_write_prolog(f, filename));
     }
 }

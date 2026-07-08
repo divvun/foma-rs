@@ -145,8 +145,8 @@ pub(crate) fn global_vars() -> Vec<Gv> {
 // [spec:foma:sem:iface.iface-stack-check-fn]
 // [spec:foma:def:foma.iface-stack-check-fn]
 // [spec:foma:sem:foma.iface-stack-check-fn]
-pub fn iface_stack_check(size: i32) -> i32 {
-    if stack_size() < size {
+pub fn iface_stack_check(session: &mut Session, size: i32) -> i32 {
+    if session.stack_size() < size {
         print!(
             "Not enough networks on stack. Operation requires at least {}.\n",
             size

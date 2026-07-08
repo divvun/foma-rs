@@ -45,15 +45,11 @@ pub(crate) use crate::mem::{
 };
 pub(crate) use crate::minimize::fsm_minimize;
 pub(crate) use crate::reverse::fsm_reverse;
+pub(crate) use crate::session::Session;
 pub(crate) use crate::sigma::sigma_sort;
 pub(crate) use crate::spelling::{
     apply_med, apply_med_get_cost, apply_med_get_instring, apply_med_set_heap_max,
     apply_med_set_med_cutoff, apply_med_set_med_limit, cmatrix_print, cmatrix_print_att,
-};
-pub(crate) use crate::stack::{
-    stack_add, stack_entry_ah, stack_entry_amedh, stack_entry_fsm, stack_entry_next,
-    stack_find_bottom, stack_find_second, stack_find_top, stack_get_ah, stack_get_med_ah,
-    stack_isempty, stack_pop, stack_rotate, stack_size, stack_turn,
 };
 pub(crate) use crate::structures::{
     fsm_copy, fsm_destroy, fsm_extract_ambiguous, fsm_extract_ambiguous_domain,

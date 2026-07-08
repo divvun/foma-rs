@@ -23,6 +23,7 @@ pub mod minimize;
 pub mod regex;
 pub mod reverse;
 pub mod rewrite;
+pub mod session;
 pub mod sigma;
 pub mod spelling;
 pub mod stack;

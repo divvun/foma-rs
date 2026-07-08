@@ -4,25 +4,25 @@
 use super::*;
 use crate::define::{add_defined, defined_networks_init};
 use crate::regex::fsm_parse_regex;
-use crate::stack::stack_init;
+use crate::session::Session;
 use crate::types::Fsm;
 
 /// Push a compiled regex onto the CLI stack (fixture).
-fn push(re: &str) {
-    stack_add(fsm_parse_regex(re, None, None).unwrap());
+fn push(session: &mut Session, re: &str) {
+    session.stack_add(fsm_parse_regex(re, None, None).unwrap());
 }
 
 /// Push a topsorted regex (fixture). fsm_count leaves pathcount untouched, so
 /// a cyclic net only gets pathcount == PATHCOUNT_CYCLIC after fsm_topsort (the
 /// REPL topsorts regex results; a bare fsm_parse_regex leaves it UNKNOWN).
-fn push_topsorted(re: &str) {
-    stack_add(fsm_topsort(fsm_parse_regex(re, None, None).unwrap()));
+fn push_topsorted(session: &mut Session, re: &str) {
+    session.stack_add(fsm_topsort(fsm_parse_regex(re, None, None).unwrap()));
 }
 
 /// Pop the top net and test recognizer-language equality against `re`.
-fn top_is(re: &str) -> bool {
+fn top_is(session: &mut Session, re: &str) -> bool {
     let expected = fsm_parse_regex(re, None, None).unwrap();
-    fsm_equivalent(stack_pop().unwrap(), expected) == 1
+    fsm_equivalent(session.stack_pop().unwrap(), expected) == 1
 }
 
 /// Does `net` accept `w` on the input (down) side?
@@ -62,7 +62,7 @@ fn up1(net: &Fsm, w: &str) -> Option<String> {
 // [spec:foma:sem:foma.iface-warranty-fn/test]
 #[test]
 fn help_family_prints_without_touching_the_stack() {
-    stack_init();
+    let session = Session::new();
     iface_help();
     iface_apropos("net"); // some matches
     iface_apropos("\u{1}zznomatchzz"); // no match → prints nothing
@@ -72,7 +72,7 @@ fn help_family_prints_without_touching_the_stack() {
     iface_print_bool(0);
     iface_warranty();
     // None of these read or write the stack.
-    assert_eq!(stack_size(), 0);
+    assert_eq!(session.stack_size(), 0);
 }
 
 // foma_net_print is re-exported from io.c; verify the re-export reaches the
@@ -122,18 +122,21 @@ fn apply_set_params_copies_the_four_globals() {
 // [spec:foma:sem:foma.iface-apply-up-fn/test]
 #[test]
 fn apply_down_and_up_keep_the_net_and_refuse_empty_stack() {
-    stack_init();
+    let mut session = Session::new();
     // Empty stack: iface_stack_check(1) refuses; nothing pushed/popped.
-    iface_apply_down("a");
-    iface_apply_up("a");
-    assert_eq!(stack_size(), 0);
-    push("a:b"); // transducer a -> b
-    iface_apply_down("a"); // prints "b"; net not consumed
-    assert_eq!(stack_size(), 1);
-    iface_apply_up("b"); // prints "a"; net not consumed
-    assert_eq!(stack_size(), 1);
+    iface_apply_down(&mut session, "a");
+    iface_apply_up(&mut session, "a");
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a:b"); // transducer a -> b
+    iface_apply_down(&mut session, "a"); // prints "b"; net not consumed
+    assert_eq!(session.stack_size(), 1);
+    iface_apply_up(&mut session, "b"); // prints "a"; net not consumed
+    assert_eq!(session.stack_size(), 1);
     // The net is unchanged and still maps a -> b.
-    assert_eq!(down1(&stack_pop().unwrap(), "a"), Some("b".to_string()));
+    assert_eq!(
+        down1(&session.stack_pop().unwrap(), "a"),
+        Some("b".to_string())
+    );
 }
 
 // apply med: configures the cached med handle (heap max 4194305, med-limit
@@ -143,15 +146,15 @@ fn apply_down_and_up_keep_the_net_and_refuse_empty_stack() {
 // [spec:foma:sem:foma.iface-apply-med-fn/test]
 #[test]
 fn apply_med_configures_handle_and_refuses_empty_stack() {
-    stack_init();
-    iface_apply_med("cat"); // empty stack: no-op
-    assert_eq!(stack_size(), 0);
-    push("c a t");
-    iface_apply_med("cat");
-    assert_eq!(stack_size(), 1); // net not consumed
-    let amedh = stack_get_med_ah().unwrap();
+    let mut session = Session::new();
+    iface_apply_med(&mut session, "cat"); // empty stack: no-op
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "c a t");
+    iface_apply_med(&mut session, "cat");
+    assert_eq!(session.stack_size(), 1); // net not consumed
+    let amedh = session.stack_get_med_ah().unwrap();
     let (limit, cutoff, heap) =
-        stack_entry_amedh(amedh, |m| (m.med_limit, m.med_cutoff, m.med_max_heap_size));
+        session.stack_entry_amedh(amedh, |m| (m.med_limit, m.med_cutoff, m.med_max_heap_size));
     assert_eq!(limit, 3);
     assert_eq!(cutoff, 15);
     assert_eq!(heap, 4194304 + 1);
@@ -169,23 +172,33 @@ fn apply_file_direction_stack_and_roundtrip() {
     let outpath = dir.join("foma_s1_applyfile_out.txt");
     std::fs::write(&inpath, "cat\n").unwrap();
 
-    stack_init();
+    let mut session = Session::new();
     // Invalid direction: rejected before the stack/file checks.
-    assert_eq!(iface_apply_file(inpath.to_str().unwrap(), None, 0), 1);
+    assert_eq!(
+        iface_apply_file(&mut session, inpath.to_str().unwrap(), None, 0),
+        1
+    );
     // Valid direction, empty stack: iface_stack_check(1) fails → 0.
-    assert_eq!(iface_apply_file(inpath.to_str().unwrap(), None, AP_D), 0);
+    assert_eq!(
+        iface_apply_file(&mut session, inpath.to_str().unwrap(), None, AP_D),
+        0
+    );
 
-    push("c a t"); // acceptor for "cat" over sigma {c,a,t}
+    push(&mut session, "c a t"); // acceptor for "cat" over sigma {c,a,t}
     // Bad input path with a populated stack: open failure → 1.
-    assert_eq!(iface_apply_file("/no/such/foma/path", None, AP_D), 1);
+    assert_eq!(
+        iface_apply_file(&mut session, "/no/such/foma/path", None, AP_D),
+        1
+    );
     // Good run writing to a file.
     let rc = iface_apply_file(
+        &mut session,
         inpath.to_str().unwrap(),
         Some(outpath.to_str().unwrap()),
         AP_D,
     );
     assert_eq!(rc, 0);
-    assert_eq!(stack_size(), 1); // net not consumed
+    assert_eq!(session.stack_size(), 1); // net not consumed
     let out = std::fs::read_to_string(&outpath).unwrap();
     assert!(out.contains("cat"), "output was: {:?}", out);
 }
@@ -197,13 +210,13 @@ fn apply_file_direction_stack_and_roundtrip() {
 // [spec:foma:sem:foma.iface-close-fn/test]
 #[test]
 fn close_preserves_language_and_refuses_empty() {
-    stack_init();
-    iface_close();
-    assert_eq!(stack_size(), 0);
-    push("a | b");
-    iface_close();
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a | b"));
+    let mut session = Session::new();
+    iface_close(&mut session);
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a | b");
+    iface_close(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a | b"));
 }
 
 // compact sigma: mutates top in place then pop + push topsort(minimize);
@@ -212,11 +225,11 @@ fn close_preserves_language_and_refuses_empty() {
 // [spec:foma:sem:foma.iface-compact-fn/test]
 #[test]
 fn compact_preserves_language() {
-    stack_init();
-    push("a | b");
-    iface_compact();
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a | b"));
+    let mut session = Session::new();
+    push(&mut session, "a | b");
+    iface_compact(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a | b"));
 }
 
 // complete net: pop + push fsm_complete(net). The accepted language is
@@ -225,11 +238,11 @@ fn compact_preserves_language() {
 // [spec:foma:sem:foma.iface-complete-fn/test]
 #[test]
 fn complete_keeps_language_and_adds_no_words() {
-    stack_init();
-    push("a");
-    iface_complete();
-    assert_eq!(stack_size(), 1);
-    let net = stack_pop().unwrap();
+    let mut session = Session::new();
+    push(&mut session, "a");
+    iface_complete(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    let net = session.stack_pop().unwrap();
     assert!(accepts_down(&net, "a"));
     assert!(!accepts_down(&net, "aa"));
     assert!(!accepts_down(&net, ""));
@@ -241,11 +254,11 @@ fn complete_keeps_language_and_adds_no_words() {
 // [spec:foma:sem:foma.iface-determinize-fn/test]
 #[test]
 fn determinize_preserves_language() {
-    stack_init();
-    push("a | b");
-    iface_determinize();
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a | b"));
+    let mut session = Session::new();
+    push(&mut session, "a | b");
+    iface_determinize(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a | b"));
 }
 
 // compose net: folds the ENTIRE stack down to one; the net nearer the top
@@ -254,25 +267,28 @@ fn determinize_preserves_language() {
 // [spec:foma:sem:foma.iface-compose-fn/test]
 #[test]
 fn compose_folds_whole_stack_and_top_is_upper_operand() {
-    stack_init();
+    let mut session = Session::new();
     // <2 nets: refusal, stack unchanged.
-    push("a");
-    iface_compose();
-    assert_eq!(stack_size(), 1);
+    push(&mut session, "a");
+    iface_compose(&mut session);
+    assert_eq!(session.stack_size(), 1);
     // 3 identity nets fold to a single net (fold-until-one).
-    push("a");
-    push("a");
-    assert_eq!(stack_size(), 3);
-    iface_compose();
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a"));
+    push(&mut session, "a");
+    push(&mut session, "a");
+    assert_eq!(session.stack_size(), 3);
+    iface_compose(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a"));
     // Pop order: compose(top, second) = (a:b) .o. (b:c) = a:c.
-    stack_init();
-    push("b:c"); // bottom / second operand
-    push("a:b"); // top / first (upper) operand
-    iface_compose();
-    assert_eq!(stack_size(), 1);
-    assert_eq!(down1(&stack_pop().unwrap(), "a"), Some("c".to_string()));
+    session = Session::new();
+    push(&mut session, "b:c"); // bottom / second operand
+    push(&mut session, "a:b"); // top / first (upper) operand
+    iface_compose(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert_eq!(
+        down1(&session.stack_pop().unwrap(), "a"),
+        Some("c".to_string())
+    );
 }
 
 // concatenate: folds the whole stack; the top net is the LEFT operand each
@@ -282,16 +298,16 @@ fn compose_folds_whole_stack_and_top_is_upper_operand() {
 // [spec:foma:sem:foma.iface-conc-fn+1/test]
 #[test]
 fn concatenate_folds_with_top_as_left_operand() {
-    stack_init();
-    push("a");
-    iface_conc(); // <2 nets: refusal
-    assert_eq!(stack_size(), 1);
-    push("b");
-    push("c"); // stack bottom->top: a, b, c
-    assert_eq!(stack_size(), 3);
-    iface_conc();
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("c b a"));
+    let mut session = Session::new();
+    push(&mut session, "a");
+    iface_conc(&mut session); // <2 nets: refusal
+    assert_eq!(session.stack_size(), 1);
+    push(&mut session, "b");
+    push(&mut session, "c"); // stack bottom->top: a, b, c
+    assert_eq!(session.stack_size(), 3);
+    iface_conc(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "c b a"));
 }
 
 // crossproduct net: SINGLE step (does not fold); top is the upper operand.
@@ -299,15 +315,18 @@ fn concatenate_folds_with_top_as_left_operand() {
 // [spec:foma:sem:foma.iface-crossproduct-fn/test]
 #[test]
 fn crossproduct_is_single_step_top_is_upper() {
-    stack_init();
-    push("z"); // bottom, untouched
-    push("b"); // second / lower operand
-    push("c"); // top / upper operand
-    iface_crossproduct();
+    let mut session = Session::new();
+    push(&mut session, "z"); // bottom, untouched
+    push(&mut session, "b"); // second / lower operand
+    push(&mut session, "c"); // top / upper operand
+    iface_crossproduct(&mut session);
     // Only the top two were consumed and one pushed: 3 -> 2.
-    assert_eq!(stack_size(), 2);
-    assert_eq!(down1(&stack_pop().unwrap(), "c"), Some("b".to_string()));
-    assert!(top_is("z")); // bottom net still present
+    assert_eq!(session.stack_size(), 2);
+    assert_eq!(
+        down1(&session.stack_pop().unwrap(), "c"),
+        Some("b".to_string())
+    );
+    assert!(top_is(&mut session, "z")); // bottom net still present
 }
 
 // intersect net: folds the whole stack (commutative). Refuses with <2 nets.
@@ -315,16 +334,16 @@ fn crossproduct_is_single_step_top_is_upper() {
 // [spec:foma:sem:foma.iface-intersect-fn/test]
 #[test]
 fn intersect_folds_whole_stack() {
-    stack_init();
-    push("a | b");
-    iface_intersect(); // <2 nets: refusal
-    assert_eq!(stack_size(), 1);
-    push("b | c");
-    push("b"); // three sets whose intersection is {b}
-    assert_eq!(stack_size(), 3);
-    iface_intersect();
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("b"));
+    let mut session = Session::new();
+    push(&mut session, "a | b");
+    iface_intersect(&mut session); // <2 nets: refusal
+    assert_eq!(session.stack_size(), 1);
+    push(&mut session, "b | c");
+    push(&mut session, "b"); // three sets whose intersection is {b}
+    assert_eq!(session.stack_size(), 3);
+    iface_intersect(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "b"));
 }
 
 // ignore net: SINGLE step; the top net is the base language A in A/B.
@@ -332,16 +351,16 @@ fn intersect_folds_whole_stack() {
 // [spec:foma:sem:foma.iface-ignore-fn/test]
 #[test]
 fn ignore_is_single_step_base_is_top() {
-    stack_init();
-    push("z"); // bottom, untouched
-    push("x"); // second: ignored material B
-    push("a"); // top: base language A
-    iface_ignore();
-    assert_eq!(stack_size(), 2); // single step 3 -> 2
-    let net = stack_pop().unwrap();
+    let mut session = Session::new();
+    push(&mut session, "z"); // bottom, untouched
+    push(&mut session, "x"); // second: ignored material B
+    push(&mut session, "a"); // top: base language A
+    iface_ignore(&mut session);
+    assert_eq!(session.stack_size(), 2); // single step 3 -> 2
+    let net = session.stack_pop().unwrap();
     assert!(accepts_down(&net, "a")); // base A with zero B's
     assert!(!accepts_down(&net, "x")); // B alone is not in A/B
-    assert!(top_is("z"));
+    assert!(top_is(&mut session, "z"));
 }
 
 // invert net: pop + push fsm_invert(net); swaps upper/lower sides.
@@ -349,12 +368,15 @@ fn ignore_is_single_step_base_is_top() {
 // [spec:foma:sem:foma.iface-invert-fn/test]
 #[test]
 fn invert_swaps_sides() {
-    stack_init();
-    push("a:b"); // maps a -> b
-    iface_invert();
-    assert_eq!(stack_size(), 1);
+    let mut session = Session::new();
+    push(&mut session, "a:b"); // maps a -> b
+    iface_invert(&mut session);
+    assert_eq!(session.stack_size(), 1);
     // Inverted net is b:a; apply up "a" (lower) yields "b" (upper).
-    assert_eq!(up1(&stack_pop().unwrap(), "a"), Some("b".to_string()));
+    assert_eq!(
+        up1(&session.stack_pop().unwrap(), "a"),
+        Some("b".to_string())
+    );
 }
 
 // lower-side net: pop + push topsort(minimize(fsm_lower(net))).
@@ -362,11 +384,11 @@ fn invert_swaps_sides() {
 // [spec:foma:sem:foma.iface-lower-side-fn/test]
 #[test]
 fn lower_side_takes_lower_projection() {
-    stack_init();
-    push("a:b");
-    iface_lower_side();
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("b"));
+    let mut session = Session::new();
+    push(&mut session, "a:b");
+    iface_lower_side(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "b"));
 }
 
 // letter machine: pop + push topsort(minimize(fsm_letter_machine(net)));
@@ -375,11 +397,11 @@ fn lower_side_takes_lower_projection() {
 // [spec:foma:sem:foma.iface-letter-machine-fn/test]
 #[test]
 fn letter_machine_preserves_single_char_language() {
-    stack_init();
-    push("a b");
-    iface_letter_machine();
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a b"));
+    let mut session = Session::new();
+    push(&mut session, "a b");
+    iface_letter_machine(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a b"));
 }
 
 // minimize net: forces g_minimal = 1 for the op, then RESTORES the saved
@@ -388,13 +410,13 @@ fn letter_machine_preserves_single_char_language() {
 // [spec:foma:sem:foma.iface-minimize-fn/test]
 #[test]
 fn minimize_restores_g_minimal_and_preserves_language() {
-    stack_init();
+    let mut session = Session::new();
     G_MINIMAL.with(|v| v.set(0)); // user turned `minimal` OFF
-    push("a | b");
-    iface_minimize();
+    push(&mut session, "a | b");
+    iface_minimize(&mut session);
     assert_eq!(G_MINIMAL.with(|v| v.get()), 0); // restored to saved value
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a | b"));
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a | b"));
 }
 
 // negate net: pop + push topsort(minimize(complement(net))); complement is
@@ -403,11 +425,11 @@ fn minimize_restores_g_minimal_and_preserves_language() {
 // [spec:foma:sem:foma.iface-negate-fn/test]
 #[test]
 fn negate_complements_over_sigma() {
-    stack_init();
-    push("a"); // sigma {a}
-    iface_negate();
-    assert_eq!(stack_size(), 1);
-    let net = stack_pop().unwrap();
+    let mut session = Session::new();
+    push(&mut session, "a"); // sigma {a}
+    iface_negate(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    let net = session.stack_pop().unwrap();
     assert!(!accepts_down(&net, "a")); // "a" excluded
     assert!(accepts_down(&net, "")); // epsilon in complement
     assert!(accepts_down(&net, "aa")); // aa in complement
@@ -418,11 +440,11 @@ fn negate_complements_over_sigma() {
 // [spec:foma:sem:foma.iface-one-plus-fn/test]
 #[test]
 fn one_plus_is_kleene_plus() {
-    stack_init();
-    push("a");
-    iface_one_plus();
-    assert_eq!(stack_size(), 1);
-    let net = stack_pop().unwrap();
+    let mut session = Session::new();
+    push(&mut session, "a");
+    iface_one_plus(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    let net = session.stack_pop().unwrap();
     assert!(accepts_down(&net, "a"));
     assert!(accepts_down(&net, "aa"));
     assert!(!accepts_down(&net, "")); // plus requires >= 1
@@ -436,18 +458,18 @@ fn one_plus_is_kleene_plus() {
 // [spec:foma:sem:foma.iface-eliminate-flag-fn/test]
 #[test]
 fn eliminate_flags_and_flag_wire_to_flag_eliminate() {
-    stack_init();
-    iface_eliminate_flags(); // empty: refusal
-    iface_eliminate_flag("X"); // empty: refusal
-    assert_eq!(stack_size(), 0);
-    push("a b");
-    iface_eliminate_flags();
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a b"));
-    push("a b");
-    iface_eliminate_flag("X");
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a b"));
+    let mut session = Session::new();
+    iface_eliminate_flags(&mut session); // empty: refusal
+    iface_eliminate_flag(&mut session, "X"); // empty: refusal
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a b");
+    iface_eliminate_flags(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a b"));
+    push(&mut session, "a b");
+    iface_eliminate_flag(&mut session, "X");
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a b"));
 }
 
 // extract ambiguous / unambiguous / ambiguous-upper (domain): each pops +
@@ -461,34 +483,37 @@ fn eliminate_flags_and_flag_wire_to_flag_eliminate() {
 #[test]
 fn extract_ambiguous_unambiguous_and_domain() {
     // extract ambiguous of an ambiguous transducer keeps its paths.
-    stack_init();
-    push("a:b | a:c");
-    iface_extract_ambiguous();
-    assert_eq!(stack_size(), 1);
-    assert!(accepts_down(&stack_pop().unwrap(), "a"));
+    let mut session = Session::new();
+    push(&mut session, "a:b | a:c");
+    iface_extract_ambiguous(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(accepts_down(&session.stack_pop().unwrap(), "a"));
     // extract ambiguous of an unambiguous transducer is empty.
-    push("a:b");
-    iface_extract_ambiguous();
-    assert!(!accepts_down(&stack_pop().unwrap(), "a"));
+    push(&mut session, "a:b");
+    iface_extract_ambiguous(&mut session);
+    assert!(!accepts_down(&session.stack_pop().unwrap(), "a"));
 
     // extract unambiguous of an unambiguous transducer keeps it (a -> b).
-    push("a:b");
-    iface_extract_unambiguous();
-    assert_eq!(stack_size(), 1);
-    assert_eq!(down1(&stack_pop().unwrap(), "a"), Some("b".to_string()));
+    push(&mut session, "a:b");
+    iface_extract_unambiguous(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert_eq!(
+        down1(&session.stack_pop().unwrap(), "a"),
+        Some("b".to_string())
+    );
     // extract unambiguous of an ambiguous transducer is empty.
-    push("a:b | a:c");
-    iface_extract_unambiguous();
-    assert!(!accepts_down(&stack_pop().unwrap(), "a"));
+    push(&mut session, "a:b | a:c");
+    iface_extract_unambiguous(&mut session);
+    assert!(!accepts_down(&session.stack_pop().unwrap(), "a"));
 
     // ambiguous upper = domain of ambiguous inputs.
-    push("a:b | a:c");
-    iface_ambiguous_upper();
-    assert_eq!(stack_size(), 1);
-    assert!(accepts_down(&stack_pop().unwrap(), "a"));
-    push("a:b"); // unambiguous → empty domain
-    iface_ambiguous_upper();
-    assert!(!accepts_down(&stack_pop().unwrap(), "a"));
+    push(&mut session, "a:b | a:c");
+    iface_ambiguous_upper(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(accepts_down(&session.stack_pop().unwrap(), "a"));
+    push(&mut session, "a:b"); // unambiguous → empty domain
+    iface_ambiguous_upper(&mut session);
+    assert!(!accepts_down(&session.stack_pop().unwrap(), "a"));
 }
 
 // extract number: scans to the first ASCII digit then atoi; no digit → 0; stops
@@ -514,18 +539,18 @@ fn extract_number_scans_to_first_digit() {
 // [spec:foma:sem:foma.iface-sequentialize-fn/test]
 #[test]
 fn factorize_and_sequentialize_are_single_net_ops() {
-    stack_init();
-    iface_factorize(); // empty: refusal
-    iface_sequentialize(); // empty: refusal
-    assert_eq!(stack_size(), 0);
-    push("a b");
-    iface_sequentialize();
-    assert_eq!(stack_size(), 1);
+    let mut session = Session::new();
+    iface_factorize(&mut session); // empty: refusal
+    iface_sequentialize(&mut session); // empty: refusal
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a b");
+    iface_sequentialize(&mut session);
+    assert_eq!(session.stack_size(), 1);
     // sequentialize of an acyclic acceptor preserves its language.
-    assert!(top_is("a b"));
-    push("a b c");
-    iface_factorize();
-    assert_eq!(stack_size(), 1); // bimachine factorization is one net op
+    assert!(top_is(&mut session, "a b"));
+    push(&mut session, "a b c");
+    iface_factorize(&mut session);
+    assert_eq!(session.stack_size(), 1); // bimachine factorization is one net op
 }
 
 // label net: pop + push fsm_sigma_pairs_net(net); size unchanged.
@@ -533,14 +558,17 @@ fn factorize_and_sequentialize_are_single_net_ops() {
 // [spec:foma:sem:foma.iface-label-net-fn/test]
 #[test]
 fn label_net_extracts_attested_pairs() {
-    stack_init();
-    iface_label_net(); // empty: refusal
-    assert_eq!(stack_size(), 0);
-    push("a:b");
-    iface_label_net();
-    assert_eq!(stack_size(), 1);
+    let mut session = Session::new();
+    iface_label_net(&mut session); // empty: refusal
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a:b");
+    iface_label_net(&mut session);
+    assert_eq!(session.stack_size(), 1);
     // The label net accepts the single attested pair a:b.
-    assert_eq!(down1(&stack_pop().unwrap(), "a"), Some("b".to_string()));
+    assert_eq!(
+        down1(&session.stack_pop().unwrap(), "a"),
+        Some("b".to_string())
+    );
 }
 
 // pop stack: empty prints "Stack is empty." (no iface_stack_check) and
@@ -549,14 +577,14 @@ fn label_net_extracts_attested_pairs() {
 // [spec:foma:sem:foma.iface-pop-fn/test]
 #[test]
 fn pop_removes_top_or_reports_empty() {
-    stack_init();
-    iface_pop(); // empty: message only
-    assert_eq!(stack_size(), 0);
-    push("a");
-    push("b");
-    iface_pop(); // removes "b"
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a")); // "a" is now the top
+    let mut session = Session::new();
+    iface_pop(&mut session); // empty: message only
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a");
+    push(&mut session, "b");
+    iface_pop(&mut session); // removes "b"
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a")); // "a" is now the top
 }
 
 // print lower-words: caches the apply handle, enumerates (prints), resets
@@ -565,13 +593,13 @@ fn pop_removes_top_or_reports_empty() {
 // [spec:foma:sem:foma.iface-lower-words-fn/test]
 #[test]
 fn lower_words_prints_without_consuming() {
-    stack_init();
-    iface_lower_words(-1); // empty: refusal
-    assert_eq!(stack_size(), 0);
-    push("a:b | a:c");
-    iface_lower_words(-1); // g_list_limit; prints "b","c"
-    iface_lower_words(1); // explicit small limit
-    assert_eq!(stack_size(), 1); // net not consumed
+    let mut session = Session::new();
+    iface_lower_words(&mut session, -1); // empty: refusal
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a:b | a:c");
+    iface_lower_words(&mut session, -1); // g_list_limit; prints "b","c"
+    iface_lower_words(&mut session, 1); // explicit small limit
+    assert_eq!(session.stack_size(), 1); // net not consumed
 }
 
 // name net + print name: name net strncpy's <=40 bytes into the top net's
@@ -583,21 +611,21 @@ fn lower_words_prints_without_consuming() {
 // [spec:foma:sem:foma.iface-print-name-fn/test]
 #[test]
 fn name_net_sets_full_name_then_prints() {
-    stack_init();
-    iface_name_net("nope"); // empty: refusal, no panic
-    iface_print_name(); // empty: refusal
-    assert_eq!(stack_size(), 0);
-    push("a");
-    iface_name_net("hello");
-    assert_eq!(stack_size(), 1); // not popped
-    let top = stack_find_top().unwrap();
-    assert_eq!(stack_entry_fsm(top, |f| f.name.clone()), "hello");
-    iface_print_name(); // prints "hello"
+    let mut session = Session::new();
+    iface_name_net(&mut session, "nope"); // empty: refusal, no panic
+    iface_print_name(&mut session); // empty: refusal
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a");
+    iface_name_net(&mut session, "hello");
+    assert_eq!(session.stack_size(), 1); // not popped
+    let top = session.stack_find_top().unwrap();
+    assert_eq!(session.stack_entry_fsm(top, |f| f.name.clone()), "hello");
+    iface_print_name(&mut session); // prints "hello"
     // >= 40 bytes: stored in full (C truncated to a fixed 40-byte field).
     let long = "x".repeat(45);
-    iface_name_net(&long);
-    let top = stack_find_top().unwrap();
-    let name = stack_entry_fsm(top, |f| f.name.clone());
+    iface_name_net(&mut session, &long);
+    let top = session.stack_find_top().unwrap();
+    let name = session.stack_entry_fsm(top, |f| f.name.clone());
     assert_eq!(name, long);
 }
 
@@ -607,14 +635,14 @@ fn name_net_sets_full_name_then_prints() {
 // [spec:foma:sem:foma.iface-print-dot-fn/test]
 #[test]
 fn print_dot_writes_and_keeps_net() {
-    stack_init();
-    iface_print_dot(None); // empty: refusal
-    assert_eq!(stack_size(), 0);
-    push("a b");
-    iface_print_dot(None); // to stdout
+    let mut session = Session::new();
+    iface_print_dot(&mut session, None); // empty: refusal
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a b");
+    iface_print_dot(&mut session, None); // to stdout
     let dotpath = std::env::temp_dir().join("foma_s1_printdot.dot");
-    iface_print_dot(Some(dotpath.to_str().unwrap()));
-    assert_eq!(stack_size(), 1); // net not consumed
+    iface_print_dot(&mut session, Some(dotpath.to_str().unwrap()));
+    assert_eq!(session.stack_size(), 1); // net not consumed
     assert!(dotpath.exists());
 }
 
@@ -624,12 +652,12 @@ fn print_dot_writes_and_keeps_net() {
 // [spec:foma:sem:foma.iface-print-net-fn/test]
 #[test]
 fn print_net_named_and_top_paths() {
-    stack_init();
+    let mut session = Session::new();
     // netname None + empty stack: refusal.
-    iface_print_net(None, None);
-    assert_eq!(stack_size(), 0);
+    iface_print_net(&mut session, None, None);
+    assert_eq!(session.stack_size(), 0);
     // netname Some with g_defines None (default): "No defined network".
-    iface_print_net(Some("Foo"), None);
+    iface_print_net(&mut session, Some("Foo"), None);
     // Populate g_defines with Foo, then print it by name.
     G_DEFINES.with(|g| *g.borrow_mut() = Some(defined_networks_init()));
     let def = fsm_parse_regex("x y", None, None).unwrap();
@@ -637,11 +665,11 @@ fn print_net_named_and_top_paths() {
         let mut g = g.borrow_mut();
         add_defined(g.as_deref_mut().unwrap(), Some(def), "Foo");
     });
-    iface_print_net(Some("Foo"), None); // found → prints
+    iface_print_net(&mut session, Some("Foo"), None); // found → prints
     // netname None + populated stack: prints the top net.
-    push("a b");
-    iface_print_net(None, None);
-    assert_eq!(stack_size(), 1); // stack untouched
+    push(&mut session, "a b");
+    iface_print_net(&mut session, None, None);
+    assert_eq!(session.stack_size(), 1); // stack untouched
 }
 
 // print cmatrix / export cmatrix: with no confusion matrix both print
@@ -654,14 +682,14 @@ fn print_net_named_and_top_paths() {
 // [spec:foma:sem:foma.iface-print-cmatrix-att-fn+1/test]
 #[test]
 fn print_cmatrix_reports_missing_matrix() {
-    stack_init();
-    iface_print_cmatrix(); // empty: refusal
-    iface_print_cmatrix_att(None); // empty: refusal
-    assert_eq!(stack_size(), 0);
-    push("a b"); // no confusion matrix attached
-    iface_print_cmatrix();
-    iface_print_cmatrix_att(None);
-    assert_eq!(stack_size(), 1); // net not consumed
+    let mut session = Session::new();
+    iface_print_cmatrix(&mut session); // empty: refusal
+    iface_print_cmatrix_att(&mut session, None); // empty: refusal
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a b"); // no confusion matrix attached
+    iface_print_cmatrix(&mut session);
+    iface_print_cmatrix_att(&mut session, None);
+    assert_eq!(session.stack_size(), 1); // net not consumed
 }
 
 // export cmatrix to an unwritable path: with a confusion matrix present, the
@@ -671,12 +699,12 @@ fn print_cmatrix_reports_missing_matrix() {
 // [spec:foma:sem:foma.iface-print-cmatrix-att-fn+1/test]
 #[test]
 fn print_cmatrix_att_unwritable_path_does_not_crash() {
-    stack_init();
+    let mut session = Session::new();
     let mut net = fsm_parse_regex("a b", None, None).unwrap();
     crate::spelling::cmatrix_init(&mut net); // attach a confusion matrix
-    stack_add(net);
-    iface_print_cmatrix_att(Some("/foma_no_such_dir_xyz123/cm.att"));
-    assert_eq!(stack_size(), 1); // net not consumed, no panic
+    session.stack_add(net);
+    iface_print_cmatrix_att(&mut session, Some("/foma_no_such_dir_xyz123/cm.att"));
+    assert_eq!(session.stack_size(), 1); // net not consumed, no panic
 }
 
 // print defined: g_defines None prints "No defined symbols."; a populated
@@ -686,7 +714,7 @@ fn print_cmatrix_att_unwritable_path_does_not_crash() {
 // [spec:foma:sem:foma.iface-print-defined-fn+1/test]
 #[test]
 fn print_defined_handles_empty_and_populated() {
-    stack_init();
+    let session = Session::new();
     iface_print_defined(); // g_defines None: "No defined symbols."
     G_DEFINES.with(|g| *g.borrow_mut() = Some(defined_networks_init()));
     let def = fsm_parse_regex("x y", None, None).unwrap();
@@ -695,7 +723,7 @@ fn print_defined_handles_empty_and_populated() {
         add_defined(g.as_deref_mut().unwrap(), Some(def), "Foo");
     });
     iface_print_defined(); // prints "Foo\t<stats>"
-    assert_eq!(stack_size(), 0);
+    assert_eq!(session.stack_size(), 0);
 }
 
 // load defined: round-trip through a temp file. The file is written with
@@ -762,16 +790,16 @@ fn load_stack_pushes_in_file_order_last_on_top() {
         }
         gz.finish().unwrap();
     }
-    stack_init();
+    let mut session = Session::new();
     // Missing file: reported, stack unchanged.
-    iface_load_stack("/no/such/foma/stack");
-    assert_eq!(stack_size(), 0);
+    iface_load_stack(&mut session, "/no/such/foma/stack");
+    assert_eq!(session.stack_size(), 0);
     // Real load: a, b, c pushed in file order → top is "c", bottom is "a".
-    iface_load_stack(p);
-    assert_eq!(stack_size(), 3);
-    assert!(top_is("c")); // pops "c"
-    assert!(top_is("b"));
-    assert!(top_is("a"));
+    iface_load_stack(&mut session, p);
+    assert_eq!(session.stack_size(), 3);
+    assert!(top_is(&mut session, "c")); // pops "c"
+    assert!(top_is(&mut session, "b"));
+    assert!(top_is(&mut session, "a"));
 }
 
 // ================================================================
@@ -798,19 +826,19 @@ fn load_stack_pushes_in_file_order_last_on_top() {
 // [spec:foma:sem:foma.iface-apply-random-fn/test]
 #[test]
 fn random_family_prints_without_consuming() {
-    stack_init();
-    iface_random_lower(-1); // empty: refusal
-    iface_random_upper(-1);
-    iface_random_words(-1);
-    iface_apply_random(apply_random_words, 3);
-    assert_eq!(stack_size(), 0);
-    push("a:b | c:d");
-    iface_random_lower(-1); // g_list_random_limit
-    iface_random_upper(3); // explicit limit
-    iface_random_words(2);
-    iface_apply_random(apply_random_words, 4);
-    assert_eq!(stack_size(), 1); // net not consumed
-    assert!(top_is("a:b | c:d"));
+    let mut session = Session::new();
+    iface_random_lower(&mut session, -1); // empty: refusal
+    iface_random_upper(&mut session, -1);
+    iface_random_words(&mut session, -1);
+    iface_apply_random(&mut session, apply_random_words, 3);
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a:b | c:d");
+    iface_random_lower(&mut session, -1); // g_list_random_limit
+    iface_random_upper(&mut session, 3); // explicit limit
+    iface_random_words(&mut session, 2);
+    iface_apply_random(&mut session, apply_random_words, 4);
+    assert_eq!(session.stack_size(), 1); // net not consumed
+    assert!(top_is(&mut session, "a:b | c:d"));
 }
 
 // print sigma / print stats: both read the top net and preserve it; empty
@@ -821,15 +849,15 @@ fn random_family_prints_without_consuming() {
 // [spec:foma:sem:foma.iface-print-stats-fn/test]
 #[test]
 fn print_sigma_and_stats_keep_net() {
-    stack_init();
-    iface_print_sigma(); // empty: refusal
-    iface_print_stats();
-    assert_eq!(stack_size(), 0);
-    push("a b");
-    iface_print_sigma();
-    iface_print_stats();
-    assert_eq!(stack_size(), 1); // net not consumed
-    assert!(top_is("a b"));
+    let mut session = Session::new();
+    iface_print_sigma(&mut session); // empty: refusal
+    iface_print_stats(&mut session);
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a b");
+    iface_print_sigma(&mut session);
+    iface_print_stats(&mut session);
+    assert_eq!(session.stack_size(), 1); // net not consumed
+    assert!(top_is(&mut session, "a b"));
 }
 
 // print shortest-string / -size: both branches (arity 1 acceptor and arity 2
@@ -841,19 +869,19 @@ fn print_sigma_and_stats_keep_net() {
 // [spec:foma:sem:foma.iface-print-shortest-string-size-fn/test]
 #[test]
 fn print_shortest_string_both_arities_keep_net() {
-    stack_init();
-    iface_print_shortest_string(); // empty: refusal
-    iface_print_shortest_string_size();
-    assert_eq!(stack_size(), 0);
-    push("a b b"); // arity 1
-    iface_print_shortest_string();
-    iface_print_shortest_string_size();
-    assert_eq!(stack_size(), 1); // net not consumed
-    let _ = stack_pop();
-    push("[a:b] | [a a:c]"); // arity 2 transducer
-    iface_print_shortest_string();
-    iface_print_shortest_string_size();
-    assert_eq!(stack_size(), 1); // net not consumed
+    let mut session = Session::new();
+    iface_print_shortest_string(&mut session); // empty: refusal
+    iface_print_shortest_string_size(&mut session);
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a b b"); // arity 1
+    iface_print_shortest_string(&mut session);
+    iface_print_shortest_string_size(&mut session);
+    assert_eq!(session.stack_size(), 1); // net not consumed
+    let _ = session.stack_pop();
+    push(&mut session, "[a:b] | [a a:c]"); // arity 2 transducer
+    iface_print_shortest_string(&mut session);
+    iface_print_shortest_string_size(&mut session);
+    assert_eq!(session.stack_size(), 1); // net not consumed
 }
 
 // read att / prolog: a print + stack_add wrapper over the io reader. Round-trip
@@ -879,16 +907,16 @@ fn read_att_and_prolog_roundtrip_and_error() {
         let mut net = fsm_parse_regex("a b", None, None).unwrap();
         foma_write_prolog(&mut net, Some(pl));
     }
-    stack_init();
-    assert_eq!(iface_read_att("/no/such/foma/att"), 1);
-    assert_eq!(iface_read_prolog("/no/such/foma/prolog"), 1);
-    assert_eq!(stack_size(), 0);
-    assert_eq!(iface_read_att(att), 0);
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a b"));
-    assert_eq!(iface_read_prolog(pl), 0);
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a b"));
+    let mut session = Session::new();
+    assert_eq!(iface_read_att(&mut session, "/no/such/foma/att"), 1);
+    assert_eq!(iface_read_prolog(&mut session, "/no/such/foma/prolog"), 1);
+    assert_eq!(session.stack_size(), 0);
+    assert_eq!(iface_read_att(&mut session, att), 0);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a b"));
+    assert_eq!(iface_read_prolog(&mut session, pl), 0);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a b"));
 }
 
 // read text / spaced-text: compile a newline word list / space-separated
@@ -908,19 +936,22 @@ fn read_text_and_spaced_text() {
     let rst = rstp.to_str().unwrap();
     std::fs::write(rst, "a b c\n").unwrap();
 
-    stack_init();
-    assert_eq!(iface_read_text("/no/such/foma/text"), 1);
-    assert_eq!(iface_read_spaced_text("/no/such/foma/spaced"), 1);
-    assert_eq!(stack_size(), 0);
-    assert_eq!(iface_read_text(rt), 0);
-    assert_eq!(stack_size(), 1);
-    let net = stack_pop().unwrap();
+    let mut session = Session::new();
+    assert_eq!(iface_read_text(&mut session, "/no/such/foma/text"), 1);
+    assert_eq!(
+        iface_read_spaced_text(&mut session, "/no/such/foma/spaced"),
+        1
+    );
+    assert_eq!(session.stack_size(), 0);
+    assert_eq!(iface_read_text(&mut session, rt), 0);
+    assert_eq!(session.stack_size(), 1);
+    let net = session.stack_pop().unwrap();
     assert!(accepts_down(&net, "cat"));
     assert!(accepts_down(&net, "dog"));
     assert!(!accepts_down(&net, "cow"));
-    assert_eq!(iface_read_spaced_text(rst), 0);
-    assert_eq!(stack_size(), 1);
-    assert!(accepts_down(&stack_pop().unwrap(), "abc"));
+    assert_eq!(iface_read_spaced_text(&mut session, rst), 0);
+    assert_eq!(session.stack_size(), 1);
+    assert!(accepts_down(&session.stack_pop().unwrap(), "abc"));
 }
 
 // stack check: returns 1 when >= size nets are present, else prints the
@@ -929,13 +960,13 @@ fn read_text_and_spaced_text() {
 // [spec:foma:sem:foma.iface-stack-check-fn/test]
 #[test]
 fn stack_check_counts_the_stack() {
-    stack_init();
-    assert_eq!(iface_stack_check(0), 1); // 0 >= 0 with an empty stack
-    assert_eq!(iface_stack_check(1), 0);
-    push("a");
-    push("b");
-    assert_eq!(iface_stack_check(2), 1);
-    assert_eq!(iface_stack_check(3), 0);
+    let mut session = Session::new();
+    assert_eq!(iface_stack_check(&mut session, 0), 1); // 0 >= 0 with an empty stack
+    assert_eq!(iface_stack_check(&mut session, 1), 0);
+    push(&mut session, "a");
+    push(&mut session, "b");
+    assert_eq!(iface_stack_check(&mut session, 2), 1);
+    assert_eq!(iface_stack_check(&mut session, 3), 0);
 }
 
 // substitute symbol / defined: symbol dequotes both args and replaces the
@@ -948,15 +979,15 @@ fn stack_check_counts_the_stack() {
 // [spec:foma:sem:foma.iface-substitute-defined-fn/test]
 #[test]
 fn substitute_symbol_and_defined() {
-    stack_init();
-    iface_substitute_symbol("a", "x"); // empty: refusal
-    iface_substitute_defined("a", "X");
-    assert_eq!(stack_size(), 0);
+    let mut session = Session::new();
+    iface_substitute_symbol(&mut session, "a", "x"); // empty: refusal
+    iface_substitute_defined(&mut session, "a", "X");
+    assert_eq!(session.stack_size(), 0);
 
-    push("a b");
-    iface_substitute_symbol("a", "x"); // replace symbol a with x
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("x b"));
+    push(&mut session, "a b");
+    iface_substitute_symbol(&mut session, "a", "x"); // replace symbol a with x
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "x b"));
 
     // substitute defined: X = [p] replaces the arc labelled `a`.
     G_DEFINES.with(|g| *g.borrow_mut() = Some(defined_networks_init()));
@@ -965,14 +996,14 @@ fn substitute_symbol_and_defined() {
         let mut g = g.borrow_mut();
         add_defined(g.as_deref_mut().unwrap(), Some(def), "X");
     });
-    push("a b");
-    iface_substitute_defined("a", "Nope"); // no such defined net → unchanged
-    assert_eq!(stack_size(), 1);
-    iface_substitute_defined("zzz", "X"); // symbol does not occur → unchanged
-    assert_eq!(stack_size(), 1);
-    iface_substitute_defined("a", "X"); // success → a replaced by [p]
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("p b"));
+    push(&mut session, "a b");
+    iface_substitute_defined(&mut session, "a", "Nope"); // no such defined net → unchanged
+    assert_eq!(session.stack_size(), 1);
+    iface_substitute_defined(&mut session, "zzz", "X"); // symbol does not occur → unchanged
+    assert_eq!(session.stack_size(), 1);
+    iface_substitute_defined(&mut session, "a", "X"); // success → a replaced by [p]
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "p b"));
 }
 
 // upper-words / words: cache the apply handle, enumerate up to `limit`
@@ -984,15 +1015,15 @@ fn substitute_symbol_and_defined() {
 // [spec:foma:sem:foma.iface-words-fn/test]
 #[test]
 fn upper_words_and_words_keep_net() {
-    stack_init();
-    iface_upper_words(-1); // empty: refusal
-    iface_words(-1);
-    assert_eq!(stack_size(), 0);
-    push("a:b | a:c");
-    iface_upper_words(-1);
-    iface_words(1);
-    iface_words(-1);
-    assert_eq!(stack_size(), 1); // net not consumed
+    let mut session = Session::new();
+    iface_upper_words(&mut session, -1); // empty: refusal
+    iface_words(&mut session, -1);
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a:b | a:c");
+    iface_upper_words(&mut session, -1);
+    iface_words(&mut session, 1);
+    iface_words(&mut session, -1);
+    assert_eq!(session.stack_size(), 1); // net not consumed
 }
 
 // prune / reverse / zero-plus / upper-side: each pops + pushes a single-net
@@ -1007,34 +1038,34 @@ fn upper_words_and_words_keep_net() {
 // [spec:foma:sem:foma.iface-upper-side-fn/test]
 #[test]
 fn prune_reverse_zero_plus_upper_side() {
-    stack_init();
-    iface_prune(); // empty: refusal
-    iface_reverse();
-    iface_zero_plus();
-    iface_upper_side();
-    assert_eq!(stack_size(), 0);
+    let mut session = Session::new();
+    iface_prune(&mut session); // empty: refusal
+    iface_reverse(&mut session);
+    iface_zero_plus(&mut session);
+    iface_upper_side(&mut session);
+    assert_eq!(session.stack_size(), 0);
 
-    push("a b"); // coaccessible already → language unchanged
-    iface_prune();
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a b"));
+    push(&mut session, "a b"); // coaccessible already → language unchanged
+    iface_prune(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a b"));
 
-    push("a b"); // reverse of "ab" accepts "ba"
-    iface_reverse();
-    let net = stack_pop().unwrap();
+    push(&mut session, "a b"); // reverse of "ab" accepts "ba"
+    iface_reverse(&mut session);
+    let net = session.stack_pop().unwrap();
     assert!(accepts_down(&net, "ba"));
     assert!(!accepts_down(&net, "ab"));
 
-    push("a"); // Kleene star
-    iface_zero_plus();
-    let net = stack_pop().unwrap();
+    push(&mut session, "a"); // Kleene star
+    iface_zero_plus(&mut session);
+    let net = session.stack_pop().unwrap();
     assert!(accepts_down(&net, ""));
     assert!(accepts_down(&net, "aa"));
 
-    push("a:b"); // upper projection
-    iface_upper_side();
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a"));
+    push(&mut session, "a:b"); // upper projection
+    iface_upper_side(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a"));
 }
 
 // rotate / turn: both wire to stack_rotate (turn is the reproduced latent bug
@@ -1046,36 +1077,36 @@ fn prune_reverse_zero_plus_upper_side() {
 // [spec:foma:sem:foma.iface-turn-fn+1/test]
 #[test]
 fn rotate_swaps_ends_turn_reverses() {
-    stack_init();
-    iface_rotate(); // empty: refusal (guard), no-op
-    iface_turn();
-    assert_eq!(stack_size(), 0);
+    let mut session = Session::new();
+    iface_rotate(&mut session); // empty: refusal (guard), no-op
+    iface_turn(&mut session);
+    assert_eq!(session.stack_size(), 0);
 
     // bottom->top: a, b, c. rotate swaps a<->c fsms → top a, mid b, bottom c.
-    push("a");
-    push("b");
-    push("c");
-    iface_rotate();
-    assert!(top_is("a")); // former bottom now on top
-    assert!(top_is("b"));
-    assert!(top_is("c"));
+    push(&mut session, "a");
+    push(&mut session, "b");
+    push(&mut session, "c");
+    iface_rotate(&mut session);
+    assert!(top_is(&mut session, "a")); // former bottom now on top
+    assert!(top_is(&mut session, "b"));
+    assert!(top_is(&mut session, "c"));
 
     // turn REVERSES the whole stack (not a top/bottom swap). Use 4 nets so the
     // two differ: reverse of a,b,c,d is d,c,b,a (pop order a,b,c,d), whereas a
     // swap-ends would give d,b,c,a (pop order a,c,b,d).
-    push("a");
-    push("b");
-    push("c");
-    push("d");
-    iface_turn();
-    assert!(top_is("a"));
-    assert!(top_is("b"));
-    assert!(top_is("c"));
-    assert!(top_is("d"));
+    push(&mut session, "a");
+    push(&mut session, "b");
+    push(&mut session, "c");
+    push(&mut session, "d");
+    iface_turn(&mut session);
+    assert!(top_is(&mut session, "a"));
+    assert!(top_is(&mut session, "b"));
+    assert!(top_is(&mut session, "c"));
+    assert!(top_is(&mut session, "d"));
 
-    push("x"); // single net: unchanged
-    iface_rotate();
-    assert!(top_is("x"));
+    push(&mut session, "x"); // single net: unchanged
+    iface_rotate(&mut session);
+    assert!(top_is(&mut session, "x"));
 }
 
 // save defined / save stack: save_defined reports "No defined networks" when
@@ -1114,21 +1145,21 @@ fn save_defined_and_save_stack_roundtrip() {
     // save stack: writes bottom→top (a, b, c); load pushes in file order.
     let sp = dir.join("foma_s2_savestack.gz");
     let s = sp.to_str().unwrap();
-    stack_init();
+    let mut session = Session::new();
     let _ = std::fs::remove_file(s);
-    iface_save_stack(s); // empty: refusal, nothing written
+    iface_save_stack(&mut session, s); // empty: refusal, nothing written
     assert!(!std::path::Path::new(s).exists());
-    push("a");
-    push("b");
-    push("c");
-    iface_save_stack(s);
-    assert_eq!(stack_size(), 3); // stack not consumed
-    stack_init();
-    iface_load_stack(s);
-    assert_eq!(stack_size(), 3);
-    assert!(top_is("c"));
-    assert!(top_is("b"));
-    assert!(top_is("a"));
+    push(&mut session, "a");
+    push(&mut session, "b");
+    push(&mut session, "c");
+    iface_save_stack(&mut session, s);
+    assert_eq!(session.stack_size(), 3); // stack not consumed
+    session = Session::new();
+    iface_load_stack(&mut session, s);
+    assert_eq!(session.stack_size(), 3);
+    assert!(top_is(&mut session, "c"));
+    assert!(top_is(&mut session, "b"));
+    assert!(top_is(&mut session, "a"));
 }
 
 // set variable: BOOL accepts ON/OFF/1/0 (else "Invalid value"); the name match
@@ -1146,7 +1177,7 @@ fn save_defined_and_save_stack_roundtrip() {
 // [spec:foma:sem:foma.iface-show-variables-fn/test]
 #[test]
 fn set_and_show_variables() {
-    stack_init();
+    let session = Session::new();
     // BOOL: ON/OFF/1/0 all recognised.
     iface_set_variable("minimal", "OFF");
     assert_eq!(G_MINIMAL.with(|v| v.get()), 0);
@@ -1187,7 +1218,7 @@ fn set_and_show_variables() {
     iface_show_variable("minimal");
     iface_show_variable("zzznope"); // "no global variable"
     iface_show_variables();
-    assert_eq!(stack_size(), 0);
+    assert_eq!(session.stack_size(), 0);
 }
 
 // shuffle / union: both fold the entire stack (commutative); union minimizes
@@ -1198,25 +1229,25 @@ fn set_and_show_variables() {
 // [spec:foma:sem:foma.iface-union-fn/test]
 #[test]
 fn shuffle_and_union_fold_whole_stack() {
-    stack_init();
-    push("a");
-    iface_shuffle(); // < 2: refusal
-    iface_union();
-    assert_eq!(stack_size(), 1);
+    let mut session = Session::new();
+    push(&mut session, "a");
+    iface_shuffle(&mut session); // < 2: refusal
+    iface_union(&mut session);
+    assert_eq!(session.stack_size(), 1);
 
-    push("b"); // shuffle(a,b) = {ab, ba}
-    iface_shuffle();
-    assert_eq!(stack_size(), 1);
-    let net = stack_pop().unwrap();
+    push(&mut session, "b"); // shuffle(a,b) = {ab, ba}
+    iface_shuffle(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    let net = session.stack_pop().unwrap();
     assert!(accepts_down(&net, "ab"));
     assert!(accepts_down(&net, "ba"));
 
-    push("a");
-    push("b");
-    push("c"); // union folds to a|b|c
-    iface_union();
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a | b | c"));
+    push(&mut session, "a");
+    push(&mut session, "b");
+    push(&mut session, "c"); // union folds to a|b|c
+    iface_union(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a | b | c"));
 }
 
 // sigma net: pop + push fsm_sigma_net; accepts every single symbol of the
@@ -1225,13 +1256,13 @@ fn shuffle_and_union_fold_whole_stack() {
 // [spec:foma:sem:foma.iface-sigma-net-fn/test]
 #[test]
 fn sigma_net_accepts_single_symbols() {
-    stack_init();
-    iface_sigma_net(); // empty: refusal
-    assert_eq!(stack_size(), 0);
-    push("a b"); // sigma {a, b}
-    iface_sigma_net();
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a | b"));
+    let mut session = Session::new();
+    iface_sigma_net(&mut session); // empty: refusal
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a b"); // sigma {a, b}
+    iface_sigma_net(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a | b"));
 }
 
 // sort in / out: mutate the top net's arc order in place (no pop/push);
@@ -1244,19 +1275,19 @@ fn sigma_net_accepts_single_symbols() {
 // [spec:foma:sem:foma.iface-sort-fn/test]
 #[test]
 fn sort_family_preserves_language() {
-    stack_init();
-    iface_sort_input(); // empty: refusal
-    iface_sort_output();
-    iface_sort();
-    assert_eq!(stack_size(), 0);
-    push("a b | b a");
-    iface_sort_input();
-    assert_eq!(stack_size(), 1);
-    iface_sort_output();
-    assert_eq!(stack_size(), 1);
-    iface_sort();
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a b | b a"));
+    let mut session = Session::new();
+    iface_sort_input(&mut session); // empty: refusal
+    iface_sort_output(&mut session);
+    iface_sort(&mut session);
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a b | b a");
+    iface_sort_input(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    iface_sort_output(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    iface_sort(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a b | b a"));
 }
 
 // test_* family: each reads the top net (equivalent reads the top two),
@@ -1282,104 +1313,104 @@ fn sort_family_preserves_language() {
 // [spec:foma:sem:foma.iface-test-equivalent-fn/test]
 #[test]
 fn test_family_pins_predicate_and_preserves_stack() {
-    stack_init();
+    let mut session = Session::new();
     // Every test_* refuses on an empty stack.
-    iface_test_functional();
-    iface_test_identity();
-    iface_test_unambiguous();
-    iface_test_sequential();
-    iface_test_null();
-    iface_test_nonnull();
-    iface_test_lower_universal();
-    iface_test_upper_universal();
-    assert_eq!(stack_size(), 0);
+    iface_test_functional(&mut session);
+    iface_test_identity(&mut session);
+    iface_test_unambiguous(&mut session);
+    iface_test_sequential(&mut session);
+    iface_test_null(&mut session);
+    iface_test_nonnull(&mut session);
+    iface_test_lower_universal(&mut session);
+    iface_test_upper_universal(&mut session);
+    assert_eq!(session.stack_size(), 0);
 
     // functional: true for a:b, false for a:b|a:c.
-    push("a:b");
-    let t = stack_find_top().unwrap();
-    assert_eq!(stack_entry_fsm(t, |f| fsm_isfunctional(f)), 1);
-    iface_test_functional();
-    assert_eq!(stack_size(), 1);
-    let _ = stack_pop();
-    push("[a:b] | [a:c]");
-    let t = stack_find_top().unwrap();
-    assert_eq!(stack_entry_fsm(t, |f| fsm_isfunctional(f)), 0);
-    iface_test_functional();
-    let _ = stack_pop();
+    push(&mut session, "a:b");
+    let t = session.stack_find_top().unwrap();
+    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isfunctional(f)), 1);
+    iface_test_functional(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    let _ = session.stack_pop();
+    push(&mut session, "[a:b] | [a:c]");
+    let t = session.stack_find_top().unwrap();
+    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isfunctional(f)), 0);
+    iface_test_functional(&mut session);
+    let _ = session.stack_pop();
 
     // identity: true for a, false for a:b.
-    push("a");
-    let t = stack_find_top().unwrap();
-    assert_eq!(stack_entry_fsm(t, |f| fsm_isidentity(f)), 1);
-    iface_test_identity();
-    let _ = stack_pop();
-    push("a:b");
-    let t = stack_find_top().unwrap();
-    assert_eq!(stack_entry_fsm(t, |f| fsm_isidentity(f)), 0);
-    iface_test_identity();
-    let _ = stack_pop();
+    push(&mut session, "a");
+    let t = session.stack_find_top().unwrap();
+    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isidentity(f)), 1);
+    iface_test_identity(&mut session);
+    let _ = session.stack_pop();
+    push(&mut session, "a:b");
+    let t = session.stack_find_top().unwrap();
+    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isidentity(f)), 0);
+    iface_test_identity(&mut session);
+    let _ = session.stack_pop();
 
     // unambiguous: true for a:b, false for a:b|a:c.
-    push("a:b");
-    let t = stack_find_top().unwrap();
-    assert_eq!(stack_entry_fsm(t, |f| fsm_isunambiguous(f)), 1);
-    iface_test_unambiguous();
-    let _ = stack_pop();
-    push("[a:b] | [a:c]");
-    let t = stack_find_top().unwrap();
-    assert_eq!(stack_entry_fsm(t, |f| fsm_isunambiguous(f)), 0);
-    iface_test_unambiguous();
-    let _ = stack_pop();
+    push(&mut session, "a:b");
+    let t = session.stack_find_top().unwrap();
+    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isunambiguous(f)), 1);
+    iface_test_unambiguous(&mut session);
+    let _ = session.stack_pop();
+    push(&mut session, "[a:b] | [a:c]");
+    let t = session.stack_find_top().unwrap();
+    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isunambiguous(f)), 0);
+    iface_test_unambiguous(&mut session);
+    let _ = session.stack_pop();
 
     // sequential: true for the acyclic acceptor "a b".
-    push("a b");
-    let t = stack_find_top().unwrap();
-    assert_eq!(stack_entry_fsm(t, |f| fsm_issequential(f)), 1);
-    iface_test_sequential();
-    let _ = stack_pop();
+    push(&mut session, "a b");
+    let t = session.stack_find_top().unwrap();
+    assert_eq!(session.stack_entry_fsm(t, |f| fsm_issequential(f)), 1);
+    iface_test_sequential(&mut session);
+    let _ = session.stack_pop();
 
     // null / nonnull: empty language vs. non-empty.
-    push("[a] - [a]"); // empty
-    let t = stack_find_top().unwrap();
-    assert_eq!(stack_entry_fsm(t, |f| fsm_isempty(f)), 1);
-    iface_test_null();
-    iface_test_nonnull();
-    assert_eq!(stack_size(), 1);
-    let _ = stack_pop();
-    push("a"); // non-empty
-    let t = stack_find_top().unwrap();
-    assert_eq!(stack_entry_fsm(t, |f| fsm_isempty(f)), 0);
-    iface_test_null();
-    iface_test_nonnull();
-    let _ = stack_pop();
+    push(&mut session, "[a] - [a]"); // empty
+    let t = session.stack_find_top().unwrap();
+    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isempty(f)), 1);
+    iface_test_null(&mut session);
+    iface_test_nonnull(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    let _ = session.stack_pop();
+    push(&mut session, "a"); // non-empty
+    let t = session.stack_find_top().unwrap();
+    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isempty(f)), 0);
+    iface_test_null(&mut session);
+    iface_test_nonnull(&mut session);
+    let _ = session.stack_pop();
 
     // lower-/upper-universal: compound (copy + complement + isempty), so only
     // preservation is pinned here. ?* is universal; "a" is not.
-    push("?*");
-    iface_test_lower_universal();
-    iface_test_upper_universal();
-    assert_eq!(stack_size(), 1);
-    let _ = stack_pop();
-    push("a");
-    iface_test_lower_universal();
-    iface_test_upper_universal();
-    assert_eq!(stack_size(), 1);
-    let _ = stack_pop();
+    push(&mut session, "?*");
+    iface_test_lower_universal(&mut session);
+    iface_test_upper_universal(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    let _ = session.stack_pop();
+    push(&mut session, "a");
+    iface_test_lower_universal(&mut session);
+    iface_test_upper_universal(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    let _ = session.stack_pop();
 
     // equivalent: reads the top two, preserves both. (a|b)≡(b|a) true; a≢b.
-    push("a | b");
-    push("b | a");
-    assert_eq!(stack_size(), 2);
-    iface_test_equivalent();
-    assert_eq!(stack_size(), 2);
-    let one = stack_entry_fsm(stack_find_top().unwrap(), |f| fsm_copy(f));
-    let two = stack_entry_fsm(stack_find_second().unwrap(), |f| fsm_copy(f));
+    push(&mut session, "a | b");
+    push(&mut session, "b | a");
+    assert_eq!(session.stack_size(), 2);
+    iface_test_equivalent(&mut session);
+    assert_eq!(session.stack_size(), 2);
+    let one = session.stack_entry_fsm(session.stack_find_top().unwrap(), |f| fsm_copy(f));
+    let two = session.stack_entry_fsm(session.stack_find_second().unwrap(), |f| fsm_copy(f));
     assert_eq!(fsm_equivalent(one, two), 1);
-    stack_init();
-    push("a");
-    push("b");
-    iface_test_equivalent();
-    assert_eq!(stack_size(), 2);
+    session = Session::new();
+    push(&mut session, "a");
+    push(&mut session, "b");
+    iface_test_equivalent(&mut session);
+    assert_eq!(session.stack_size(), 2);
 }
 
 // twosided flag-diacritics: pop + push flag_twosided; a flagless net keeps
@@ -1388,13 +1419,13 @@ fn test_family_pins_predicate_and_preserves_stack() {
 // [spec:foma:sem:foma.iface-twosided-flags-fn/test]
 #[test]
 fn twosided_flags_preserves_flagless_language() {
-    stack_init();
-    iface_twosided_flags(); // empty: refusal
-    assert_eq!(stack_size(), 0);
-    push("a b");
-    iface_twosided_flags();
-    assert_eq!(stack_size(), 1);
-    assert!(top_is("a b"));
+    let mut session = Session::new();
+    iface_twosided_flags(&mut session); // empty: refusal
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a b");
+    iface_twosided_flags(&mut session);
+    assert_eq!(session.stack_size(), 1);
+    assert!(top_is(&mut session, "a b"));
 }
 
 // view: guarded by iface_stack_check(1); with an empty stack it returns
@@ -1406,9 +1437,9 @@ fn twosided_flags_preserves_flagless_language() {
 // [spec:foma:sem:foma.view-net-fn/test]
 #[test]
 fn view_refuses_empty_stack_without_spawning() {
-    stack_init();
-    iface_view(); // empty: refusal → view_net not reached, no viewer spawned
-    assert_eq!(stack_size(), 0);
+    let mut session = Session::new();
+    iface_view(&mut session); // empty: refusal → view_net not reached, no viewer spawned
+    assert_eq!(session.stack_size(), 0);
 }
 
 // words to file: type 0/1/2 select the word/upper/lower enumerator; a cyclic
@@ -1426,33 +1457,33 @@ fn words_file_writes_per_type_and_refuses_cyclic() {
     let pc = dir.join("foma_s2_wordsc.txt");
     let _ = std::fs::remove_file(&pc);
 
-    stack_init();
-    iface_words_file(p0.to_str().unwrap(), 0); // empty: refusal
-    assert_eq!(stack_size(), 0);
+    let mut session = Session::new();
+    iface_words_file(&mut session, p0.to_str().unwrap(), 0); // empty: refusal
+    assert_eq!(session.stack_size(), 0);
 
-    push("a b"); // acyclic acceptor → whole word "ab"
-    iface_words_file(p0.to_str().unwrap(), 0);
-    assert_eq!(stack_size(), 1); // net not consumed
+    push(&mut session, "a b"); // acyclic acceptor → whole word "ab"
+    iface_words_file(&mut session, p0.to_str().unwrap(), 0);
+    assert_eq!(session.stack_size(), 1); // net not consumed
     assert_eq!(std::fs::read_to_string(&p0).unwrap(), "ab\n");
-    let _ = stack_pop();
+    let _ = session.stack_pop();
 
-    push("a:b"); // transducer → upper "a", lower "b"
-    iface_words_file(p1.to_str().unwrap(), 1);
+    push(&mut session, "a:b"); // transducer → upper "a", lower "b"
+    iface_words_file(&mut session, p1.to_str().unwrap(), 1);
     assert_eq!(std::fs::read_to_string(&p1).unwrap(), "a\n");
-    iface_words_file(p2.to_str().unwrap(), 2);
+    iface_words_file(&mut session, p2.to_str().unwrap(), 2);
     assert_eq!(std::fs::read_to_string(&p2).unwrap(), "b\n");
     // Wave 4 fix: a type-0 call right after type 1/2 uses the words enumerator,
     // not the stale upper ("a") / lower ("b") one from the previous call.
     let pmix = dir.join("foma_s2_wordsmix.txt");
-    iface_words_file(pmix.to_str().unwrap(), 0);
+    iface_words_file(&mut session, pmix.to_str().unwrap(), 0);
     let mix = std::fs::read_to_string(&pmix).unwrap();
     assert_ne!(mix, "a\n"); // not the stale upper-words enumerator
     assert_ne!(mix, "b\n"); // not the stale lower-words enumerator
-    let _ = stack_pop();
+    let _ = session.stack_pop();
 
-    push_topsorted("a*"); // cyclic → refuses before opening the file
-    iface_words_file(pc.to_str().unwrap(), 0);
-    assert_eq!(stack_size(), 1);
+    push_topsorted(&mut session, "a*"); // cyclic → refuses before opening the file
+    iface_words_file(&mut session, pc.to_str().unwrap(), 0);
+    assert_eq!(session.stack_size(), 1);
     assert!(!std::path::Path::new(&pc).exists());
 }
 
@@ -1467,18 +1498,18 @@ fn words_file_writes_per_type_and_refuses_cyclic() {
 // [spec:foma:sem:foma.iface-random-pairs-fn+1/test]
 #[test]
 fn pairs_family_prints_without_consuming() {
-    stack_init();
-    iface_pairs(-1); // empty: refusal
-    iface_pairs_call(2, 0);
-    iface_random_pairs(-1);
-    assert_eq!(stack_size(), 0);
-    push("a:b | c:d");
-    iface_pairs(-1);
-    iface_pairs_call(2, 0);
-    iface_pairs_call(2, 1); // random path
-    iface_random_pairs(-1);
-    assert_eq!(stack_size(), 1); // net not consumed
-    assert!(top_is("a:b | c:d"));
+    let mut session = Session::new();
+    iface_pairs(&mut session, -1); // empty: refusal
+    iface_pairs_call(&mut session, 2, 0);
+    iface_random_pairs(&mut session, -1);
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a:b | c:d");
+    iface_pairs(&mut session, -1);
+    iface_pairs_call(&mut session, 2, 0);
+    iface_pairs_call(&mut session, 2, 1); // random path
+    iface_random_pairs(&mut session, -1);
+    assert_eq!(session.stack_size(), 1); // net not consumed
+    assert!(top_is(&mut session, "a:b | c:d"));
 }
 
 // pairs to file: cyclic refuses (message, no file); acyclic writes
@@ -1491,17 +1522,17 @@ fn pairs_file_writes_pairs_and_refuses_cyclic() {
     let pf = dir.join("foma_s2_pairs.txt");
     let pc = dir.join("foma_s2_pairs_cyclic.txt");
     let _ = std::fs::remove_file(&pc);
-    stack_init();
-    iface_pairs_file(pf.to_str().unwrap()); // empty: refusal
-    assert_eq!(stack_size(), 0);
-    push("a:b");
-    iface_pairs_file(pf.to_str().unwrap());
-    assert_eq!(stack_size(), 1);
+    let mut session = Session::new();
+    iface_pairs_file(&mut session, pf.to_str().unwrap()); // empty: refusal
+    assert_eq!(session.stack_size(), 0);
+    push(&mut session, "a:b");
+    iface_pairs_file(&mut session, pf.to_str().unwrap());
+    assert_eq!(session.stack_size(), 1);
     assert_eq!(std::fs::read_to_string(&pf).unwrap(), "a\tb\n");
-    let _ = stack_pop();
-    push_topsorted("[a:b]*"); // cyclic transducer → refuses, no file
-    iface_pairs_file(pc.to_str().unwrap());
-    assert_eq!(stack_size(), 1);
+    let _ = session.stack_pop();
+    push_topsorted(&mut session, "[a:b]*"); // cyclic transducer → refuses, no file
+    iface_pairs_file(&mut session, pc.to_str().unwrap());
+    assert_eq!(session.stack_size(), 1);
     assert!(!std::path::Path::new(&pc).exists());
 }
 
@@ -1543,18 +1574,18 @@ fn write_att_and_prolog_roundtrip() {
     let plp = dir.join("foma_s2_write.prolog");
     let pl = plp.to_str().unwrap();
 
-    stack_init();
-    assert_eq!(iface_write_att(Some(att)), 1); // empty: returns 1
+    let mut session = Session::new();
+    assert_eq!(iface_write_att(&mut session, Some(att)), 1); // empty: returns 1
 
-    push("a b");
-    assert_eq!(iface_write_att(Some(att)), 0);
-    assert_eq!(stack_size(), 1); // net not consumed
+    push(&mut session, "a b");
+    assert_eq!(iface_write_att(&mut session, Some(att)), 0);
+    assert_eq!(session.stack_size(), 1); // net not consumed
     let back = read_att(att).unwrap();
     let expected = fsm_parse_regex("a b", None, None).unwrap();
     assert_eq!(fsm_equivalent(back, expected), 1);
 
-    iface_write_prolog(Some(pl));
-    assert_eq!(stack_size(), 1);
+    iface_write_prolog(&mut session, Some(pl));
+    assert_eq!(session.stack_size(), 1);
     let back = fsm_read_prolog(pl).unwrap();
     let expected = fsm_parse_regex("a b", None, None).unwrap();
     assert_eq!(fsm_equivalent(back, expected), 1);

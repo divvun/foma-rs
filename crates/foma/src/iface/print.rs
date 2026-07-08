@@ -990,13 +990,13 @@ pub fn iface_warranty() {
 // [spec:foma:sem:iface.iface-print-dot-fn]
 // [spec:foma:def:foma.iface-print-dot-fn]
 // [spec:foma:sem:foma.iface-print-dot-fn]
-pub fn iface_print_dot(filename: Option<&str>) {
-    if iface_stack_check(1) != 0 {
+pub fn iface_print_dot(session: &mut Session, filename: Option<&str>) {
+    if iface_stack_check(session, 1) != 0 {
         if let Some(f) = filename {
             print!("Writing dot file to {}.\n", f);
         }
-        let top = stack_find_top().unwrap();
-        stack_entry_fsm(top, |net| print_dot(net, filename));
+        let top = session.stack_find_top().unwrap();
+        session.stack_entry_fsm(top, |net| print_dot(net, filename));
     }
 }
 
@@ -1004,7 +1004,7 @@ pub fn iface_print_dot(filename: Option<&str>) {
 // [spec:foma:sem:iface.iface-print-net-fn]
 // [spec:foma:def:foma.iface-print-net-fn]
 // [spec:foma:sem:foma.iface-print-net-fn]
-pub fn iface_print_net(netname: Option<&str>, filename: Option<&str>) {
+pub fn iface_print_net(session: &mut Session, netname: Option<&str>, filename: Option<&str>) {
     match netname {
         Some(netname) => {
             // net = find_defined(g_defines, netname); NULL g_defines ↔ not found.
@@ -1029,9 +1029,9 @@ pub fn iface_print_net(netname: Option<&str>, filename: Option<&str>) {
             }
         }
         None => {
-            if iface_stack_check(1) != 0 {
-                let top = stack_find_top().unwrap();
-                stack_entry_fsm(top, |net| print_net(net, filename));
+            if iface_stack_check(session, 1) != 0 {
+                let top = session.stack_find_top().unwrap();
+                session.stack_entry_fsm(top, |net| print_net(net, filename));
             }
         }
     }
@@ -1041,11 +1041,11 @@ pub fn iface_print_net(netname: Option<&str>, filename: Option<&str>) {
 // [spec:foma:sem:iface.iface-print-cmatrix-att-fn+1]
 // [spec:foma:def:foma.iface-print-cmatrix-att-fn]
 // [spec:foma:sem:foma.iface-print-cmatrix-att-fn+1]
-pub fn iface_print_cmatrix_att(filename: Option<&str>) {
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
+pub fn iface_print_cmatrix_att(session: &mut Session, filename: Option<&str>) {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
         // C: medlookup == NULL || medlookup->confusion_matrix == NULL. Empty Vec ↔ NULL.
-        let has_cm = stack_entry_fsm(top, |f| {
+        let has_cm = session.stack_entry_fsm(top, |f| {
             !(f.medlookup.is_none() || f.medlookup.as_ref().unwrap().confusion_matrix.is_empty())
         });
         if !has_cm {
@@ -1053,7 +1053,7 @@ pub fn iface_print_cmatrix_att(filename: Option<&str>) {
         } else {
             match filename {
                 None => {
-                    stack_entry_fsm(top, |f| cmatrix_print_att(f, &mut std::io::stdout()));
+                    session.stack_entry_fsm(top, |f| cmatrix_print_att(f, &mut std::io::stdout()));
                 }
                 Some(name) => {
                     // C: outfile = fopen(name,"w"); message; result NOT NULL-checked.
@@ -1063,7 +1063,7 @@ pub fn iface_print_cmatrix_att(filename: Option<&str>) {
                     // and return instead of crashing, like the other file commands.
                     match res {
                         Ok(mut file) => {
-                            stack_entry_fsm(top, |f| cmatrix_print_att(f, &mut file));
+                            session.stack_entry_fsm(top, |f| cmatrix_print_att(f, &mut file));
                             // C never fclose's the file (latent leak); Rust closes on drop.
                         }
                         Err(_) => {
@@ -1081,16 +1081,16 @@ pub fn iface_print_cmatrix_att(filename: Option<&str>) {
 // [spec:foma:sem:iface.iface-print-cmatrix-fn]
 // [spec:foma:def:foma.iface-print-cmatrix-fn]
 // [spec:foma:sem:foma.iface-print-cmatrix-fn]
-pub fn iface_print_cmatrix() {
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
-        let has_cm = stack_entry_fsm(top, |f| {
+pub fn iface_print_cmatrix(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
+        let has_cm = session.stack_entry_fsm(top, |f| {
             !(f.medlookup.is_none() || f.medlookup.as_ref().unwrap().confusion_matrix.is_empty())
         });
         if !has_cm {
             print!("No confusion matrix defined.\n");
         } else {
-            stack_entry_fsm(top, |f| cmatrix_print(f));
+            session.stack_entry_fsm(top, |f| cmatrix_print(f));
         }
     }
 }
@@ -1134,10 +1134,10 @@ pub fn iface_print_defined() {
 // [spec:foma:sem:iface.iface-print-sigma-fn]
 // [spec:foma:def:foma.iface-print-sigma-fn]
 // [spec:foma:sem:foma.iface-print-sigma-fn]
-pub fn iface_print_sigma() {
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
-        stack_entry_fsm(top, |f| {
+pub fn iface_print_sigma(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
+        session.stack_entry_fsm(top, |f| {
             print_sigma(f.sigma.as_deref(), &mut std::io::stdout())
         });
     }
@@ -1147,10 +1147,10 @@ pub fn iface_print_sigma() {
 // [spec:foma:sem:iface.iface-print-stats-fn]
 // [spec:foma:def:foma.iface-print-stats-fn]
 // [spec:foma:sem:foma.iface-print-stats-fn]
-pub fn iface_print_stats() {
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
-        stack_entry_fsm(top, |f| print_stats(f));
+pub fn iface_print_stats(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
+        session.stack_entry_fsm(top, |f| print_stats(f));
     }
 }
 
@@ -1158,9 +1158,9 @@ pub fn iface_print_stats() {
 // [spec:foma:sem:iface.iface-view-fn]
 // [spec:foma:def:foma.iface-view-fn]
 // [spec:foma:sem:foma.iface-view-fn]
-pub fn iface_view() {
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
-        stack_entry_fsm(top, |f| view_net(f));
+pub fn iface_view(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
+        session.stack_entry_fsm(top, |f| view_net(f));
     }
 }

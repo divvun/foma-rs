@@ -20,20 +20,20 @@ pub fn iface_apply_set_params(h: &mut ApplyHandle) {
 // [spec:foma:sem:iface.iface-apply-med-fn]
 // [spec:foma:def:foma.iface-apply-med-fn]
 // [spec:foma:sem:foma.iface-apply-med-fn]
-pub fn iface_apply_med(word: &str) {
-    if iface_stack_check(1) == 0 {
+pub fn iface_apply_med(session: &mut Session, word: &str) {
+    if iface_stack_check(session, 1) == 0 {
         return;
     }
     // amedh = stack_get_med_ah() — arena index of the top entry (see module notes)
-    let amedh = stack_get_med_ah().unwrap();
+    let amedh = session.stack_get_med_ah().unwrap();
 
-    stack_entry_amedh(amedh, |h| {
+    session.stack_entry_amedh(amedh, |h| {
         apply_med_set_heap_max(h, 4194304 + 1);
         apply_med_set_med_limit(h, G_MED_LIMIT.with(|v| v.get()));
         apply_med_set_med_cutoff(h, G_MED_CUTOFF.with(|v| v.get()));
     });
 
-    let result = stack_entry_amedh(amedh, |h| apply_med(h, Some(word)));
+    let result = session.stack_entry_amedh(amedh, |h| apply_med(h, Some(word)));
     match result {
         None => {
             print!("???\n");
@@ -41,7 +41,7 @@ pub fn iface_apply_med(word: &str) {
         }
         Some(r) => {
             print!("{}\n", r);
-            let (instr, cost) = stack_entry_amedh(amedh, |h| {
+            let (instr, cost) = session.stack_entry_amedh(amedh, |h| {
                 (apply_med_get_instring(h), apply_med_get_cost(h))
             });
             print!("{}\n", instr.unwrap_or_default());
@@ -49,12 +49,12 @@ pub fn iface_apply_med(word: &str) {
         }
     }
     loop {
-        let result = stack_entry_amedh(amedh, |h| apply_med(h, None));
+        let result = session.stack_entry_amedh(amedh, |h| apply_med(h, None));
         match result {
             None => break,
             Some(r) => {
                 print!("{}\n", r);
-                let (instr, cost) = stack_entry_amedh(amedh, |h| {
+                let (instr, cost) = session.stack_entry_amedh(amedh, |h| {
                     (apply_med_get_instring(h), apply_med_get_cost(h))
                 });
                 print!("{}\n", instr.unwrap_or_default());
@@ -68,13 +68,18 @@ pub fn iface_apply_med(word: &str) {
 // [spec:foma:sem:iface.iface-apply-file-fn]
 // [spec:foma:def:foma.iface-apply-file-fn]
 // [spec:foma:sem:foma.iface-apply-file-fn]
-pub fn iface_apply_file(infilename: &str, outfilename: Option<&str>, direction: i32) -> i32 {
+pub fn iface_apply_file(
+    session: &mut Session,
+    infilename: &str,
+    outfilename: Option<&str>,
+    direction: i32,
+) -> i32 {
     let _ = LINE_LIMIT; // fgets buffer size; read_line reads whole lines here.
     if direction != AP_D && direction != AP_U {
         perror("Invalid direction in iface_apply_file().\n");
         return 1;
     }
-    if iface_stack_check(1) == 0 {
+    if iface_stack_check(session, 1) == 0 {
         return 0;
     }
     let infile = match File::open(infilename) {
@@ -105,8 +110,8 @@ pub fn iface_apply_file(infilename: &str, outfilename: Option<&str>, direction: 
         }
     };
 
-    let ah = stack_get_ah().unwrap();
-    stack_entry_ah(ah, |h| iface_apply_set_params(h));
+    let ah = session.stack_get_ah().unwrap();
+    session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
 
     let mut reader = BufReader::new(infile);
     let mut inword = String::new();
@@ -128,9 +133,9 @@ pub fn iface_apply_file(infilename: &str, outfilename: Option<&str>, direction: 
 
         let _ = write!(outfile, "\n{}\n", inword);
         let result = if direction == AP_D {
-            stack_entry_ah(ah, |h| apply_down(h, Some(&inword)))
+            session.stack_entry_ah(ah, |h| apply_down(h, Some(&inword)))
         } else {
-            stack_entry_ah(ah, |h| apply_up(h, Some(&inword)))
+            session.stack_entry_ah(ah, |h| apply_up(h, Some(&inword)))
         };
 
         let result = match result {
@@ -143,9 +148,9 @@ pub fn iface_apply_file(infilename: &str, outfilename: Option<&str>, direction: 
         let _ = write!(outfile, "{}\n", result);
         loop {
             let result = if direction == AP_D {
-                stack_entry_ah(ah, |h| apply_down(h, None))
+                session.stack_entry_ah(ah, |h| apply_down(h, None))
             } else {
-                stack_entry_ah(ah, |h| apply_up(h, None))
+                session.stack_entry_ah(ah, |h| apply_up(h, None))
             };
             match result {
                 None => break,
@@ -165,13 +170,13 @@ pub fn iface_apply_file(infilename: &str, outfilename: Option<&str>, direction: 
 // [spec:foma:sem:iface.iface-apply-down-fn]
 // [spec:foma:def:foma.iface-apply-down-fn]
 // [spec:foma:sem:foma.iface-apply-down-fn]
-pub fn iface_apply_down(word: &str) {
-    if iface_stack_check(1) == 0 {
+pub fn iface_apply_down(session: &mut Session, word: &str) {
+    if iface_stack_check(session, 1) == 0 {
         return;
     }
-    let ah = stack_get_ah().unwrap();
-    stack_entry_ah(ah, |h| iface_apply_set_params(h));
-    let result = stack_entry_ah(ah, |h| apply_down(h, Some(word)));
+    let ah = session.stack_get_ah().unwrap();
+    session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
+    let result = session.stack_entry_ah(ah, |h| apply_down(h, Some(word)));
     match result {
         None => {
             print!("???\n");
@@ -183,7 +188,7 @@ pub fn iface_apply_down(word: &str) {
     }
     let mut i = G_LIST_LIMIT.with(|v| v.get());
     while i > 0 {
-        let result = stack_entry_ah(ah, |h| apply_down(h, None));
+        let result = session.stack_entry_ah(ah, |h| apply_down(h, None));
         match result {
             None => break,
             Some(r) => print!("{}\n", r),
@@ -196,13 +201,13 @@ pub fn iface_apply_down(word: &str) {
 // [spec:foma:sem:iface.iface-apply-up-fn]
 // [spec:foma:def:foma.iface-apply-up-fn]
 // [spec:foma:sem:foma.iface-apply-up-fn]
-pub fn iface_apply_up(word: &str) {
-    if iface_stack_check(1) == 0 {
+pub fn iface_apply_up(session: &mut Session, word: &str) {
+    if iface_stack_check(session, 1) == 0 {
         return;
     }
-    let ah = stack_get_ah().unwrap();
-    stack_entry_ah(ah, |h| iface_apply_set_params(h));
-    let result = stack_entry_ah(ah, |h| apply_up(h, Some(word)));
+    let ah = session.stack_get_ah().unwrap();
+    session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
+    let result = session.stack_entry_ah(ah, |h| apply_up(h, Some(word)));
     match result {
         None => {
             print!("???\n");
@@ -214,7 +219,7 @@ pub fn iface_apply_up(word: &str) {
     }
     let mut i = G_LIST_LIMIT.with(|v| v.get());
     while i > 0 {
-        let result = stack_entry_ah(ah, |h| apply_up(h, None));
+        let result = session.stack_entry_ah(ah, |h| apply_up(h, None));
         match result {
             None => break,
             Some(r) => print!("{}\n", r),
@@ -227,8 +232,8 @@ pub fn iface_apply_up(word: &str) {
 // [spec:foma:sem:iface.iface-lower-words-fn]
 // [spec:foma:def:foma.iface-lower-words-fn]
 // [spec:foma:sem:foma.iface-lower-words-fn]
-pub fn iface_lower_words(limit: i32) {
-    if iface_stack_check(1) == 0 {
+pub fn iface_lower_words(session: &mut Session, limit: i32) {
+    if iface_stack_check(session, 1) == 0 {
         return;
     }
     let limit = if limit == -1 {
@@ -236,19 +241,19 @@ pub fn iface_lower_words(limit: i32) {
     } else {
         limit
     };
-    if iface_stack_check(1) != 0 {
-        let ah = stack_get_ah().unwrap();
-        stack_entry_ah(ah, |h| iface_apply_set_params(h));
+    if iface_stack_check(session, 1) != 0 {
+        let ah = session.stack_get_ah().unwrap();
+        session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
         let mut i = limit;
         while i > 0 {
-            let result = stack_entry_ah(ah, |h| apply_lower_words(h));
+            let result = session.stack_entry_ah(ah, |h| apply_lower_words(h));
             match result {
                 None => break,
                 Some(r) => print!("{}\n", r),
             }
             i -= 1;
         }
-        stack_entry_ah(ah, |h| apply_reset_enumerator(h));
+        session.stack_entry_ah(ah, |h| apply_reset_enumerator(h));
     }
 }
 
@@ -256,24 +261,24 @@ pub fn iface_lower_words(limit: i32) {
 // [spec:foma:sem:iface.iface-random-lower-fn]
 // [spec:foma:def:foma.iface-random-lower-fn]
 // [spec:foma:sem:foma.iface-random-lower-fn]
-pub fn iface_random_lower(limit: i32) {
-    iface_apply_random(apply_random_lower, limit);
+pub fn iface_random_lower(session: &mut Session, limit: i32) {
+    iface_apply_random(session, apply_random_lower, limit);
 }
 
 // [spec:foma:def:iface.iface-random-upper-fn]
 // [spec:foma:sem:iface.iface-random-upper-fn]
 // [spec:foma:def:foma.iface-random-upper-fn]
 // [spec:foma:sem:foma.iface-random-upper-fn]
-pub fn iface_random_upper(limit: i32) {
-    iface_apply_random(apply_random_upper, limit);
+pub fn iface_random_upper(session: &mut Session, limit: i32) {
+    iface_apply_random(session, apply_random_upper, limit);
 }
 
 // [spec:foma:def:iface.iface-random-words-fn]
 // [spec:foma:sem:iface.iface-random-words-fn]
 // [spec:foma:def:foma.iface-random-words-fn]
 // [spec:foma:sem:foma.iface-random-words-fn]
-pub fn iface_random_words(limit: i32) {
-    iface_apply_random(apply_random_words, limit);
+pub fn iface_random_words(session: &mut Session, limit: i32) {
+    iface_apply_random(session, apply_random_words, limit);
 }
 
 // [spec:foma:def:iface.iface-apply-random-fn]
@@ -282,20 +287,24 @@ pub fn iface_random_words(limit: i32) {
 // [spec:foma:sem:foma.iface-apply-random-fn]
 // C: `void iface_apply_random(char *(*applyer)(struct apply_handle *h), int limit)` —
 // the applyer function pointer becomes a Rust fn pointer of the same shape.
-pub fn iface_apply_random(applyer: fn(&mut ApplyHandle) -> Option<String>, limit: i32) {
+pub fn iface_apply_random(
+    session: &mut Session,
+    applyer: fn(&mut ApplyHandle) -> Option<String>,
+    limit: i32,
+) {
     let limit = if limit == -1 {
         G_LIST_RANDOM_LIMIT.with(|v| v.get())
     } else {
         limit
     };
-    if iface_stack_check(1) != 0 {
+    if iface_stack_check(session, 1) != 0 {
         // calloc(limit, sizeof(struct apply_results {char *string; int count;}))
         let mut results: Vec<(Option<String>, i32)> = vec![(None, 0); limit as usize];
-        let ah = stack_get_ah().unwrap();
-        stack_entry_ah(ah, |h| iface_apply_set_params(h));
+        let ah = session.stack_get_ah().unwrap();
+        session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
         let mut i = limit;
         while i > 0 {
-            let result = stack_entry_ah(ah, |h| applyer(h));
+            let result = session.stack_entry_ah(ah, |h| applyer(h));
             if let Some(result) = result {
                 for slot in results.iter_mut() {
                     if slot.0.is_none() {
@@ -318,7 +327,7 @@ pub fn iface_apply_random(applyer: fn(&mut ApplyHandle) -> Option<String>, limit
             }
         }
         // free(results) — Vec dropped at scope end.
-        stack_entry_ah(ah, |h| apply_reset_enumerator(h));
+        session.stack_entry_ah(ah, |h| apply_reset_enumerator(h));
     }
 }
 
@@ -326,12 +335,12 @@ pub fn iface_apply_random(applyer: fn(&mut ApplyHandle) -> Option<String>, limit
 // [spec:foma:sem:iface.iface-print-shortest-string-fn]
 // [spec:foma:def:foma.iface-print-shortest-string-fn]
 // [spec:foma:sem:foma.iface-print-shortest-string-fn]
-pub fn iface_print_shortest_string() {
+pub fn iface_print_shortest_string(session: &mut Session) {
     /* L -  ?+  [[L .o. [?:"@TMP@"]*].l .o. "@TMP@":?*].l; */
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
-        let mut one = stack_entry_fsm(top, |f| fsm_copy(f));
-        if stack_entry_fsm(top, |f| f.arity) == 1 {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
+        let mut one = session.stack_entry_fsm(top, |f| fsm_copy(f));
+        if session.stack_entry_fsm(top, |f| f.arity) == 1 {
             let result = fsm_minimize(fsm_minus(
                 fsm_copy(&mut one),
                 fsm_concat(
@@ -450,12 +459,12 @@ fn shortest_acyclic_length(net: &crate::types::Fsm) -> i32 {
 // [spec:foma:sem:iface.iface-print-shortest-string-size-fn+1]
 // [spec:foma:def:foma.iface-print-shortest-string-size-fn]
 // [spec:foma:sem:foma.iface-print-shortest-string-size-fn+1]
-pub fn iface_print_shortest_string_size() {
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
-        let mut one = stack_entry_fsm(top, |f| fsm_copy(f));
+pub fn iface_print_shortest_string_size(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
+        let mut one = session.stack_entry_fsm(top, |f| fsm_copy(f));
         /* [L .o. [?:a]*].l; */
-        if stack_entry_fsm(top, |f| f.arity) == 1 {
+        if session.stack_entry_fsm(top, |f| f.arity) == 1 {
             let result = fsm_minimize(fsm_lower(fsm_compose(
                 one,
                 fsm_kleene_star(fsm_cross_product(fsm_identity(), fsm_symbol("a"))),
@@ -492,25 +501,25 @@ pub fn iface_print_shortest_string_size() {
 // [spec:foma:sem:iface.iface-upper-words-fn]
 // [spec:foma:def:foma.iface-upper-words-fn]
 // [spec:foma:sem:foma.iface-upper-words-fn]
-pub fn iface_upper_words(limit: i32) {
+pub fn iface_upper_words(session: &mut Session, limit: i32) {
     let limit = if limit == -1 {
         G_LIST_LIMIT.with(|v| v.get())
     } else {
         limit
     };
-    if iface_stack_check(1) != 0 {
-        let ah = stack_get_ah().unwrap();
-        stack_entry_ah(ah, |h| iface_apply_set_params(h));
+    if iface_stack_check(session, 1) != 0 {
+        let ah = session.stack_get_ah().unwrap();
+        session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
         let mut i = limit;
         while i > 0 {
-            let result = stack_entry_ah(ah, |h| apply_upper_words(h));
+            let result = session.stack_entry_ah(ah, |h| apply_upper_words(h));
             match result {
                 None => break,
                 Some(r) => print!("{}\n", r),
             }
             i -= 1;
         }
-        stack_entry_ah(ah, |h| apply_reset_enumerator(h));
+        session.stack_entry_ah(ah, |h| apply_reset_enumerator(h));
     }
 }
 
@@ -518,7 +527,7 @@ pub fn iface_upper_words(limit: i32) {
 // [spec:foma:sem:iface.iface-words-file-fn+1]
 // [spec:foma:def:foma.iface-words-file-fn]
 // [spec:foma:sem:foma.iface-words-file-fn+1]
-pub fn iface_words_file(filename: &str, r#type: i32) {
+pub fn iface_words_file(session: &mut Session, filename: &str, r#type: i32) {
     /* type 0 (words), 1 (upper-words), 2 (lower-words) */
     // Wave 4 fix: the C kept the applyer in a function-local `static`, so a type-0
     // call after any type-1/2 call reused the stale upper/lower enumerator. Select
@@ -530,9 +539,9 @@ pub fn iface_words_file(filename: &str, r#type: i32) {
     } else {
         apply_words
     };
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
-        if stack_entry_fsm(top, |f| f.pathcount) == PATHCOUNT_CYCLIC {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
+        if session.stack_entry_fsm(top, |f| f.pathcount) == PATHCOUNT_CYCLIC {
             print!("FSM is cyclic: can't write all words to file.\n");
             return;
         }
@@ -544,10 +553,10 @@ pub fn iface_words_file(filename: &str, r#type: i32) {
                 return;
             }
         };
-        let ah = stack_get_ah().unwrap();
-        stack_entry_ah(ah, |h| iface_apply_set_params(h));
+        let ah = session.stack_get_ah().unwrap();
+        session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
         loop {
-            let result = stack_entry_ah(ah, |h| applyer(h));
+            let result = session.stack_entry_ah(ah, |h| applyer(h));
             match result {
                 None => break,
                 Some(r) => {
@@ -555,7 +564,7 @@ pub fn iface_words_file(filename: &str, r#type: i32) {
                 }
             }
         }
-        stack_entry_ah(ah, |h| apply_reset_enumerator(h));
+        session.stack_entry_ah(ah, |h| apply_reset_enumerator(h));
         // fclose(outfile) — dropped at scope end.
     }
 }
@@ -564,53 +573,53 @@ pub fn iface_words_file(filename: &str, r#type: i32) {
 // [spec:foma:sem:iface.iface-words-fn]
 // [spec:foma:def:foma.iface-words-fn]
 // [spec:foma:sem:foma.iface-words-fn]
-pub fn iface_words(limit: i32) {
+pub fn iface_words(session: &mut Session, limit: i32) {
     let limit = if limit == -1 {
         G_LIST_LIMIT.with(|v| v.get())
     } else {
         limit
     };
-    if iface_stack_check(1) != 0 {
-        let ah = stack_get_ah().unwrap();
-        stack_entry_ah(ah, |h| iface_apply_set_params(h));
+    if iface_stack_check(session, 1) != 0 {
+        let ah = session.stack_get_ah().unwrap();
+        session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
         let mut i = limit;
         while i > 0 {
-            let result = stack_entry_ah(ah, |h| apply_words(h));
+            let result = session.stack_entry_ah(ah, |h| apply_words(h));
             match result {
                 None => break,
                 Some(r) => print!("{}\n", r),
             }
             i -= 1;
         }
-        stack_entry_ah(ah, |h| apply_reset_enumerator(h));
+        session.stack_entry_ah(ah, |h| apply_reset_enumerator(h));
     }
 }
 
 // [spec:foma:def:iface.iface-pairs-call-fn]
 // [spec:foma:sem:iface.iface-pairs-call-fn]
-pub fn iface_pairs_call(limit: i32, random: i32) {
+pub fn iface_pairs_call(session: &mut Session, limit: i32, random: i32) {
     let limit = if limit == -1 {
         G_LIST_LIMIT.with(|v| v.get())
     } else {
         limit
     };
-    if iface_stack_check(1) != 0 {
-        let ah = stack_get_ah().unwrap();
-        stack_entry_ah(ah, |h| {
+    if iface_stack_check(session, 1) != 0 {
+        let ah = session.stack_get_ah().unwrap();
+        session.stack_entry_ah(ah, |h| {
             apply_set_show_flags(h, G_SHOW_FLAGS.with(|v| v.get()))
         });
-        stack_entry_ah(ah, |h| {
+        session.stack_entry_ah(ah, |h| {
             apply_set_obey_flags(h, G_OBEY_FLAGS.with(|v| v.get()))
         });
-        stack_entry_ah(ah, |h| apply_set_space_symbol(h, "\u{1}"));
-        stack_entry_ah(ah, |h| apply_set_epsilon(h, "\u{2}"));
-        stack_entry_ah(ah, |h| apply_set_separator(h, "\u{3}"));
+        session.stack_entry_ah(ah, |h| apply_set_space_symbol(h, "\u{1}"));
+        session.stack_entry_ah(ah, |h| apply_set_epsilon(h, "\u{2}"));
+        session.stack_entry_ah(ah, |h| apply_set_separator(h, "\u{3}"));
         let mut i = limit;
         while i > 0 {
             let result = if random == 1 {
-                stack_entry_ah(ah, |h| apply_random_words(h))
+                session.stack_entry_ah(ah, |h| apply_random_words(h))
             } else {
-                stack_entry_ah(ah, |h| apply_words(h))
+                session.stack_entry_ah(ah, |h| apply_words(h))
             };
             let result = match result {
                 None => break,
@@ -628,10 +637,10 @@ pub fn iface_pairs_call(limit: i32, random: i32) {
             let _ = out.write_all(b"\n");
             i -= 1;
         }
-        stack_entry_ah(ah, |h| apply_set_space_symbol(h, " "));
-        stack_entry_ah(ah, |h| apply_set_epsilon(h, "0"));
-        stack_entry_ah(ah, |h| apply_set_separator(h, ":"));
-        stack_entry_ah(ah, |h| apply_reset_enumerator(h));
+        session.stack_entry_ah(ah, |h| apply_set_space_symbol(h, " "));
+        session.stack_entry_ah(ah, |h| apply_set_epsilon(h, "0"));
+        session.stack_entry_ah(ah, |h| apply_set_separator(h, ":"));
+        session.stack_entry_ah(ah, |h| apply_reset_enumerator(h));
     }
 }
 
@@ -639,7 +648,7 @@ pub fn iface_pairs_call(limit: i32, random: i32) {
 // [spec:foma:sem:iface.iface-random-pairs-fn+1]
 // [spec:foma:def:foma.iface-random-pairs-fn]
 // [spec:foma:sem:foma.iface-random-pairs-fn+1]
-pub fn iface_random_pairs(limit: i32) {
+pub fn iface_random_pairs(session: &mut Session, limit: i32) {
     // Wave 4 fix: the C passed limit straight through, so limit == -1 resolved to
     // g_list_limit inside iface_pairs_call instead of g_list_random_limit like the
     // other random commands. Resolve -1 to g_list_random_limit here first.
@@ -648,25 +657,25 @@ pub fn iface_random_pairs(limit: i32) {
     } else {
         limit
     };
-    iface_pairs_call(limit, 1);
+    iface_pairs_call(session, limit, 1);
 }
 
 // [spec:foma:def:iface.iface-pairs-fn]
 // [spec:foma:sem:iface.iface-pairs-fn]
 // [spec:foma:def:foma.iface-pairs-fn]
 // [spec:foma:sem:foma.iface-pairs-fn]
-pub fn iface_pairs(limit: i32) {
-    iface_pairs_call(limit, 0);
+pub fn iface_pairs(session: &mut Session, limit: i32) {
+    iface_pairs_call(session, limit, 0);
 }
 
 // [spec:foma:def:iface.iface-pairs-file-fn]
 // [spec:foma:sem:iface.iface-pairs-file-fn]
 // [spec:foma:def:foma.iface-pairs-file-fn]
 // [spec:foma:sem:foma.iface-pairs-file-fn]
-pub fn iface_pairs_file(filename: &str) {
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
-        if stack_entry_fsm(top, |f| f.pathcount) == PATHCOUNT_CYCLIC {
+pub fn iface_pairs_file(session: &mut Session, filename: &str) {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
+        if session.stack_entry_fsm(top, |f| f.pathcount) == PATHCOUNT_CYCLIC {
             print!("FSM is cyclic: can't write all pairs to file.\n");
             return;
         }
@@ -678,18 +687,18 @@ pub fn iface_pairs_file(filename: &str) {
                 return;
             }
         };
-        let ah = stack_get_ah().unwrap();
-        stack_entry_ah(ah, |h| {
+        let ah = session.stack_get_ah().unwrap();
+        session.stack_entry_ah(ah, |h| {
             apply_set_show_flags(h, G_SHOW_FLAGS.with(|v| v.get()))
         });
-        stack_entry_ah(ah, |h| {
+        session.stack_entry_ah(ah, |h| {
             apply_set_obey_flags(h, G_OBEY_FLAGS.with(|v| v.get()))
         });
-        stack_entry_ah(ah, |h| apply_set_space_symbol(h, "\u{1}"));
-        stack_entry_ah(ah, |h| apply_set_epsilon(h, "\u{2}"));
-        stack_entry_ah(ah, |h| apply_set_separator(h, "\u{3}"));
+        session.stack_entry_ah(ah, |h| apply_set_space_symbol(h, "\u{1}"));
+        session.stack_entry_ah(ah, |h| apply_set_epsilon(h, "\u{2}"));
+        session.stack_entry_ah(ah, |h| apply_set_separator(h, "\u{3}"));
         loop {
-            let result = stack_entry_ah(ah, |h| apply_words(h));
+            let result = session.stack_entry_ah(ah, |h| apply_words(h));
             let result = match result {
                 None => break,
                 Some(r) => r,
@@ -703,10 +712,10 @@ pub fn iface_pairs_file(filename: &str) {
             let _ = outfile.write_all(&lower);
             let _ = outfile.write_all(b"\n");
         }
-        stack_entry_ah(ah, |h| apply_set_space_symbol(h, " "));
-        stack_entry_ah(ah, |h| apply_set_epsilon(h, "0"));
-        stack_entry_ah(ah, |h| apply_set_separator(h, ":"));
-        stack_entry_ah(ah, |h| apply_reset_enumerator(h));
+        session.stack_entry_ah(ah, |h| apply_set_space_symbol(h, " "));
+        session.stack_entry_ah(ah, |h| apply_set_epsilon(h, "0"));
+        session.stack_entry_ah(ah, |h| apply_set_separator(h, ":"));
+        session.stack_entry_ah(ah, |h| apply_reset_enumerator(h));
         // fclose(outfile) — dropped at scope end.
     }
 }

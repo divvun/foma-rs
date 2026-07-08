@@ -6,7 +6,7 @@ use super::*;
 // [spec:foma:sem:iface.iface-load-stack-fn]
 // [spec:foma:def:foma.iface-load-stack-fn]
 // [spec:foma:sem:foma.iface-load-stack-fn]
-pub fn iface_load_stack(filename: &str) {
+pub fn iface_load_stack(session: &mut Session, filename: &str) {
     let mut fsrh = fsm_read_binary_file_multiple_init(filename);
     if fsrh.is_none() {
         eprint!("{}: ", filename);
@@ -14,7 +14,7 @@ pub fn iface_load_stack(filename: &str) {
         return;
     }
     while let Some(net) = fsm_read_binary_file_multiple(&mut fsrh) {
-        stack_add(net);
+        session.stack_add(net);
     }
 }
 
@@ -22,11 +22,11 @@ pub fn iface_load_stack(filename: &str) {
 // [spec:foma:sem:iface.iface-pop-fn]
 // [spec:foma:def:foma.iface-pop-fn]
 // [spec:foma:sem:foma.iface-pop-fn]
-pub fn iface_pop() {
-    if stack_size() < 1 {
+pub fn iface_pop(session: &mut Session) {
+    if session.stack_size() < 1 {
         print!("Stack is empty.\n");
     } else {
-        let net = stack_pop().unwrap();
+        let net = session.stack_pop().unwrap();
         fsm_destroy(net);
     }
 }
@@ -35,16 +35,16 @@ pub fn iface_pop() {
 // [spec:foma:sem:iface.iface-name-net-fn+1]
 // [spec:foma:def:foma.iface-name-net-fn]
 // [spec:foma:sem:foma.iface-name-net-fn+1]
-pub fn iface_name_net(name: &str) {
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
-        stack_entry_fsm(top, |f| {
+pub fn iface_name_net(session: &mut Session, name: &str) {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
+        session.stack_entry_fsm(top, |f| {
             // [spec:foma:sem:iface.iface-name-net-fn+1] store the name in full. C
             // used a fixed char[40] field (strncpy without a NUL terminator for
             // names >= 40 bytes), truncating longer names.
             f.name = name.to_string();
         });
-        iface_print_name();
+        iface_print_name(session);
     }
 }
 
@@ -52,10 +52,10 @@ pub fn iface_name_net(name: &str) {
 // [spec:foma:sem:iface.iface-print-name-fn]
 // [spec:foma:def:foma.iface-print-name-fn]
 // [spec:foma:sem:foma.iface-print-name-fn]
-pub fn iface_print_name() {
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
-        let name = stack_entry_fsm(top, |f| f.name.clone());
+pub fn iface_print_name(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
+        let name = session.stack_entry_fsm(top, |f| f.name.clone());
         print!("{}\n", name);
     }
 }
@@ -64,7 +64,7 @@ pub fn iface_print_name() {
 // [spec:foma:sem:iface.iface-quit-fn]
 // [spec:foma:def:foma.iface-quit-fn]
 // [spec:foma:sem:foma.iface-quit-fn]
-pub fn iface_quit() {
+pub fn iface_quit(session: &mut Session) {
     G_DEFINES.with(|g| {
         let mut g = g.borrow_mut();
         // remove_defined(g_defines, NULL) — NULL name destroys every defined net.
@@ -72,8 +72,8 @@ pub fn iface_quit() {
             remove_defined(d, None);
         }
     });
-    while stack_isempty() == 0 {
-        let net = stack_pop().unwrap();
+    while session.stack_isempty() == 0 {
+        let net = session.stack_pop().unwrap();
         fsm_destroy(net);
     }
     std::process::exit(0);
@@ -83,9 +83,9 @@ pub fn iface_quit() {
 // [spec:foma:sem:iface.iface-rotate-fn]
 // [spec:foma:def:foma.iface-rotate-fn]
 // [spec:foma:sem:foma.iface-rotate-fn]
-pub fn iface_rotate() {
-    if iface_stack_check(1) != 0 {
-        stack_rotate();
+pub fn iface_rotate(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        session.stack_rotate();
     }
 }
 
@@ -93,8 +93,8 @@ pub fn iface_rotate() {
 // [spec:foma:sem:iface.iface-save-stack-fn]
 // [spec:foma:def:foma.iface-save-stack-fn]
 // [spec:foma:sem:foma.iface-save-stack-fn]
-pub fn iface_save_stack(filename: &str) {
-    if iface_stack_check(1) != 0 {
+pub fn iface_save_stack(session: &mut Session, filename: &str) {
+    if iface_stack_check(session, 1) != 0 {
         // gzopen(filename, "wb") — File::create + GzEncoder.
         let file = match File::create(filename) {
             Ok(f) => f,
@@ -106,10 +106,10 @@ pub fn iface_save_stack(filename: &str) {
         print!("Writing to file {}.\n", filename);
         let mut outfile = GzEncoder::new(file, Compression::default());
         // for (stack_ptr = stack_find_bottom(); stack_ptr->next != NULL; stack_ptr = stack_ptr->next)
-        let mut stack_ptr = stack_find_bottom().unwrap();
-        while stack_entry_next(stack_ptr).is_some() {
-            stack_entry_fsm(stack_ptr, |f| foma_net_print(f, &mut outfile));
-            stack_ptr = stack_entry_next(stack_ptr).unwrap();
+        let mut stack_ptr = session.stack_find_bottom().unwrap();
+        while session.stack_entry_next(stack_ptr).is_some() {
+            session.stack_entry_fsm(stack_ptr, |f| foma_net_print(f, &mut outfile));
+            stack_ptr = session.stack_entry_next(stack_ptr).unwrap();
         }
         // gzclose(outfile)
         let _ = outfile.finish();
@@ -120,11 +120,11 @@ pub fn iface_save_stack(filename: &str) {
 // [spec:foma:sem:iface.iface-turn-fn+1]
 // [spec:foma:def:foma.iface-turn-fn]
 // [spec:foma:sem:foma.iface-turn-fn+1]
-pub fn iface_turn() {
+pub fn iface_turn(session: &mut Session) {
     // [spec:foma:sem:iface.iface-turn-fn+1] "turn stack" reverses the whole stack
     // via stack_turn(). C wired it to stack_rotate() (a top/bottom swap), which
     // contradicted the "turns stack upside down" help text.
-    if iface_stack_check(1) != 0 {
-        stack_turn();
+    if iface_stack_check(session, 1) != 0 {
+        session.stack_turn();
     }
 }

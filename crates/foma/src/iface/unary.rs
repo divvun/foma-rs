@@ -6,9 +6,10 @@ use super::*;
 // [spec:foma:sem:iface.iface-ambiguous-upper-fn]
 // [spec:foma:def:foma.iface-ambiguous-upper-fn]
 // [spec:foma:sem:foma.iface-ambiguous-upper-fn]
-pub fn iface_ambiguous_upper() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_extract_ambiguous_domain(stack_pop().unwrap()));
+pub fn iface_ambiguous_upper(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_extract_ambiguous_domain(popped));
     }
 }
 
@@ -16,12 +17,10 @@ pub fn iface_ambiguous_upper() {
 // [spec:foma:sem:iface.iface-close-fn]
 // [spec:foma:def:foma.iface-close-fn]
 // [spec:foma:sem:foma.iface-close-fn]
-pub fn iface_close() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_topsort(fsm_minimize(fsm_close_sigma(
-            stack_pop().unwrap(),
-            0,
-        ))));
+pub fn iface_close(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_topsort(fsm_minimize(fsm_close_sigma(popped, 0))));
     }
 }
 
@@ -29,12 +28,13 @@ pub fn iface_close() {
 // [spec:foma:sem:iface.iface-compact-fn]
 // [spec:foma:def:foma.iface-compact-fn]
 // [spec:foma:sem:foma.iface-compact-fn]
-pub fn iface_compact() {
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
-        stack_entry_fsm(top, |f| fsm_compact(f));
-        stack_entry_fsm(top, |f| sigma_sort(f));
-        stack_add(fsm_topsort(fsm_minimize(stack_pop().unwrap())));
+pub fn iface_compact(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
+        session.stack_entry_fsm(top, |f| fsm_compact(f));
+        session.stack_entry_fsm(top, |f| sigma_sort(f));
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_topsort(fsm_minimize(popped)));
     }
 }
 
@@ -42,9 +42,10 @@ pub fn iface_compact() {
 // [spec:foma:sem:iface.iface-complete-fn]
 // [spec:foma:def:foma.iface-complete-fn]
 // [spec:foma:sem:foma.iface-complete-fn]
-pub fn iface_complete() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_complete(stack_pop().unwrap()));
+pub fn iface_complete(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_complete(popped));
     }
 }
 
@@ -52,9 +53,10 @@ pub fn iface_complete() {
 // [spec:foma:sem:iface.iface-determinize-fn]
 // [spec:foma:def:foma.iface-determinize-fn]
 // [spec:foma:sem:foma.iface-determinize-fn]
-pub fn iface_determinize() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_determinize(stack_pop().unwrap()));
+pub fn iface_determinize(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_determinize(popped));
     }
 }
 
@@ -62,9 +64,10 @@ pub fn iface_determinize() {
 // [spec:foma:sem:iface.iface-eliminate-flags-fn]
 // [spec:foma:def:foma.iface-eliminate-flags-fn]
 // [spec:foma:sem:foma.iface-eliminate-flags-fn]
-pub fn iface_eliminate_flags() {
-    if iface_stack_check(1) != 0 {
-        stack_add(flag_eliminate(stack_pop().unwrap(), None));
+pub fn iface_eliminate_flags(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(flag_eliminate(popped, None));
     }
 }
 
@@ -72,9 +75,10 @@ pub fn iface_eliminate_flags() {
 // [spec:foma:sem:iface.iface-extract-ambiguous-fn]
 // [spec:foma:def:foma.iface-extract-ambiguous-fn]
 // [spec:foma:sem:foma.iface-extract-ambiguous-fn]
-pub fn iface_extract_ambiguous() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_extract_ambiguous(stack_pop().unwrap()));
+pub fn iface_extract_ambiguous(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_extract_ambiguous(popped));
     }
 }
 
@@ -82,9 +86,10 @@ pub fn iface_extract_ambiguous() {
 // [spec:foma:sem:iface.iface-extract-unambiguous-fn]
 // [spec:foma:def:foma.iface-extract-unambiguous-fn]
 // [spec:foma:sem:foma.iface-extract-unambiguous-fn]
-pub fn iface_extract_unambiguous() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_extract_unambiguous(stack_pop().unwrap()));
+pub fn iface_extract_unambiguous(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_extract_unambiguous(popped));
     }
 }
 
@@ -136,9 +141,10 @@ pub fn iface_extract_number(s: &str) -> i32 {
 // [spec:foma:sem:iface.iface-eliminate-flag-fn]
 // [spec:foma:def:foma.iface-eliminate-flag-fn]
 // [spec:foma:sem:foma.iface-eliminate-flag-fn]
-pub fn iface_eliminate_flag(name: &str) {
-    if iface_stack_check(1) != 0 {
-        stack_add(flag_eliminate(stack_pop().unwrap(), Some(name)));
+pub fn iface_eliminate_flag(session: &mut Session, name: &str) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(flag_eliminate(popped, Some(name)));
     }
 }
 
@@ -146,9 +152,10 @@ pub fn iface_eliminate_flag(name: &str) {
 // [spec:foma:sem:iface.iface-factorize-fn]
 // [spec:foma:def:foma.iface-factorize-fn]
 // [spec:foma:sem:foma.iface-factorize-fn]
-pub fn iface_factorize() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_bimachine(stack_pop().unwrap()));
+pub fn iface_factorize(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_bimachine(popped));
     }
 }
 
@@ -156,9 +163,10 @@ pub fn iface_factorize() {
 // [spec:foma:sem:iface.iface-sequentialize-fn]
 // [spec:foma:def:foma.iface-sequentialize-fn]
 // [spec:foma:sem:foma.iface-sequentialize-fn]
-pub fn iface_sequentialize() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_sequentialize(stack_pop().unwrap()));
+pub fn iface_sequentialize(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_sequentialize(popped));
     }
 }
 
@@ -166,9 +174,10 @@ pub fn iface_sequentialize() {
 // [spec:foma:sem:iface.iface-invert-fn]
 // [spec:foma:def:foma.iface-invert-fn]
 // [spec:foma:sem:foma.iface-invert-fn]
-pub fn iface_invert() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_invert(stack_pop().unwrap()));
+pub fn iface_invert(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_invert(popped));
     }
 }
 
@@ -176,9 +185,10 @@ pub fn iface_invert() {
 // [spec:foma:sem:iface.iface-label-net-fn]
 // [spec:foma:def:foma.iface-label-net-fn]
 // [spec:foma:sem:foma.iface-label-net-fn]
-pub fn iface_label_net() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_sigma_pairs_net(stack_pop().unwrap()));
+pub fn iface_label_net(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_sigma_pairs_net(popped));
     }
 }
 
@@ -186,11 +196,10 @@ pub fn iface_label_net() {
 // [spec:foma:sem:iface.iface-letter-machine-fn]
 // [spec:foma:def:foma.iface-letter-machine-fn]
 // [spec:foma:sem:foma.iface-letter-machine-fn]
-pub fn iface_letter_machine() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_topsort(fsm_minimize(fsm_letter_machine(
-            stack_pop().unwrap(),
-        ))));
+pub fn iface_letter_machine(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_topsort(fsm_minimize(fsm_letter_machine(popped))));
     }
 }
 
@@ -198,9 +207,10 @@ pub fn iface_letter_machine() {
 // [spec:foma:sem:iface.iface-lower-side-fn]
 // [spec:foma:def:foma.iface-lower-side-fn]
 // [spec:foma:sem:foma.iface-lower-side-fn]
-pub fn iface_lower_side() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_topsort(fsm_minimize(fsm_lower(stack_pop().unwrap()))));
+pub fn iface_lower_side(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_topsort(fsm_minimize(fsm_lower(popped))));
     }
 }
 
@@ -208,11 +218,12 @@ pub fn iface_lower_side() {
 // [spec:foma:sem:iface.iface-minimize-fn]
 // [spec:foma:def:foma.iface-minimize-fn]
 // [spec:foma:sem:foma.iface-minimize-fn]
-pub fn iface_minimize() {
-    if iface_stack_check(1) != 0 {
+pub fn iface_minimize(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
         let store_minimal_var = G_MINIMAL.with(|v| v.get());
         G_MINIMAL.with(|v| v.set(1));
-        stack_add(fsm_topsort(fsm_minimize(stack_pop().unwrap())));
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_topsort(fsm_minimize(popped)));
         G_MINIMAL.with(|v| v.set(store_minimal_var));
     }
 }
@@ -221,11 +232,10 @@ pub fn iface_minimize() {
 // [spec:foma:sem:iface.iface-one-plus-fn]
 // [spec:foma:def:foma.iface-one-plus-fn]
 // [spec:foma:sem:foma.iface-one-plus-fn]
-pub fn iface_one_plus() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_topsort(fsm_minimize(fsm_kleene_plus(
-            stack_pop().unwrap(),
-        ))));
+pub fn iface_one_plus(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_topsort(fsm_minimize(fsm_kleene_plus(popped))));
     }
 }
 
@@ -233,11 +243,10 @@ pub fn iface_one_plus() {
 // [spec:foma:sem:iface.iface-negate-fn]
 // [spec:foma:def:foma.iface-negate-fn]
 // [spec:foma:sem:foma.iface-negate-fn]
-pub fn iface_negate() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_topsort(fsm_minimize(fsm_complement(
-            stack_pop().unwrap(),
-        ))));
+pub fn iface_negate(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_topsort(fsm_minimize(fsm_complement(popped))));
     }
 }
 
@@ -245,9 +254,10 @@ pub fn iface_negate() {
 // [spec:foma:sem:iface.iface-prune-fn]
 // [spec:foma:def:foma.iface-prune-fn]
 // [spec:foma:sem:foma.iface-prune-fn]
-pub fn iface_prune() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_topsort(fsm_coaccessible(stack_pop().unwrap())));
+pub fn iface_prune(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_topsort(fsm_coaccessible(popped)));
     }
 }
 
@@ -255,11 +265,10 @@ pub fn iface_prune() {
 // [spec:foma:sem:iface.iface-reverse-fn]
 // [spec:foma:def:foma.iface-reverse-fn]
 // [spec:foma:sem:foma.iface-reverse-fn]
-pub fn iface_reverse() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_topsort(fsm_determinize(fsm_reverse(
-            stack_pop().unwrap(),
-        ))));
+pub fn iface_reverse(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_topsort(fsm_determinize(fsm_reverse(popped))));
     }
 }
 
@@ -267,9 +276,10 @@ pub fn iface_reverse() {
 // [spec:foma:sem:iface.iface-sigma-net-fn]
 // [spec:foma:def:foma.iface-sigma-net-fn]
 // [spec:foma:sem:foma.iface-sigma-net-fn]
-pub fn iface_sigma_net() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_sigma_net(stack_pop().unwrap()));
+pub fn iface_sigma_net(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_sigma_net(popped));
     }
 }
 
@@ -277,10 +287,10 @@ pub fn iface_sigma_net() {
 // [spec:foma:sem:iface.iface-sort-input-fn]
 // [spec:foma:def:foma.iface-sort-input-fn]
 // [spec:foma:sem:foma.iface-sort-input-fn]
-pub fn iface_sort_input() {
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
-        stack_entry_fsm(top, |f| fsm_sort_arcs(f, 1));
+pub fn iface_sort_input(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
+        session.stack_entry_fsm(top, |f| fsm_sort_arcs(f, 1));
     }
 }
 
@@ -288,10 +298,10 @@ pub fn iface_sort_input() {
 // [spec:foma:sem:iface.iface-sort-output-fn]
 // [spec:foma:def:foma.iface-sort-output-fn]
 // [spec:foma:sem:foma.iface-sort-output-fn]
-pub fn iface_sort_output() {
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
-        stack_entry_fsm(top, |f| fsm_sort_arcs(f, 2));
+pub fn iface_sort_output(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
+        session.stack_entry_fsm(top, |f| fsm_sort_arcs(f, 2));
     }
 }
 
@@ -299,11 +309,12 @@ pub fn iface_sort_output() {
 // [spec:foma:sem:iface.iface-sort-fn]
 // [spec:foma:def:foma.iface-sort-fn]
 // [spec:foma:sem:foma.iface-sort-fn]
-pub fn iface_sort() {
-    if iface_stack_check(1) != 0 {
-        let top = stack_find_top().unwrap();
-        stack_entry_fsm(top, |f| sigma_sort(f));
-        stack_add(fsm_topsort(stack_pop().unwrap()));
+pub fn iface_sort(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let top = session.stack_find_top().unwrap();
+        session.stack_entry_fsm(top, |f| sigma_sort(f));
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_topsort(popped));
     }
 }
 
@@ -311,9 +322,10 @@ pub fn iface_sort() {
 // [spec:foma:sem:iface.iface-twosided-flags-fn]
 // [spec:foma:def:foma.iface-twosided-flags-fn]
 // [spec:foma:sem:foma.iface-twosided-flags-fn]
-pub fn iface_twosided_flags() {
-    if iface_stack_check(1) != 0 {
-        stack_add(flag_twosided(stack_pop().unwrap()));
+pub fn iface_twosided_flags(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(flag_twosided(popped));
     }
 }
 
@@ -321,9 +333,10 @@ pub fn iface_twosided_flags() {
 // [spec:foma:sem:iface.iface-upper-side-fn]
 // [spec:foma:def:foma.iface-upper-side-fn]
 // [spec:foma:sem:foma.iface-upper-side-fn]
-pub fn iface_upper_side() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_topsort(fsm_minimize(fsm_upper(stack_pop().unwrap()))));
+pub fn iface_upper_side(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_topsort(fsm_minimize(fsm_upper(popped))));
     }
 }
 
@@ -331,10 +344,9 @@ pub fn iface_upper_side() {
 // [spec:foma:sem:iface.iface-zero-plus-fn]
 // [spec:foma:def:foma.iface-zero-plus-fn]
 // [spec:foma:sem:foma.iface-zero-plus-fn]
-pub fn iface_zero_plus() {
-    if iface_stack_check(1) != 0 {
-        stack_add(fsm_topsort(fsm_minimize(fsm_kleene_star(
-            stack_pop().unwrap(),
-        ))));
+pub fn iface_zero_plus(session: &mut Session) {
+    if iface_stack_check(session, 1) != 0 {
+        let popped = session.stack_pop().unwrap();
+        session.stack_add(fsm_topsort(fsm_minimize(fsm_kleene_star(popped))));
     }
 }

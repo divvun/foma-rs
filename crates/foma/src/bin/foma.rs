@@ -28,7 +28,7 @@ use foma::iface::*;
 use foma::io::file_to_mem;
 use foma::mem::G_VERBOSE;
 use foma::regex::fsm_parse_regex;
-use foma::stack::{stack_add, stack_clear, stack_init, stack_pop, stack_size};
+use foma::session::Session;
 use foma::structures::fsm_copy;
 use foma::topsort::fsm_topsort;
 use foma::types::{
@@ -391,7 +391,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let argv0 = args.first().cloned().unwrap_or_else(|| "foma".to_string());
 
-    stack_init();
+    let mut session = Session::new();
     // DEVIATION from C: `srand((unsigned int)time(NULL))` seeds dynarray's
     // crate-private LCG, which this (separate) binary crate cannot reach.
     // apply_init reseeds that LCG with time(NULL) before any random enumeration,
@@ -414,7 +414,7 @@ fn main() {
             match opt {
                 'e' => {
                     match getoptarg(&args, &mut idx, &cur, &mut k) {
-                        Some(a) => my_interfaceparse(&a),
+                        Some(a) => my_interfaceparse(&mut session, &a),
                         None => usage_err(),
                     }
                     break;
@@ -423,7 +423,7 @@ fn main() {
                     if let Some(a) = getoptarg(&args, &mut idx, &cur, &mut k) {
                         if let Ok(bytes) = file_to_mem(&a) {
                             INPUT_IS_FILE.with(|f| f.set(1));
-                            my_interfaceparse(&String::from_utf8_lossy(&bytes));
+                            my_interfaceparse(&mut session, &String::from_utf8_lossy(&bytes));
                         }
                     }
                     process::exit(0);
@@ -436,7 +436,7 @@ fn main() {
                     if let Some(a) = getoptarg(&args, &mut idx, &cur, &mut k) {
                         if let Ok(bytes) = file_to_mem(&a) {
                             INPUT_IS_FILE.with(|f| f.set(1));
-                            my_interfaceparse(&String::from_utf8_lossy(&bytes));
+                            my_interfaceparse(&mut session, &String::from_utf8_lossy(&bytes));
                         }
                     }
                     break;
@@ -478,7 +478,7 @@ fn main() {
     loop {
         let promptmode = PROMPTMODE.with(|p| p.get());
         let mut prompt = if promptmode == PROMPT_MAIN {
-            format!("foma[{}]: ", stack_size())
+            format!("foma[{}]: ", session.stack_size())
         } else {
             let d = APPLY_DIRECTION.with(|d| d.get());
             if d == AP_D {
@@ -511,7 +511,7 @@ fn main() {
             }
             Some(cmd) => {
                 INPUT_IS_FILE.with(|f| f.set(0));
-                my_interfaceparse(&cmd);
+                my_interfaceparse(&mut session, &cmd);
             }
         }
     }
@@ -543,7 +543,7 @@ fn usage_err() -> ! {
 /* interface.l my_interfaceparse: scan a whole buffer (a -e/-f/-l/source file or
 one REPL line) and dispatch its commands. Persistent state (PROMPTMODE apply
 mode, PENDING_REGEX) survives across calls, matching flex's global yy_start. */
-fn my_interfaceparse(buffer: &str) {
+fn my_interfaceparse(session: &mut Session, buffer: &str) {
     // interface.l scans a NUL-terminated C string (file_to_mem buffers carry a
     // trailing '\0'); flex stops at the first NUL, so trim there before splitting
     // into lines — otherwise the terminator becomes a spurious final command.
@@ -554,26 +554,26 @@ fn my_interfaceparse(buffer: &str) {
     LINENO.with(|l| l.set(1));
     for raw in buffer.split('\n') {
         let line = raw.strip_suffix('\r').unwrap_or(raw);
-        if !process_line(line) {
+        if !process_line(session, line) {
             return; // an unknown command aborts the buffer (flex returns 1)
         }
         LINENO.with(|l| l.set(l.get() + 1));
     }
 }
 
-fn process_line(line: &str) -> bool {
+fn process_line(session: &mut Session, line: &str) -> bool {
     if PENDING_REGEX.with(|p| p.borrow().is_some()) {
-        return regex_feed(line);
+        return regex_feed(session, line);
     }
     if PROMPTMODE.with(|p| p.get()) == PROMPT_A {
-        return apply_feed(line);
+        return apply_feed(session, line);
     }
-    dispatch(line)
+    dispatch(session, line)
 }
 
 /* <APPLY_P>: each line is an apply input word until "END;" or (in the REPL) EOF.
 Empty lines are ignored (they don't match {NONL}+). */
-fn apply_feed(line: &str) -> bool {
+fn apply_feed(session: &mut Session, line: &str) -> bool {
     if line.is_empty() {
         return true;
     }
@@ -583,22 +583,22 @@ fn apply_feed(line: &str) -> bool {
     }
     let d = APPLY_DIRECTION.with(|d| d.get());
     if d == AP_D {
-        iface_apply_down(line);
+        iface_apply_down(session, line);
     } else if d == AP_M {
-        iface_apply_med(line);
+        iface_apply_med(session, line);
     } else if d == AP_U {
-        iface_apply_up(line);
+        iface_apply_up(session, line);
     }
     true
 }
 
 /* <REGEX> continuation: append the line and scan for the terminating top-level
 `;`. When found, compile and re-dispatch any leftover on the same line. */
-fn regex_feed(line: &str) -> bool {
-    regex_append_and_scan(line, true)
+fn regex_feed(session: &mut Session, line: &str) -> bool {
+    regex_append_and_scan(session, line, true)
 }
 
-fn start_regex(pmode: i32, defname: String, initial: &str) -> bool {
+fn start_regex(session: &mut Session, pmode: i32, defname: String, initial: &str) -> bool {
     PENDING_REGEX.with(|p| {
         *p.borrow_mut() = Some(PendingRegex {
             pmode,
@@ -606,10 +606,10 @@ fn start_regex(pmode: i32, defname: String, initial: &str) -> bool {
             accum: String::new(),
         })
     });
-    regex_append_and_scan(initial, false)
+    regex_append_and_scan(session, initial, false)
 }
 
-fn regex_append_and_scan(text: &str, prepend_nl: bool) -> bool {
+fn regex_append_and_scan(session: &mut Session, text: &str, prepend_nl: bool) -> bool {
     let scan = PENDING_REGEX.with(|p| {
         let mut b = p.borrow_mut();
         let pr = b.as_mut().unwrap();
@@ -627,8 +627,8 @@ fn regex_append_and_scan(text: &str, prepend_nl: bool) -> bool {
         None => true, // no `;` yet: keep accumulating on the next line
         Some((body, leftover, pmode, defname)) => {
             PENDING_REGEX.with(|p| *p.borrow_mut() = None);
-            compile_regex(pmode, &defname, &body);
-            process_line(&leftover)
+            compile_regex(session, pmode, &defname, &body);
+            process_line(session, &leftover)
         }
     }
 }
@@ -681,7 +681,7 @@ fn find_regex_terminator(s: &str) -> Option<usize> {
 
 /* interface.l <REGEX>(;) action: parse the accumulated body; on success push
 (RE) or define (DE) fsm_topsort(fsm_minimize(current_parse)). */
-fn compile_regex(pmode: i32, defname: &str, body: &str) {
+fn compile_regex(session: &mut Session, pmode: i32, defname: &str, body: &str) {
     let verbose = G_VERBOSE.with(|v| v.get()) != 0;
     G_DEFINES.with(|dn| {
         G_DEFINES_F.with(|df| {
@@ -699,7 +699,7 @@ fn compile_regex(pmode: i32, defname: &str, body: &str) {
                 Some(net) => {
                     let tempnet = fsm_topsort(net);
                     if pmode == RE {
-                        stack_add(tempnet); // prints stats itself when verbose
+                        session.stack_add(tempnet); // prints stats itself when verbose
                     } else {
                         let olddef =
                             add_defined(dnb.as_deref_mut().unwrap(), Some(tempnet), defname);
@@ -729,11 +729,11 @@ fn compile_regex(pmode: i32, defname: &str, body: &str) {
 }
 
 /* interface.l <DEFI> "define NAME" (no regex body): name the top-of-stack net. */
-fn define_top_of_stack(name: &str) {
-    if iface_stack_check(1) == 0 {
+fn define_top_of_stack(session: &mut Session, name: &str) {
+    if iface_stack_check(session, 1) == 0 {
         return;
     }
-    let net = stack_pop();
+    let net = session.stack_pop();
     let name2 = name.trim_end_matches(';');
     let verbose = G_VERBOSE.with(|v| v.get()) != 0;
     G_DEFINES.with(|dn| {
@@ -839,7 +839,7 @@ fn utf8_len(lead: u8) -> usize {
 
 // ───────────────────────── the command matcher ─────────────────────────
 
-fn dispatch(line: &str) -> bool {
+fn dispatch(session: &mut Session, line: &str) -> bool {
     let t = lstrip(line);
     if t.is_empty() {
         return true;
@@ -858,7 +858,7 @@ fn dispatch(line: &str) -> bool {
         || w0 == "hyvästi"
         || (w0 == "au" && w1 == "revoir")
     {
-        iface_quit(); // never returns
+        iface_quit(session); // never returns
         return true;
     }
 
@@ -878,7 +878,7 @@ fn dispatch(line: &str) -> bool {
         if let Some(dir) = dir {
             let arg = arg_after(t, nskip);
             if arg.is_empty() {
-                if iface_stack_check(1) != 0 {
+                if iface_stack_check(session, 1) != 0 {
                     PROMPTMODE.with(|p| p.set(PROMPT_A));
                     APPLY_DIRECTION.with(|d| d.set(dir));
                 }
@@ -887,18 +887,18 @@ fn dispatch(line: &str) -> bool {
             if (dir == AP_D || dir == AP_U) && arg.starts_with('<') {
                 let a2 = arg[1..].trim();
                 if let Some(gp) = a2.find('>') {
-                    iface_apply_file(a2[..gp].trim(), Some(a2[gp + 1..].trim()), dir);
+                    iface_apply_file(session, a2[..gp].trim(), Some(a2[gp + 1..].trim()), dir);
                 } else {
-                    iface_apply_file(a2.trim(), None, dir);
+                    iface_apply_file(session, a2.trim(), None, dir);
                 }
                 return true;
             }
             if dir == AP_D {
-                iface_apply_down(&arg);
+                iface_apply_down(session, &arg);
             } else if dir == AP_U {
-                iface_apply_up(&arg);
+                iface_apply_up(session, &arg);
             } else {
-                iface_apply_med(&arg);
+                iface_apply_med(session, &arg);
             }
             return true;
         }
@@ -906,7 +906,7 @@ fn dispatch(line: &str) -> bool {
 
     // define NAME … / define NAME(args) … / define NAME (top of stack)
     if pfx(w0, "define", 2) && ws.len() >= 2 {
-        return handle_define(&arg_after(t, 1));
+        return handle_define(session, &arg_after(t, 1));
     }
 
     // NAME = body  (define shorthand)
@@ -915,12 +915,12 @@ fn dispatch(line: &str) -> bool {
         if !left.is_empty()
             && !left.contains(|c: char| c == ' ' || c == '\t' || c == '#' || c == '!')
         {
-            return start_regex(DE, left.to_string(), &t[eq + 1..]);
+            return start_regex(session, DE, left.to_string(), &t[eq + 1..]);
         }
     }
 
     // regex / read family
-    if let Some(r) = try_read_or_regex(t, w0, w1) {
+    if let Some(r) = try_read_or_regex(session, t, w0, w1) {
         return r;
     }
 
@@ -932,8 +932,8 @@ fn dispatch(line: &str) -> bool {
     // assert-stack <n>
     if w0 == "assert-stack" {
         let level: i32 = arg_after(t, 1).trim().parse().unwrap_or(0);
-        if level != stack_size() {
-            eprintln!("Stack size {} not {}", stack_size(), level);
+        if level != session.stack_size() {
+            eprintln!("Stack size {} not {}", session.stack_size(), level);
             process::exit(1);
         }
         return true;
@@ -964,15 +964,15 @@ fn dispatch(line: &str) -> bool {
 
     // sigma net / label net / letter machine  (before the print/short-form family)
     if w0 == "sigma" && pfx(w1, "net", 1) {
-        iface_sigma_net();
+        iface_sigma_net(session);
         return true;
     }
     if w0 == "label" && pfx(w1, "net", 1) {
-        iface_label_net();
+        iface_label_net(session);
         return true;
     }
     if w0 == "letter" && pfx(w1, "machine", 1) {
-        iface_letter_machine();
+        iface_letter_machine(session);
         return true;
     }
 
@@ -981,7 +981,7 @@ fn dispatch(line: &str) -> bool {
         let nskip = if pfx(w1, "net", 1) { 2 } else { 1 };
         let arg = arg_after(t, nskip);
         if !arg.is_empty() {
-            iface_name_net(&arg);
+            iface_name_net(session, &arg);
             return true;
         }
     }
@@ -989,11 +989,11 @@ fn dispatch(line: &str) -> bool {
     // eliminate flags / eliminate flag <name>
     if w0 == "eliminate" {
         if w1 == "flags" {
-            iface_eliminate_flags();
+            iface_eliminate_flags(session);
             return true;
         }
         if w1 == "flag" && ws.len() >= 3 {
-            iface_eliminate_flag(&arg_after(t, 2));
+            iface_eliminate_flag(session, &arg_after(t, 2));
             return true;
         }
     }
@@ -1002,16 +1002,16 @@ fn dispatch(line: &str) -> bool {
     if w0 == "export" && pfx(w1, "cmatrix", 3) {
         let arg = arg_after(t, 2);
         if arg.is_empty() {
-            iface_print_cmatrix_att(None);
+            iface_print_cmatrix_att(session, None);
         } else {
-            iface_print_cmatrix_att(Some(strip_redir(&arg).as_str()));
+            iface_print_cmatrix_att(session, Some(strip_redir(&arg).as_str()));
         }
         return true;
     }
 
     // substitute defined|symbol X for Y
     if pfx(w0, "substitute", 3) && ws.len() >= 2 {
-        return handle_substitute(t, w1);
+        return handle_substitute(session, t, w1);
     }
 
     // set / show
@@ -1041,9 +1041,9 @@ fn dispatch(line: &str) -> bool {
         if w1 == "defined" {
             iface_load_defined(&arg_after(t, 2));
         } else if w1 == "stack" {
-            iface_load_stack(&arg_after(t, 2));
+            iface_load_stack(session, &arg_after(t, 2));
         } else {
-            iface_load_stack(&arg_after(t, 1));
+            iface_load_stack(session, &arg_after(t, 1));
         }
         return true;
     }
@@ -1052,7 +1052,7 @@ fn dispatch(line: &str) -> bool {
         return true;
     }
     if w0 == "ss" {
-        iface_save_stack(&strip_redir(&arg_after(t, 1)));
+        iface_save_stack(session, &strip_redir(&arg_after(t, 1)));
         return true;
     }
     if w0 == "save" {
@@ -1061,7 +1061,7 @@ fn dispatch(line: &str) -> bool {
             return true;
         }
         if w1 == "stack" {
-            iface_save_stack(&strip_redir(&arg_after(t, 2)));
+            iface_save_stack(session, &strip_redir(&arg_after(t, 2)));
             return true;
         }
     }
@@ -1071,7 +1071,7 @@ fn dispatch(line: &str) -> bool {
         let nskip = if pfx(w1, "defined", 3) { 2 } else { 1 };
         let name = arg_after(t, nskip);
         if !name.is_empty() {
-            iface_push(&name);
+            iface_push(session, &name);
         }
         return true;
     }
@@ -1099,7 +1099,7 @@ fn dispatch(line: &str) -> bool {
             Some(bytes) => {
                 println!("Opening file '{}'.", file);
                 INPUT_IS_FILE.with(|f| f.set(1));
-                my_interfaceparse(&String::from_utf8_lossy(&bytes));
+                my_interfaceparse(session, &String::from_utf8_lossy(&bytes));
             }
             None => println!("Error opening file '{}'", file),
         }
@@ -1123,34 +1123,34 @@ fn dispatch(line: &str) -> bool {
 
     // write att / write prolog (with optional filename)
     if w0 == "watt" {
-        return write_att_cmd(&arg_after(t, 1));
+        return write_att_cmd(session, &arg_after(t, 1));
     }
     if w0 == "wpl" {
-        return write_prolog_cmd(&arg_after(t, 1));
+        return write_prolog_cmd(session, &arg_after(t, 1));
     }
     if pfx(w0, "write", 2) && ws.len() >= 2 {
         if pfx(w1, "att", 2) {
-            return write_att_cmd(&arg_after(t, 2));
+            return write_att_cmd(session, &arg_after(t, 2));
         }
         if pfx(w1, "prolog", 4) {
-            return write_prolog_cmd(&arg_after(t, 2));
+            return write_prolog_cmd(session, &arg_after(t, 2));
         }
     }
 
     // read shorthands ratt/rpl already handled in try_read_or_regex.
 
     // test family & abbreviations
-    if let Some(r) = try_test(w0, w1) {
+    if let Some(r) = try_test(session, w0, w1) {
         return r;
     }
 
     // print family and bare short forms (net, sigma, words, pss, …)
-    if let Some(r) = try_print_family(t, &ws) {
+    if let Some(r) = try_print_family(session, t, &ws) {
         return r;
     }
 
     // all remaining zero-argument commands
-    if let Some(r) = try_zero_arg(w0, w1) {
+    if let Some(r) = try_zero_arg(session, w0, w1) {
         return r;
     }
 
@@ -1167,7 +1167,7 @@ fn dispatch(line: &str) -> bool {
     false
 }
 
-fn handle_define(rest: &str) -> bool {
+fn handle_define(session: &mut Session, rest: &str) -> bool {
     let rest = rest.trim_start();
     if rest.is_empty() {
         return true;
@@ -1194,14 +1194,14 @@ fn handle_define(rest: &str) -> bool {
     let name = &rest[..name_end];
     let body = rest[name_end..].trim();
     if body.is_empty() || body == ";" {
-        define_top_of_stack(name);
+        define_top_of_stack(session, name);
         true
     } else {
-        start_regex(DE, name.to_string(), body)
+        start_regex(session, DE, name.to_string(), body)
     }
 }
 
-fn handle_substitute(t: &str, w1: &str) -> bool {
+fn handle_substitute(session: &mut Session, t: &str, w1: &str) -> bool {
     // "substitute defined|symbol X for Y" → replace Y with X.
     let (is_defined, is_symbol) = (pfx(w1, "defined", 3), pfx(w1, "symbol", 3));
     if !is_defined && !is_symbol {
@@ -1217,61 +1217,61 @@ fn handle_substitute(t: &str, w1: &str) -> bool {
     // Y = everything after the "for" token.
     let y = arg_after(&rest, 2);
     if is_defined {
-        iface_substitute_defined(&y, x);
+        iface_substitute_defined(session, &y, x);
     } else {
-        iface_substitute_symbol(&y, x);
+        iface_substitute_symbol(session, &y, x);
     }
     true
 }
 
-fn try_read_or_regex(t: &str, w0: &str, w1: &str) -> Option<bool> {
+fn try_read_or_regex(session: &mut Session, t: &str, w0: &str, w1: &str) -> Option<bool> {
     // Standalone read abbreviations.
     if w0 == "ratt" {
-        iface_read_att(&read_file_arg(t, 1));
+        iface_read_att(session, &read_file_arg(t, 1));
         return Some(true);
     }
     if w0 == "rpl" {
-        iface_read_prolog(&read_file_arg(t, 1));
+        iface_read_prolog(session, &read_file_arg(t, 1));
         return Some(true);
     }
     // "reg"/"rege"/"regex" (min 3) → always a regex; body follows.
     if pfx(w0, "regex", 3) {
-        return Some(start_regex(RE, String::new(), &arg_after(t, 1)));
+        return Some(start_regex(session, RE, String::new(), &arg_after(t, 1)));
     }
     // "re"/"rea"/"read": either a read subcommand or a bare "re <regex>".
     let is_re_prefix = w0 == "re" || pfx(w0, "read", 3);
     if is_re_prefix {
-        if let Some(r) = read_subcommand(t, w1) {
+        if let Some(r) = read_subcommand(session, t, w1) {
             return Some(r);
         }
         // "re <stuff>" with no read-subcommand → regex; "read <stuff>" → unknown.
         if w0 == "re" {
-            return Some(start_regex(RE, String::new(), &arg_after(t, 1)));
+            return Some(start_regex(session, RE, String::new(), &arg_after(t, 1)));
         }
         return None;
     }
     None
 }
 
-fn read_subcommand(t: &str, w1: &str) -> Option<bool> {
+fn read_subcommand(session: &mut Session, t: &str, w1: &str) -> Option<bool> {
     if pfx(w1, "att", 2) {
-        iface_read_att(&read_file_arg(t, 2));
+        iface_read_att(session, &read_file_arg(t, 2));
         return Some(true);
     }
     if pfx(w1, "prolog", 4) {
-        iface_read_prolog(&read_file_arg(t, 2));
+        iface_read_prolog(session, &read_file_arg(t, 2));
         return Some(true);
     }
     if w1 == "spaced-text" {
-        iface_read_spaced_text(&read_file_arg(t, 2));
+        iface_read_spaced_text(session, &read_file_arg(t, 2));
         return Some(true);
     }
     if w1 == "text" {
-        iface_read_text(&read_file_arg(t, 2));
+        iface_read_text(session, &read_file_arg(t, 2));
         return Some(true);
     }
     if pfx(w1, "regex", 3) {
-        return Some(start_regex(RE, String::new(), &arg_after(t, 2)));
+        return Some(start_regex(session, RE, String::new(), &arg_after(t, 2)));
     }
     if pfx(w1, "cmatrix", 3) {
         // DEVIATION from C: my_cmatrixparse is not yet ported; not wired.
@@ -1283,36 +1283,36 @@ fn read_subcommand(t: &str, w1: &str) -> Option<bool> {
         fsm_lexc_parse_string(buf, 1), result pushed via stack_add */
         let fname = read_file_arg(t, 2);
         if let Some(net) = foma::lexcread::fsm_lexc_parse_file(&fname, 1) {
-            foma::stack::stack_add(net);
+            session.stack_add(net);
         }
         return Some(true);
     }
     None
 }
 
-fn write_att_cmd(arg: &str) -> bool {
+fn write_att_cmd(session: &mut Session, arg: &str) -> bool {
     let arg = strip_redir(arg);
     if arg.is_empty() {
-        iface_write_att(None);
+        iface_write_att(session, None);
     } else {
-        iface_write_att(Some(arg.as_str()));
+        iface_write_att(session, Some(arg.as_str()));
     }
     true
 }
 
-fn write_prolog_cmd(arg: &str) -> bool {
+fn write_prolog_cmd(session: &mut Session, arg: &str) -> bool {
     let arg = strip_redir(arg);
     if arg.is_empty() {
-        iface_write_prolog(None);
+        iface_write_prolog(session, None);
     } else {
-        iface_write_prolog(Some(arg.as_str()));
+        iface_write_prolog(session, Some(arg.as_str()));
     }
     true
 }
 
-fn try_test(w0: &str, w1: &str) -> Option<bool> {
+fn try_test(session: &mut Session, w0: &str, w1: &str) -> Option<bool> {
     // Standalone abbreviations.
-    let abbr: Option<fn()> = match w0 {
+    let abbr: Option<fn(&mut Session)> = match w0 {
         "tunam" => Some(iface_test_unambiguous),
         "equ" => Some(iface_test_equivalent),
         "tfu" => Some(iface_test_functional),
@@ -1325,11 +1325,11 @@ fn try_test(w0: &str, w1: &str) -> Option<bool> {
         _ => None,
     };
     if let Some(f) = abbr {
-        f();
+        f(session);
         return Some(true);
     }
     if w0 == "test" {
-        let f: Option<fn()> = match w1 {
+        let f: Option<fn(&mut Session)> = match w1 {
             "unambiguous" => Some(iface_test_unambiguous),
             "equivalent" => Some(iface_test_equivalent),
             "functional" => Some(iface_test_functional),
@@ -1342,14 +1342,14 @@ fn try_test(w0: &str, w1: &str) -> Option<bool> {
             _ => None,
         };
         if let Some(f) = f {
-            f();
+            f(session);
             return Some(true);
         }
     }
     None
 }
 
-fn try_print_family(t: &str, ws: &[&str]) -> Option<bool> {
+fn try_print_family(session: &mut Session, t: &str, ws: &[&str]) -> Option<bool> {
     // Strip an optional leading "print"/"pr"/"pri"/"prin" prefix; the remainder
     // (`sub_owned`) is matched against the print sub-commands, which also stand
     // alone as short forms ("net", "sigma", "words", "pss", …).
@@ -1367,7 +1367,7 @@ fn try_print_family(t: &str, ws: &[&str]) -> Option<bool> {
     let gt = sub_owned.find('>');
 
     if pfx(s0, "cmatrix", 3) {
-        iface_print_cmatrix();
+        iface_print_cmatrix(session);
         return Some(true);
     }
     if pfx(s0, "defined", 3) {
@@ -1376,16 +1376,16 @@ fn try_print_family(t: &str, ws: &[&str]) -> Option<bool> {
     }
     if s0 == "dot" {
         if let Some(g) = gt {
-            iface_print_dot(Some(sub_owned[g + 1..].trim()));
+            iface_print_dot(session, Some(sub_owned[g + 1..].trim()));
         } else if subws.len() >= 2 {
             // "dot NAME": interface.l has no action (no-op).
         } else {
-            iface_print_dot(None);
+            iface_print_dot(session, None);
         }
         return Some(true);
     }
     if pfx(s0, "name", 2) {
-        iface_print_name();
+        iface_print_name(session);
         return Some(true);
     }
     if s0 == "net" {
@@ -1394,249 +1394,249 @@ fn try_print_family(t: &str, ws: &[&str]) -> Option<bool> {
             let after = sub_owned[g + 1..].trim();
             let name = arg_after(before, 1);
             if name.is_empty() {
-                iface_print_net(None, Some(after));
+                iface_print_net(session, None, Some(after));
             } else {
-                iface_print_net(Some(&name), Some(after));
+                iface_print_net(session, Some(&name), Some(after));
             }
         } else if subws.len() >= 2 {
             let name = arg_after(&sub_owned, 1);
-            iface_print_net(Some(&name), None);
+            iface_print_net(session, Some(&name), None);
         } else {
-            iface_print_net(None, None);
+            iface_print_net(session, None, None);
         }
         return Some(true);
     }
     if s0 == "stack-size" {
-        println!("STACK SIZE: {}", stack_size());
+        println!("STACK SIZE: {}", session.stack_size());
         return Some(true);
     }
     if pfx_hyphen(s0, "lower-words", 3) {
         if let Some(g) = gt {
-            iface_words_file(sub_owned[g + 1..].trim(), 2);
+            iface_words_file(session, sub_owned[g + 1..].trim(), 2);
         } else {
-            iface_lower_words(num_arg(&subws, t));
+            iface_lower_words(session, num_arg(&subws, t));
         }
         return Some(true);
     }
     if pfx_hyphen(s0, "upper-words", 3) {
         if let Some(g) = gt {
-            iface_words_file(sub_owned[g + 1..].trim(), 1);
+            iface_words_file(session, sub_owned[g + 1..].trim(), 1);
         } else {
-            iface_upper_words(num_arg(&subws, t));
+            iface_upper_words(session, num_arg(&subws, t));
         }
         return Some(true);
     }
     if s0 == "words" {
         if let Some(g) = gt {
-            iface_words_file(sub_owned[g + 1..].trim(), 0);
+            iface_words_file(session, sub_owned[g + 1..].trim(), 0);
         } else {
-            iface_words(num_arg(&subws, t));
+            iface_words(session, num_arg(&subws, t));
         }
         return Some(true);
     }
     if s0 == "pairs" {
         if let Some(g) = gt {
-            iface_pairs_file(sub_owned[g + 1..].trim());
+            iface_pairs_file(session, sub_owned[g + 1..].trim());
         } else {
-            iface_pairs(-1);
+            iface_pairs(session, -1);
         }
         return Some(true);
     }
     if s0 == "random-lower" {
-        iface_random_lower(num_arg(&subws, t));
+        iface_random_lower(session, num_arg(&subws, t));
         return Some(true);
     }
     if s0 == "random-upper" {
-        iface_random_upper(num_arg(&subws, t));
+        iface_random_upper(session, num_arg(&subws, t));
         return Some(true);
     }
     if s0 == "random-words" {
-        iface_random_words(num_arg(&subws, t));
+        iface_random_words(session, num_arg(&subws, t));
         return Some(true);
     }
     if s0 == "random-pairs" {
-        iface_random_pairs(-1);
+        iface_random_pairs(session, -1);
         return Some(true);
     }
     if pfx(s0, "sigma", 3) {
-        iface_print_sigma();
+        iface_print_sigma(session);
         return Some(true);
     }
     if pfx(s0, "size", 3) {
-        iface_print_stats();
+        iface_print_stats(session);
         return Some(true);
     }
     if s0 == "shortest-string" || s0 == "pss" {
-        iface_print_shortest_string();
+        iface_print_shortest_string(session);
         return Some(true);
     }
     if s0 == "shortest-string-size" || s0 == "psz" {
-        iface_print_shortest_string_size();
+        iface_print_shortest_string_size(session);
         return Some(true);
     }
     None
 }
 
-fn try_zero_arg(w0: &str, w1: &str) -> Option<bool> {
+fn try_zero_arg(session: &mut Session, w0: &str, w1: &str) -> Option<bool> {
     // ambiguous [upper]
     if w0 == "ambiguous" {
-        iface_ambiguous_upper();
+        iface_ambiguous_upper(session);
         return Some(true);
     }
     if w0 == "clear" {
-        stack_clear();
+        session.stack_clear();
         return Some(true);
     }
     if w0 == "close" {
-        iface_close();
+        iface_close(session);
         return Some(true);
     }
     // compact sigma / complete / compose / concatenate
     if pfx(w0, "compact", 4) && pfx(w1, "sigma", 3) {
-        iface_compact();
+        iface_compact(session);
         return Some(true);
     }
     if pfx(w0, "complete", 5) {
-        iface_complete();
+        iface_complete(session);
         return Some(true);
     }
     if pfx(w0, "compose", 5) {
-        iface_compose();
+        iface_compose(session);
         return Some(true);
     }
     if pfx(w0, "concatenate", 4) {
-        iface_conc();
+        iface_conc(session);
         return Some(true);
     }
     if pfx(w0, "crossproduct", 5) {
-        iface_crossproduct();
+        iface_crossproduct(session);
         return Some(true);
     }
     if pfx(w0, "determinize", 3) {
-        iface_determinize();
+        iface_determinize(session);
         return Some(true);
     }
     if w0 == "examb" {
-        iface_extract_ambiguous();
+        iface_extract_ambiguous(session);
         return Some(true);
     }
     if w0 == "exunamb" {
-        iface_extract_unambiguous();
+        iface_extract_unambiguous(session);
         return Some(true);
     }
     if w0 == "extract" {
         if w1 == "ambiguous" {
-            iface_extract_ambiguous();
+            iface_extract_ambiguous(session);
             return Some(true);
         }
         if w1 == "unambiguous" {
-            iface_extract_unambiguous();
+            iface_extract_unambiguous(session);
             return Some(true);
         }
     }
     if w0 == "fac" || pfx(w0, "factorize", 3) {
-        iface_factorize();
+        iface_factorize(session);
         return Some(true);
     }
     if w0 == "seq" || pfx(w0, "sequentialize", 3) {
-        iface_sequentialize();
+        iface_sequentialize(session);
         return Some(true);
     }
     if pfx(w0, "ignore", 4) {
-        iface_ignore();
+        iface_ignore(session);
         return Some(true);
     }
     if pfx(w0, "intersect", 5) {
-        iface_intersect();
+        iface_intersect(session);
         return Some(true);
     }
     if pfx(w0, "invert", 3) {
-        iface_invert();
+        iface_invert(session);
         return Some(true);
     }
     if w0 == "lower-side" {
-        iface_lower_side();
+        iface_lower_side(session);
         return Some(true);
     }
     if w0 == "upper-side" {
-        iface_upper_side();
+        iface_upper_side(session);
         return Some(true);
     }
     if pfx(w0, "minimize", 3) {
-        iface_minimize();
+        iface_minimize(session);
         return Some(true);
     }
     if pfx(w0, "negate", 3) {
-        iface_negate();
+        iface_negate(session);
         return Some(true);
     }
     if pfx(w0, "one-plus", 2) {
-        iface_one_plus();
+        iface_one_plus(session);
         return Some(true);
     }
     if pfx(w0, "zero-plus", 2) {
-        iface_zero_plus();
+        iface_zero_plus(session);
         return Some(true);
     }
     if pfx(w0, "pop", 2) {
-        iface_pop();
+        iface_pop(session);
         return Some(true);
     }
     if pfx(w0, "prune", 3) {
-        iface_prune();
+        iface_prune(session);
         return Some(true);
     }
     if w0 == "rev" || pfx(w0, "reverse", 3) {
-        iface_reverse();
+        iface_reverse(session);
         return Some(true);
     }
     if pfx(w0, "rotate", 3) {
-        iface_rotate();
+        iface_rotate(session);
         return Some(true);
     }
     if pfx(w0, "shuffle", 3) {
-        iface_shuffle();
+        iface_shuffle(session);
         return Some(true);
     }
     // sort in / sort out / sort [net]
     if pfx(w0, "sort", 2) {
         if pfx(w1, "input", 2) {
-            iface_sort_input();
+            iface_sort_input(session);
         } else if pfx(w1, "output", 3) {
-            iface_sort_output();
+            iface_sort_output(session);
         } else {
-            iface_sort();
+            iface_sort(session);
         }
         return Some(true);
     }
     if pfx(w0, "turn", 2) {
-        iface_turn();
+        iface_turn(session);
         return Some(true);
     }
     if w0 == "tfd" || (w0 == "twosided" && pfx(w1, "flag-diacritics", 4)) {
-        iface_twosided_flags();
+        iface_twosided_flags(session);
         return Some(true);
     }
     if pfx(w0, "union", 3) {
-        iface_union();
+        iface_union(session);
         return Some(true);
     }
     if pfx(w0, "view", 4) {
-        iface_view();
+        iface_view(session);
         return Some(true);
     }
     None
 }
 
 // interface.l PUSH action wrapped as a helper (find_defined + copy + stack_add).
-fn iface_push(name: &str) {
+fn iface_push(session: &mut Session, name: &str) {
     G_DEFINES.with(|dn| {
         let mut dnb = dn.borrow_mut();
         match find_defined(dnb.as_deref_mut().unwrap(), name) {
             None => println!("'{}' is not a defined symbol.", name),
             Some(net) => {
                 let copy = fsm_copy(net);
-                stack_add(copy);
+                session.stack_add(copy);
             }
         }
     });
