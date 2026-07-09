@@ -20,6 +20,8 @@
 
 use crate::constructions::add_fsm_arc;
 use crate::int_stack::{int_stack_clear, int_stack_isempty, int_stack_pop, int_stack_push};
+#[cfg(test)]
+use crate::options::FomaOptions;
 use crate::sigma::sigma_create;
 use crate::structures::{fsm_empty, fsm_sigma_destroy};
 use crate::types::{Fsm, YES};
@@ -377,7 +379,8 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-coaccessible-fn/test]
     #[test]
     fn coaccessible_all_coaccessible_terminates_early_with_counts_unchanged() {
-        let net = fsm_parse_regex("a b", None, None).unwrap();
+        let opts = &FomaOptions::default();
+        let net = fsm_parse_regex(opts, "a b", None, None).unwrap();
         let before = lines(&net);
         let (sc, lc, ac) = (net.statecount, net.linecount, net.arccount);
         let net = fsm_coaccessible(net);

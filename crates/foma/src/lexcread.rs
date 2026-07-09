@@ -19,8 +19,8 @@ use crate::constructions::{add_fsm_arc, fsm_update_flags};
 use crate::define::{G_DEFINES, add_defined};
 use crate::determinize::fsm_determinize;
 use crate::io::file_to_mem;
-use crate::mem::{G_LEXC_ALIGN, G_VERBOSE};
 use crate::minimize::fsm_minimize;
+use crate::options::FomaOptions;
 use crate::regex::fsm_parse_regex;
 use crate::sigma::{
     sigma_add, sigma_add_special, sigma_cleanup, sigma_create, sigma_find, sigma_find_number,
@@ -129,6 +129,9 @@ static PRIMES: [u32; 26] = [
 /// plus the arenas that back the C pointer graph. Pointer fields are arena
 /// indices; NULL is `None` / an empty arena.
 struct LexcCompiler {
+    /* the compiling session's options (C read the g_* globals directly) */
+    opts: FomaOptions,
+
     /* arenas backing the C `struct *` graph (never reclaimed mid-compile;
     the C frees are no-ops here — see the DEVIATION notes at each free site) */
     state_arena: Vec<States>,
@@ -175,6 +178,7 @@ struct LexcCompiler {
 impl LexcCompiler {
     fn new_empty() -> LexcCompiler {
         LexcCompiler {
+            opts: FomaOptions::default(),
             state_arena: Vec::new(),
             trans_arena: Vec::new(),
             statelist_arena: Vec::new(),
@@ -677,7 +681,7 @@ fn lexc_set_current_word(lx: &mut LexcCompiler, upper: &str, lower: Option<&str>
         let mut intarr = std::mem::take(&mut lx.cwordout);
         lexc_string_to_tokens(lx, lower, &mut intarr);
         lx.cwordout = intarr;
-        if G_LEXC_ALIGN.with(|v| v.get()) != 0 {
+        if lx.opts.lexc_align {
             lexc_medpad(lx);
         } else {
             lexc_pad(lx);
@@ -1190,7 +1194,7 @@ fn lexc_number_states(lx: &mut LexcCompiler) {
             if lx.statelist_arena[sidx].next.is_none() {
                 let state = lx.statelist_arena[sidx].state;
                 lx.state_arena[state].number = 0;
-                if G_VERBOSE.with(|v| v.get()) != 0 {
+                if lx.opts.verbose {
                     let lidx = lx.state_arena[state].lexstate.unwrap();
                     let name = lx.lexstates_arena[lidx].name.as_deref().unwrap_or("");
                     eprint!("*Warning: no Root lexicon, using '{}' as Root.\n", name);
@@ -1237,7 +1241,7 @@ fn lexc_number_states(lx: &mut LexcCompiler) {
         while let Some(lidx) = l {
             let state = lx.lexstates_arena[lidx].state;
             if lx.lexstates_arena[lidx].targeted == 0 && lx.state_arena[state].number != 0 {
-                if G_VERBOSE.with(|v| v.get()) != 0 {
+                if lx.opts.verbose {
                     let name = lx.lexstates_arena[lidx].name.as_deref().unwrap_or("");
                     eprint!("*Warning: lexicon '{}' defined but not used\n", name);
                 }
@@ -1245,7 +1249,7 @@ fn lexc_number_states(lx: &mut LexcCompiler) {
             if lx.lexstates_arena[lidx].has_outgoing == 0
                 && lx.lexstates_arena[lidx].name.as_deref() != Some("#")
             {
-                if G_VERBOSE.with(|v| v.get()) != 0 {
+                if lx.opts.verbose {
                     let name = lx.lexstates_arena[lidx].name.as_deref().unwrap_or("");
                     eprint!("***Warning: lexicon '{}' used but never defined\n", name);
                 }
@@ -1466,7 +1470,7 @@ fn lexc_merge_states(lx: &mut LexcCompiler) {
 // [spec:foma:def:lexc.lexc-to-fsm-fn]
 // [spec:foma:sem:lexc.lexc-to-fsm-fn]
 fn lexc_to_fsm(lx: &mut LexcCompiler) -> Box<Fsm> {
-    if G_VERBOSE.with(|v| v.get()) != 0 {
+    if lx.opts.verbose {
         eprint!("Building lexicon...\n");
     }
     lexc_merge_states(lx);
@@ -1475,7 +1479,7 @@ fn lexc_to_fsm(lx: &mut LexcCompiler) -> Box<Fsm> {
     net.sigma = lx.lexsigma.take();
     lexc_number_states(lx);
     if lx.hasfinal == 0 {
-        if G_VERBOSE.with(|v| v.get()) != 0 {
+        if lx.opts.verbose {
             eprint!("Warning: # is never reached!!!\n");
         }
         /* Leak path: lexc_cleanup is not called; the state graph and hash
@@ -1576,15 +1580,15 @@ fn lexc_to_fsm(lx: &mut LexcCompiler) -> Box<Fsm> {
     sigma_cleanup(&mut net, 0);
     sigma_sort(&mut net);
 
-    if G_VERBOSE.with(|v| v.get()) != 0 {
+    if lx.opts.verbose {
         eprint!("Determinizing...\n");
     }
     let net = fsm_determinize(net);
-    if G_VERBOSE.with(|v| v.get()) != 0 {
+    if lx.opts.verbose {
         eprint!("Minimizing...\n");
     }
-    let net = fsm_topsort(fsm_minimize(net));
-    if G_VERBOSE.with(|v| v.get()) != 0 {
+    let net = fsm_topsort(fsm_minimize(&lx.opts, net));
+    if lx.opts.verbose {
         eprint!("Done!\n");
     }
     net
@@ -1633,11 +1637,10 @@ const TARGET_LEXICON: i32 = 1;
 
 // [spec:foma:def:fomalib.fsm-lexc-parse-string-fn]
 // [spec:foma:sem:fomalib.fsm-lexc-parse-string-fn]
-pub fn fsm_lexc_parse_string(string: &str, verbose: i32) -> Option<Box<Fsm>> {
+pub fn fsm_lexc_parse_string(opts: &FomaOptions, string: &str) -> Option<Box<Fsm>> {
     use std::io::Write;
-    /* The `verbose` parameter is ignored, exactly as in C (the warnings key off
-    the global g_verbose, read inside lexc_number_states/lexc_to_fsm). */
-    let _ = verbose;
+    /* C took an (ignored) `verbose` int parameter; the warnings keyed off the
+    global g_verbose instead. Both collapse into `opts.verbose` here. */
 
     /* olddefines = g_defines. The C never repoints g_defines, so the save is a
     no-op and any Definitions-section nets persist in g_defines after the call;
@@ -1650,6 +1653,7 @@ pub fn fsm_lexc_parse_string(string: &str, verbose: i32) -> Option<Box<Fsm>> {
     so fsm_lexc_parse_string is reentrant. */
     let mut lexentries: i32 = -1;
     let mut lx = LexcCompiler::new_empty();
+    lx.opts = opts.clone();
     lexc_init(&mut lx);
 
     /* lexclex(): the flex scanner is replaced by nfst-lexc; its return code is
@@ -1675,11 +1679,11 @@ pub fn fsm_lexc_parse_string(string: &str, verbose: i32) -> Option<Box<Fsm>> {
             }
 
             /* <DEFREGEX>[\073] { if (my_yyparse(...,g_defines,...)==0)
-            add_defined(g_defines, fsm_topsort(fsm_minimize(current_parse)),
+            add_defined(g_defines, fsm_topsort(fsm_minimize(&lx.opts, current_parse)),
                         tempstr); } */
             for d in &f.definitions {
                 let body = nfst_xre::pretty_print(&d.value.body);
-                if let Some(net) = fsm_parse_regex(&body, olddefines.as_deref_mut(), None) {
+                if let Some(net) = fsm_parse_regex(opts, &body, olddefines.as_deref_mut(), None) {
                     let net = fsm_topsort(net);
                     if let Some(defs) = olddefines.as_deref_mut() {
                         add_defined(defs, Some(net), &d.value.name);
@@ -1717,7 +1721,8 @@ pub fn fsm_lexc_parse_string(string: &str, verbose: i32) -> Option<Box<Fsm>> {
                             /* <REGEX>[\076] { if (my_yyparse(...)==0)
                             lexc_set_network(current_parse); } */
                             let r = nfst_xre::pretty_print(xre);
-                            if let Some(net) = fsm_parse_regex(&r, olddefines.as_deref_mut(), None)
+                            if let Some(net) =
+                                fsm_parse_regex(opts, &r, olddefines.as_deref_mut(), None)
                             {
                                 lexc_set_network(&mut lx, net);
                             }
@@ -1767,7 +1772,7 @@ pub fn fsm_lexc_parse_string(string: &str, verbose: i32) -> Option<Box<Fsm>> {
 
 // [spec:foma:def:fomalib.fsm-lexc-parse-file-fn]
 // [spec:foma:sem:fomalib.fsm-lexc-parse-file-fn]
-pub fn fsm_lexc_parse_file(filename: &str, verbose: i32) -> Option<Box<Fsm>> {
+pub fn fsm_lexc_parse_file(opts: &FomaOptions, filename: &str) -> Option<Box<Fsm>> {
     /* mystring = file_to_mem(filename); return fsm_lexc_parse_string(mystring,
     verbose). The C never frees mystring (documented leak); here the buffer is a
     Vec that drops at scope end — an observable no-op. */
@@ -1785,7 +1790,7 @@ pub fn fsm_lexc_parse_file(filename: &str, verbose: i32) -> Option<Box<Fsm>> {
         .position(|&b| b == 0)
         .unwrap_or(mystring.len());
     let text = String::from_utf8_lossy(&mystring[..end]);
-    fsm_lexc_parse_string(&text, verbose)
+    fsm_lexc_parse_string(opts, &text)
 }
 
 #[cfg(test)]
@@ -1800,7 +1805,7 @@ mod tests {
     /// Compile a lexc source string (verbose off is irrelevant — g_verbose is a
     /// separate global; the parse string ignores its own `verbose` arg).
     fn compile(src: &str) -> Box<Fsm> {
-        fsm_lexc_parse_string(src, 0).expect("compile produced a net")
+        fsm_lexc_parse_string(&FomaOptions::default(), src).expect("compile produced a net")
     }
 
     fn lower_all(net: &Fsm) -> Vec<String> {
@@ -2006,11 +2011,14 @@ mod tests {
         let dir = std::env::temp_dir();
         let path = dir.join(format!("foma_lexc_test_{}.lexc", std::process::id()));
         std::fs::write(&path, "LEXICON Root\ncat # ;\n").unwrap();
-        let net = fsm_lexc_parse_file(path.to_str().unwrap(), 0).expect("file parsed");
+        let net = fsm_lexc_parse_file(&FomaOptions::default(), path.to_str().unwrap())
+            .expect("file parsed");
         assert_eq!(lower_all(&net), vec!["cat"]);
         std::fs::remove_file(&path).ok();
 
-        assert!(fsm_lexc_parse_file("/no/such/foma/lexc/file.xyz", 0).is_none());
+        assert!(
+            fsm_lexc_parse_file(&FomaOptions::default(), "/no/such/foma/lexc/file.xyz").is_none()
+        );
     }
 
     /* ---- direct API: hashing -------------------------------------------- */

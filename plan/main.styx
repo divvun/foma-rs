@@ -931,6 +931,21 @@ children (
                 id w8-options
                 title "Tier 2: 21 G_* options (mem.rs) → Session fields. Reads are mostly at iface entry points + a few library sites (fsm_minimize G_MINIMAL/hopcroft, io G_ATT_EPSILON, lexc G_LEXC_ALIGN) — pass those as params where the cascade is small."
                 priority 1
+                log (
+                    {
+                        at 2026-07-09T14:38:21.504551Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan_start)"
+                    }
+
+                    {
+                        at 2026-07-09T15:01:15.744765Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "Full library threading chosen over CLI-only (operator call): the node's \"pass as params where the cascade is small\" premise was false — g_minimal/g_minimize_hopcroft are read inside fsm_minimize, which has 147 pure-library call sites, so a param means threading the whole construction layer. Done: new options::FomaOptions (bools as bool, i32 limits, att_epsilon String; C defaults), owned by Session (session.opts) and passed as &FomaOptions first param through fsm_minimize/fsm_compose/flag_eliminate/read_att/net_print_att/add_defined_function and their ~85-function transitive caller closure (constructions, rewrite, regex build_* chain, my_yyparse). lexcread absorbs a FomaOptions clone into LexcCompiler at the parse entry points (fsm_lexc_parse_string/file lose the ignored C `verbose` int param). iface global_vars[] table now carries FomaOptions field projections (GvField::Bool/Int/Str fn pointers) instead of &'static thread_local pointers; set/show variable take &mut Session. Session gains stack_entry_{fsm,ah,amedh}_with_opts borrow-splitting accessors for closure sites needing opts + handle. flag_eliminate's g_flag_is_epsilon save/set/restore became a modified opts copy passed to its composes. All 21 G_* thread_locals deleted from mem.rs. 556 tests green; observable behaviour unchanged (byte-exact CLI transcripts pass)."
+                    }
+                )
             }
 
             {

@@ -18,7 +18,7 @@
 use crate::coaccessible::fsm_coaccessible;
 use crate::constructions::{add_fsm_arc, fsm_count, fsm_update_flags};
 use crate::determinize::fsm_determinize;
-use crate::mem::{G_MINIMAL, G_MINIMIZE_HOPCROFT};
+use crate::options::FomaOptions;
 use crate::reverse::fsm_reverse;
 use crate::sigma::sigma_max;
 use crate::structures::{fsm_destroy, fsm_empty_set};
@@ -151,8 +151,9 @@ static void single_symbol_to_symbol_pair(int symbol, int *symbol_in, int *symbol
 // [spec:foma:sem:minimize.fsm-minimize-fn]
 // [spec:foma:def:fomalib.fsm-minimize-fn]
 // [spec:foma:sem:fomalib.fsm-minimize-fn]
-pub fn fsm_minimize(net: Box<Fsm>) -> Box<Fsm> {
-    /* extern int g_minimal; extern int g_minimize_hopcroft; → mem.rs */
+pub fn fsm_minimize(opts: &FomaOptions, net: Box<Fsm>) -> Box<Fsm> {
+    /* C: extern int g_minimal; extern int g_minimize_hopcroft; — the session
+    options threaded in as `opts` */
 
     /* C: if (net == NULL) return NULL — a Box argument cannot be NULL;
     NULL-able callers keep the check at the call site */
@@ -164,8 +165,8 @@ pub fn fsm_minimize(net: Box<Fsm>) -> Box<Fsm> {
     if net.is_pruned != YES {
         net = fsm_coaccessible(net);
     }
-    if net.is_minimized != YES && G_MINIMAL.get() == 1 {
-        if G_MINIMIZE_HOPCROFT.get() != 0 {
+    if net.is_minimized != YES && opts.minimal {
+        if opts.minimize_hopcroft {
             net = fsm_minimize_hop(net);
         } else {
             net = fsm_minimize_brz(net);
@@ -917,8 +918,9 @@ mod tests {
     // [spec:foma:sem:minimize.symbol-pair-to-single-symbol-fn/test]
     #[test]
     fn minimize_hop_reduces_and_preserves_language() {
+        let opts = &FomaOptions::default();
         let net = build_ab_plus();
-        let m = fsm_minimize(net);
+        let m = fsm_minimize(opts, net);
         assert_eq!(m.statecount, 2, "3-state DFA minimizes to 2");
         assert_eq!(m.arccount, 4);
         assert_eq!(m.linecount, 5);
@@ -950,9 +952,11 @@ mod tests {
     #[test]
     fn minimize_brzozowski_path() {
         let net = build_ab_plus();
-        G_MINIMIZE_HOPCROFT.set(0);
-        let m = fsm_minimize(net);
-        G_MINIMIZE_HOPCROFT.set(1); /* restore default before asserting */
+        let opts = FomaOptions {
+            minimize_hopcroft: false,
+            ..FomaOptions::default()
+        };
+        let m = fsm_minimize(&opts, net);
         assert_eq!(m.statecount, 2);
         assert_eq!(m.is_deterministic, YES);
         assert_eq!(m.is_minimized, YES);
@@ -1000,8 +1004,9 @@ mod tests {
     #[test]
     fn minimize_determinize_language_equivalence() {
         fn check(net: Box<Fsm>, samples: &[(&str, bool)]) {
+            let opts = &FomaOptions::default();
             let d = fsm_determinize(net.clone());
-            let m = fsm_minimize(net);
+            let m = fsm_minimize(opts, net);
             for (w, exp) in samples {
                 assert_eq!(
                     accepts(&d, w).is_some(),

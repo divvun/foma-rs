@@ -27,7 +27,7 @@ pub fn iface_test_equivalent(session: &mut Session) {
 pub fn iface_test_functional(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let top = session.stack_find_top().unwrap();
-        let r = session.stack_entry_fsm(top, |f| fsm_isfunctional(f));
+        let r = session.stack_entry_fsm_with_opts(top, |opts, f| fsm_isfunctional(opts, f));
         iface_print_bool(r);
     }
 }
@@ -39,7 +39,7 @@ pub fn iface_test_functional(session: &mut Session) {
 pub fn iface_test_identity(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let top = session.stack_find_top().unwrap();
-        let r = session.stack_entry_fsm(top, |f| fsm_isidentity(f));
+        let r = session.stack_entry_fsm_with_opts(top, |opts, f| fsm_isidentity(opts, f));
         iface_print_bool(r);
     }
 }
@@ -52,7 +52,7 @@ pub fn iface_test_nonnull(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let top = session.stack_find_top().unwrap();
         // C: iface_print_bool(!fsm_isempty(...)) — logical NOT of the int result.
-        let e = session.stack_entry_fsm(top, |f| fsm_isempty(f));
+        let e = session.stack_entry_fsm_with_opts(top, |opts, f| fsm_isempty(opts, f));
         iface_print_bool((e == 0) as i32);
     }
 }
@@ -64,7 +64,7 @@ pub fn iface_test_nonnull(session: &mut Session) {
 pub fn iface_test_null(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let top = session.stack_find_top().unwrap();
-        let r = session.stack_entry_fsm(top, |f| fsm_isempty(f));
+        let r = session.stack_entry_fsm_with_opts(top, |opts, f| fsm_isempty(opts, f));
         iface_print_bool(r);
     }
 }
@@ -76,7 +76,7 @@ pub fn iface_test_null(session: &mut Session) {
 pub fn iface_test_unambiguous(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let top = session.stack_find_top().unwrap();
-        let r = session.stack_entry_fsm(top, |f| fsm_isunambiguous(f));
+        let r = session.stack_entry_fsm_with_opts(top, |opts, f| fsm_isunambiguous(opts, f));
         iface_print_bool(r);
     }
 }
@@ -88,8 +88,9 @@ pub fn iface_test_unambiguous(session: &mut Session) {
 pub fn iface_test_lower_universal(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let top = session.stack_find_top().unwrap();
-        let mut tmp = fsm_complement(fsm_lower(session.stack_entry_fsm(top, |f| fsm_copy(f))));
-        iface_print_bool(fsm_isempty(&mut tmp));
+        let copy = session.stack_entry_fsm(top, |f| fsm_copy(f));
+        let mut tmp = fsm_complement(&session.opts, fsm_lower(copy));
+        iface_print_bool(fsm_isempty(&session.opts, &mut tmp));
         fsm_destroy(tmp);
     }
 }
@@ -113,8 +114,9 @@ pub fn iface_test_sequential(session: &mut Session) {
 pub fn iface_test_upper_universal(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let top = session.stack_find_top().unwrap();
-        let mut tmp = fsm_complement(fsm_upper(session.stack_entry_fsm(top, |f| fsm_copy(f))));
-        iface_print_bool(fsm_isempty(&mut tmp));
+        let copy = session.stack_entry_fsm(top, |f| fsm_copy(f));
+        let mut tmp = fsm_complement(&session.opts, fsm_upper(copy));
+        iface_print_bool(fsm_isempty(&session.opts, &mut tmp));
         fsm_destroy(tmp);
     }
 }

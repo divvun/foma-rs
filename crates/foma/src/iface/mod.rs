@@ -7,7 +7,7 @@
 //! below). Sem rules: docs/spec/port/foma/iface.md (per-file `iface.*` ids)
 //! plus the foma.h prototype ids (`foma.iface-*`) carried at each Rust site.
 
-pub(crate) use std::cell::{Cell, RefCell};
+pub(crate) use std::cell::Cell;
 pub(crate) use std::fs::File;
 pub(crate) use std::io::{BufRead, BufReader, Write};
 
@@ -37,13 +37,8 @@ pub(crate) use crate::io::{
     fsm_read_prolog, fsm_read_spaced_text_file, fsm_read_text_file, load_defined, net_print_att,
     read_att, save_defined,
 };
-pub(crate) use crate::mem::{
-    G_ATT_EPSILON, G_COMPOSE_TRISTATE, G_FLAG_IS_EPSILON, G_LEXC_ALIGN, G_LIST_LIMIT,
-    G_LIST_RANDOM_LIMIT, G_MED_CUTOFF, G_MED_LIMIT, G_MINIMAL, G_MINIMIZE_HOPCROFT, G_NAME_NETS,
-    G_OBEY_FLAGS, G_PRINT_PAIRS, G_PRINT_SIGMA, G_PRINT_SPACE, G_QUIT_ON_FAIL, G_QUOTE_SPECIAL,
-    G_RECURSIVE_DEFINE, G_SHOW_FLAGS, G_SORT_ARCS, G_VERBOSE,
-};
 pub(crate) use crate::minimize::fsm_minimize;
+pub(crate) use crate::options::FomaOptions;
 pub(crate) use crate::reverse::fsm_reverse;
 pub(crate) use crate::session::Session;
 pub(crate) use crate::sigma::sigma_sort;

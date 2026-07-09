@@ -20,6 +20,7 @@ pub mod io;
 pub mod lexcread;
 pub mod mem;
 pub mod minimize;
+pub mod options;
 pub mod regex;
 pub mod reverse;
 pub mod rewrite;

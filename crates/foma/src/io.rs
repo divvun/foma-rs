@@ -29,7 +29,7 @@ use crate::dynarray::{
     fsm_construct_done, fsm_construct_init, fsm_construct_set_final, fsm_construct_set_initial,
 };
 use crate::error::FomaError;
-use crate::mem::G_ATT_EPSILON;
+use crate::options::FomaOptions;
 use crate::sigma::{sigma_add_number, sigma_max, sigma_string, sigma_to_list};
 use crate::structures::{fsm_create, fsm_destroy};
 use crate::topsort::fsm_topsort;
@@ -345,7 +345,7 @@ pub fn foma_write_prolog(net: &mut Fsm, filename: Option<&str>) -> i32 {
 // [spec:foma:sem:io.read-att-fn]
 // [spec:foma:def:fomalib.read-att-fn]
 // [spec:foma:sem:fomalib.read-att-fn]
-pub fn read_att(filename: &str) -> Option<Box<Fsm>> {
+pub fn read_att(opts: &FomaOptions, filename: &str) -> Option<Box<Fsm>> {
     let infile = match File::open(filename) {
         Ok(f) => f,
         Err(_) => return None,
@@ -378,7 +378,7 @@ pub fn read_att(filename: &str) -> Option<Box<Fsm>> {
             continue;
         }
         if i >= 4 {
-            let ge = G_ATT_EPSILON.with(|e| e.borrow().clone());
+            let ge = opts.att_epsilon.clone();
             let t2 = if tokens[2] == ge.as_str() {
                 "@_EPSILON_SYMBOL_@"
             } else {
@@ -1376,11 +1376,15 @@ pub fn foma_net_print<W: std::io::Write + ?Sized>(net: &Fsm, outfile: &mut W) ->
 // [spec:foma:sem:io.net-print-att-fn]
 // [spec:foma:def:fomalib.net-print-att-fn]
 // [spec:foma:sem:fomalib.net-print-att-fn]
-pub fn net_print_att<W: std::io::Write + ?Sized>(net: &Fsm, outfile: &mut W) -> i32 {
+pub fn net_print_att<W: std::io::Write + ?Sized>(
+    opts: &FomaOptions,
+    net: &Fsm,
+    outfile: &mut W,
+) -> i32 {
     let mut sl = sigma_to_list(net.sigma.as_deref());
     if sigma_max(net.sigma.as_deref()) >= 0 {
         /* (sl+0)->symbol = g_att_epsilon */
-        sl[0].symbol = Some(G_ATT_EPSILON.with(|e| e.borrow().clone()));
+        sl[0].symbol = Some(opts.att_epsilon.clone());
     }
     let mut i = 0usize;
     while net.states[i].state_no != -1 {
@@ -1640,7 +1644,8 @@ mod tests {
 
     /* ---- helpers ---- */
     fn parse(rx: &str) -> Box<Fsm> {
-        fsm_parse_regex(rx, None, None).expect("regex should compile")
+        let opts = &FomaOptions::default();
+        fsm_parse_regex(opts, rx, None, None).expect("regex should compile")
     }
 
     fn drain_down(net: &Fsm, w: &str) -> Vec<String> {
@@ -2008,7 +2013,8 @@ mod tests {
     // [spec:foma:sem:io.fsm-read-binary-mem-fn/test]
     #[test]
     fn stream_binary_round_trip() {
-        let mut net = fsm_parse_regex("a:b;", None, None).expect("regex should compile");
+        let opts = &FomaOptions::default();
+        let mut net = fsm_parse_regex(opts, "a:b;", None, None).expect("regex should compile");
         net.name = "stream".to_string();
         /* write the gzip-compressed image to an in-memory Vec */
         let mut buf: Vec<u8> = Vec::new();
@@ -2145,10 +2151,11 @@ mod tests {
     // [spec:foma:sem:fomalib.read-att-fn/test]
     #[test]
     fn att_round_trip_and_exact_bytes() {
+        let opts = &FomaOptions::default();
         /* net_print_att emits arcs first, then final-state lines. */
         let net = craft_ab_net("att");
         let mut buf: Vec<u8> = Vec::new();
-        assert_eq!(net_print_att(&net, &mut buf), 1);
+        assert_eq!(net_print_att(opts, &net, &mut buf), 1);
         assert_eq!(buf, b"0\t1\ta\tb\n1\n");
 
         /* read_att parses that image back into an equivalent transducer. */
@@ -2157,7 +2164,7 @@ mod tests {
             let mut file = File::create(f.path()).unwrap();
             file.write_all(&buf).unwrap();
         }
-        let back = read_att(f.path()).unwrap();
+        let back = read_att(opts, f.path()).unwrap();
         assert_eq!(drain_down(&back, "a"), vec!["b".to_string()]);
         assert_eq!(drain_up(&back, "b"), vec!["a".to_string()]);
     }
@@ -2166,10 +2173,11 @@ mod tests {
     // [spec:foma:sem:fomalib.read-att-fn/test]
     #[test]
     fn read_att_missing_file_none() {
+        let opts = &FomaOptions::default();
         let mut p = std::env::temp_dir();
         p.push("foma_io_absent_att_zzz.att");
         let _ = std::fs::remove_file(&p);
-        assert!(read_att(p.to_str().unwrap()).is_none());
+        assert!(read_att(opts, p.to_str().unwrap()).is_none());
     }
 
     // [spec:foma:sem:io.foma-write-prolog-fn+1/test]
@@ -2451,11 +2459,12 @@ mod tests {
     // [spec:foma:sem:io.io-net-read-fn+3/test]
     #[test]
     fn io_net_read_bails_on_truncated_sigma_section() {
+        let opts = &FomaOptions::default();
         // Serialize a real net to text, then drop everything from "##states##"
         // onward so the buffer ends inside the sigma section. io_net_read must
         // return None instead of looping forever on the empty lines io_gets
         // yields at end-of-buffer.
-        let net = fsm_parse_regex("a b", None, None).unwrap();
+        let net = fsm_parse_regex(opts, "a b", None, None).unwrap();
         let mut text: Vec<u8> = Vec::new();
         foma_net_print(&net, &mut text);
         let s = String::from_utf8(text).unwrap();
@@ -2469,10 +2478,11 @@ mod tests {
     // [spec:foma:sem:io.io-net-read-fn+3/test]
     #[test]
     fn io_net_read_empty_name_when_field_absent() {
+        let opts = &FomaOptions::default();
         // A net with an empty name serializes a props line with no name field, so
         // io_net_read reads 12 tokens. The name is then empty; C's sscanf left the
         // buffer holding the whole props line, which became the net name.
-        let mut net = fsm_parse_regex("a b", None, None).unwrap();
+        let mut net = fsm_parse_regex(opts, "a b", None, None).unwrap();
         net.name = String::new();
         let mut text: Vec<u8> = Vec::new();
         foma_net_print(&net, &mut text);
@@ -2488,7 +2498,8 @@ mod tests {
     // [spec:foma:sem:io.io-net-read-fn+3/test]
     #[test]
     fn io_net_read_bails_on_spaceless_sigma_line() {
-        let net = fsm_parse_regex("a b", None, None).unwrap();
+        let opts = &FomaOptions::default();
+        let net = fsm_parse_regex(opts, "a b", None, None).unwrap();
         let mut text: Vec<u8> = Vec::new();
         foma_net_print(&net, &mut text);
         let s = String::from_utf8(text).unwrap();

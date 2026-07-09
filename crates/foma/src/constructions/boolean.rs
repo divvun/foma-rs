@@ -9,7 +9,7 @@ pub const COMPLETE: i32 = 1;
 // [spec:foma:sem:constructions.fsm-concat-fn]
 // [spec:foma:def:fomalib.fsm-concat-fn]
 // [spec:foma:sem:fomalib.fsm-concat-fn]
-pub fn fsm_concat(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
+pub fn fsm_concat(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
     let mut net1 = net1;
     let mut net2 = net2;
 
@@ -119,7 +119,7 @@ pub fn fsm_concat(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
     net1.is_deterministic = NO;
     net1.is_minimized = NO;
     net1.is_pruned = NO;
-    fsm_minimize(net1)
+    fsm_minimize(opts, net1)
 }
 
 // [spec:foma:def:constructions.fsm-union-fn]
@@ -233,7 +233,7 @@ pub fn fsm_union(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
 
 // [spec:foma:def:constructions.fsm-completes-fn]
 // [spec:foma:sem:constructions.fsm-completes-fn]
-pub fn fsm_completes(net: Box<Fsm>, operation: i32) -> Box<Fsm> {
+pub fn fsm_completes(opts: &FomaOptions, net: Box<Fsm>, operation: i32) -> Box<Fsm> {
     /* TODO: this currently relies on that the sigma is gap-free in its numbering  */
     /* which can't always be counted on, especially when reading external machines */
 
@@ -241,7 +241,7 @@ pub fn fsm_completes(net: Box<Fsm>, operation: i32) -> Box<Fsm> {
 
     let mut net = net;
     if net.is_minimized != YES {
-        net = fsm_minimize(net);
+        net = fsm_minimize(opts, net);
     }
 
     let mut incomplete = 0;
@@ -447,27 +447,27 @@ pub fn fsm_completes(net: Box<Fsm>, operation: i32) -> Box<Fsm> {
 // [spec:foma:sem:constructions.fsm-complete-fn]
 // [spec:foma:def:fomalib.fsm-complete-fn]
 // [spec:foma:sem:fomalib.fsm-complete-fn]
-pub fn fsm_complete(net: Box<Fsm>) -> Box<Fsm> {
-    fsm_completes(net, COMPLETE)
+pub fn fsm_complete(opts: &FomaOptions, net: Box<Fsm>) -> Box<Fsm> {
+    fsm_completes(opts, net, COMPLETE)
 }
 
 // [spec:foma:def:constructions.fsm-complement-fn]
 // [spec:foma:sem:constructions.fsm-complement-fn]
 // [spec:foma:def:fomalib.fsm-complement-fn]
 // [spec:foma:sem:fomalib.fsm-complement-fn]
-pub fn fsm_complement(net: Box<Fsm>) -> Box<Fsm> {
-    fsm_completes(net, COMPLEMENT)
+pub fn fsm_complement(opts: &FomaOptions, net: Box<Fsm>) -> Box<Fsm> {
+    fsm_completes(opts, net, COMPLEMENT)
 }
 
 // [spec:foma:def:constructions.fsm-minus-fn]
 // [spec:foma:sem:constructions.fsm-minus-fn]
 // [spec:foma:def:fomalib.fsm-minus-fn]
 // [spec:foma:sem:fomalib.fsm-minus-fn]
-pub fn fsm_minus(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
+pub fn fsm_minus(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
     let mut statecount = 0;
 
-    let mut net1 = fsm_minimize(net1);
-    let mut net2 = fsm_minimize(net2);
+    let mut net1 = fsm_minimize(opts, net1);
+    let mut net2 = fsm_minimize(opts, net2);
 
     fsm_merge_sigma(&mut net1, &mut net2);
 
@@ -600,22 +600,22 @@ pub fn fsm_minus(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
     drop(point_b);
     fsm_destroy(net2);
     triplet_hash_free(Some(th));
-    fsm_minimize(net1)
+    fsm_minimize(opts, net1)
 }
 
 // [spec:foma:def:constructions.fsm-concat-m-n-fn]
 // [spec:foma:sem:constructions.fsm-concat-m-n-fn]
 // [spec:foma:def:fomalib.fsm-concat-m-n-fn]
 // [spec:foma:sem:fomalib.fsm-concat-m-n-fn]
-pub fn fsm_concat_m_n(net1: Box<Fsm>, m: i32, n: i32) -> Box<Fsm> {
+pub fn fsm_concat_m_n(opts: &FomaOptions, net1: Box<Fsm>, m: i32, n: i32) -> Box<Fsm> {
     let mut net1 = net1;
     let mut acc = fsm_empty_string();
     let mut i = 1;
     while i <= n {
         if i > m {
-            acc = fsm_concat(acc, fsm_optionality(fsm_copy(&mut net1)));
+            acc = fsm_concat(opts, acc, fsm_optionality(opts, fsm_copy(&mut net1)));
         } else {
-            acc = fsm_concat(acc, fsm_copy(&mut net1));
+            acc = fsm_concat(opts, acc, fsm_copy(&mut net1));
         }
         i += 1;
     }
@@ -627,16 +627,16 @@ pub fn fsm_concat_m_n(net1: Box<Fsm>, m: i32, n: i32) -> Box<Fsm> {
 // [spec:foma:sem:constructions.fsm-concat-n-fn]
 // [spec:foma:def:fomalib.fsm-concat-n-fn]
 // [spec:foma:sem:fomalib.fsm-concat-n-fn]
-pub fn fsm_concat_n(net1: Box<Fsm>, n: i32) -> Box<Fsm> {
-    fsm_concat_m_n(net1, n, n)
+pub fn fsm_concat_n(opts: &FomaOptions, net1: Box<Fsm>, n: i32) -> Box<Fsm> {
+    fsm_concat_m_n(opts, net1, n, n)
 }
 
 // [spec:foma:def:constructions.fsm-term-negation-fn]
 // [spec:foma:sem:constructions.fsm-term-negation-fn]
 // [spec:foma:def:fomalib.fsm-term-negation-fn]
 // [spec:foma:sem:fomalib.fsm-term-negation-fn]
-pub fn fsm_term_negation(net1: Box<Fsm>) -> Box<Fsm> {
-    fsm_intersect(fsm_identity(), fsm_complement(net1))
+pub fn fsm_term_negation(opts: &FomaOptions, net1: Box<Fsm>) -> Box<Fsm> {
+    fsm_intersect(opts, fsm_identity(), fsm_complement(opts, net1))
 }
 
 // [spec:foma:def:constructions.fsm-invert-fn]

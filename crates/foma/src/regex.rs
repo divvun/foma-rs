@@ -15,6 +15,7 @@
 //! quotients, `.f` flag-eliminate, two-level `|||` replace), those simply never
 //! reach us as AST nodes (they lex/parse to something else or error out).
 
+use crate::options::FomaOptions;
 use std::cell::Cell;
 
 use nfst_xre::{
@@ -63,20 +64,22 @@ thread_local! {
 // [spec:foma:def:fomalib.fsm-parse-regex-fn]
 // [spec:foma:sem:fomalib.fsm-parse-regex-fn]
 pub fn fsm_parse_regex(
+    opts: &FomaOptions,
     regex: &str,
     defined_nets: Option<&mut DefinedNetworks>,
     defined_funcs: Option<&mut DefinedFunctions>,
 ) -> Option<Box<Fsm>> {
     /* C: strcpy a copy of `regex` with ";" appended, my_yyparse it at line 1,
-    and on success return fsm_minimize(current_parse). nfst-xre tolerates the
+    and on success return fsm_minimize(opts, current_parse). nfst-xre tolerates the
     optional trailing ";" itself, so no copy is needed. */
-    let current_parse = my_yyparse(regex, defined_nets, defined_funcs)?;
-    Some(fsm_minimize(current_parse))
+    let current_parse = my_yyparse(opts, regex, defined_nets, defined_funcs)?;
+    Some(fsm_minimize(opts, current_parse))
 }
 
 // [spec:foma:def:foma.my-yyparse-fn]
 // [spec:foma:sem:foma.my-yyparse-fn]
 fn my_yyparse(
+    opts: &FomaOptions,
     regex: &str,
     defined_nets: Option<&mut DefinedNetworks>,
     defined_funcs: Option<&mut DefinedFunctions>,
@@ -92,12 +95,13 @@ fn my_yyparse(
         return None;
     }
     G_PARSE_DEPTH.with(|c| c.set(depth + 1));
-    let result = my_yyparse_inner(regex, defined_nets, defined_funcs);
+    let result = my_yyparse_inner(opts, regex, defined_nets, defined_funcs);
     G_PARSE_DEPTH.with(|c| c.set(depth));
     result
 }
 
 fn my_yyparse_inner(
+    opts: &FomaOptions,
     regex: &str,
     defined_nets: Option<&mut DefinedNetworks>,
     defined_funcs: Option<&mut DefinedFunctions>,
@@ -126,12 +130,13 @@ fn my_yyparse_inner(
             return None;
         }
     };
-    build_net(&last.value, defined_nets, defined_funcs)
+    build_net(opts, &last.value, defined_nets, defined_funcs)
 }
 
 /// Walk one AST node to a network, mirroring the regex.y semantic action for
 /// the corresponding production.
 fn build_net(
+    opts: &FomaOptions,
     expr: &XreExpr,
     mut nets: Option<&mut DefinedNetworks>,
     mut funcs: Option<&mut DefinedFunctions>,
@@ -163,9 +168,19 @@ fn build_net(
         // ──────────────── label combinators ────────────────
         XreExpr::Pair { upper, lower } => {
             /* `:` HIGH_CROSS_PRODUCT: fsm_cross_product(upper, lower). */
-            let u = build_net(&upper.value, nets.as_deref_mut(), funcs.as_deref_mut())?;
-            let l = build_net(&lower.value, nets.as_deref_mut(), funcs.as_deref_mut())?;
-            Some(fsm_cross_product(u, l))
+            let u = build_net(
+                opts,
+                &upper.value,
+                nets.as_deref_mut(),
+                funcs.as_deref_mut(),
+            )?;
+            let l = build_net(
+                opts,
+                &lower.value,
+                nets.as_deref_mut(),
+                funcs.as_deref_mut(),
+            )?;
+            Some(fsm_cross_product(opts, u, l))
         }
         XreExpr::Weighted { .. } => {
             eprintln!("*** Syntax error: weights (::w) are not supported");
@@ -176,17 +191,17 @@ fn build_net(
             None
         }
 
-        XreExpr::ReadFile { kind, path } => build_read_file(*kind, path, nets, funcs),
+        XreExpr::ReadFile { kind, path } => build_read_file(opts, *kind, path, nets, funcs),
 
-        XreExpr::FunctionCall { name, args } => function_apply(name, args, nets, funcs),
+        XreExpr::FunctionCall { name, args } => function_apply(opts, name, args, nets, funcs),
 
         // ──────────────── grouping ────────────────
-        XreExpr::Group(inner) => build_net(&inner.value, nets, funcs),
+        XreExpr::Group(inner) => build_net(opts, &inner.value, nets, funcs),
         XreExpr::Optional(inner) => {
             /* regex.y LPAREN network RPAREN: fsm_optionality (no quantifier can
             reach us, so count_quantifiers() is always 0 here). */
-            let n = build_net(&inner.value, nets, funcs)?;
-            Some(fsm_optionality(n))
+            let n = build_net(opts, &inner.value, nets, funcs)?;
+            Some(fsm_optionality(opts, n))
         }
         XreExpr::BracketedDotted(_) => {
             /* `[. E .]` outside a replacement mapping is a syntax error in the C
@@ -196,101 +211,104 @@ fn build_net(
         }
 
         // ──────────────── unary ────────────────
-        XreExpr::Unary(op, inner) => build_unary(*op, &inner.value, nets, funcs),
+        XreExpr::Unary(op, inner) => build_unary(opts, *op, &inner.value, nets, funcs),
 
         // ──────────────── binary ────────────────
-        XreExpr::Binary(op, l, r) => build_binary(*op, &l.value, &r.value, nets, funcs),
+        XreExpr::Binary(op, l, r) => build_binary(opts, *op, &l.value, &r.value, nets, funcs),
 
         // ──────────────── iteration ────────────────
         XreExpr::RepeatN(inner, n) => {
             /* NCONCAT: fsm_concat_n(net, n). */
-            let net = build_net(&inner.value, nets, funcs)?;
-            Some(fsm_concat_n(net, *n as i32))
+            let net = build_net(opts, &inner.value, nets, funcs)?;
+            Some(fsm_concat_n(opts, net, *n as i32))
         }
         XreExpr::RepeatNPlus(inner, n) => {
             /* MORENCONCAT (`^>N`): concat(concat_n(copy,n), kleene_plus(copy)). */
-            let mut net = build_net(&inner.value, nets, funcs)?;
+            let mut net = build_net(opts, &inner.value, nets, funcs)?;
             let res = fsm_concat(
-                fsm_concat_n(fsm_copy(&mut net), *n as i32),
-                fsm_kleene_plus(fsm_copy(&mut net)),
+                opts,
+                fsm_concat_n(opts, fsm_copy(&mut net), *n as i32),
+                fsm_kleene_plus(opts, fsm_copy(&mut net)),
             );
             fsm_destroy(net);
             Some(res)
         }
         XreExpr::RepeatNMinus(inner, n) => {
             /* LESSNCONCAT (`^<N`): fsm_concat_m_n(net, 0, n-1). */
-            let net = build_net(&inner.value, nets, funcs)?;
-            Some(fsm_concat_m_n(net, 0, *n as i32 - 1))
+            let net = build_net(opts, &inner.value, nets, funcs)?;
+            Some(fsm_concat_m_n(opts, net, 0, *n as i32 - 1))
         }
         XreExpr::RepeatNToK(inner, n, k) => {
             /* MNCONCAT (`^N,K`): fsm_concat_m_n(net, n, k). */
-            let net = build_net(&inner.value, nets, funcs)?;
-            Some(fsm_concat_m_n(net, *n as i32, *k as i32))
+            let net = build_net(opts, &inner.value, nets, funcs)?;
+            Some(fsm_concat_m_n(opts, net, *n as i32, *k as i32))
         }
 
         // ──────────────── replace / restriction / substitute ────────────────
-        XreExpr::Replace { arrow, rules } => build_replace(*arrow, rules, nets, funcs),
+        XreExpr::Replace { arrow, rules } => build_replace(opts, *arrow, rules, nets, funcs),
         XreExpr::Restriction { body, contexts } => {
-            build_restriction(&body.value, contexts, nets, funcs)
+            build_restriction(opts, &body.value, contexts, nets, funcs)
         }
         XreExpr::Substitute { haystack, what } => {
-            build_substitute(&haystack.value, what, nets, funcs)
+            build_substitute(opts, &haystack.value, what, nets, funcs)
         }
     }
 }
 
 fn build_unary(
+    opts: &FomaOptions,
     op: UnaryOp,
     inner: &XreExpr,
     nets: Option<&mut DefinedNetworks>,
     funcs: Option<&mut DefinedFunctions>,
 ) -> Option<Box<Fsm>> {
-    let net = build_net(inner, nets, funcs)?;
+    let net = build_net(opts, inner, nets, funcs)?;
     Some(match op {
         /* network9 KLEENE_STAR: fsm_kleene_star(fsm_minimize(net)) */
-        UnaryOp::Star => fsm_kleene_star(fsm_minimize(net)),
-        UnaryOp::Plus => fsm_kleene_plus(net),
+        UnaryOp::Star => fsm_kleene_star(opts, fsm_minimize(opts, net)),
+        UnaryOp::Plus => fsm_kleene_plus(opts, net),
         /* network9 REVERSE: fsm_determinize(fsm_reverse(net)) */
         UnaryOp::Reverse => fsm_determinize(fsm_reverse(net)),
         UnaryOp::Invert => fsm_invert(net),
         UnaryOp::UpperProject => fsm_upper(net),
         UnaryOp::LowerProject => fsm_lower(net),
-        UnaryOp::Complement => fsm_complement(net),
-        UnaryOp::TermComplement => fsm_term_negation(net),
-        UnaryOp::Containment => fsm_contains(net),
-        UnaryOp::ContainmentOnce => fsm_contains_one(net),
-        UnaryOp::ContainmentOpt => fsm_contains_opt_one(net),
+        UnaryOp::Complement => fsm_complement(opts, net),
+        UnaryOp::TermComplement => fsm_term_negation(opts, net),
+        UnaryOp::Containment => fsm_contains(opts, net),
+        UnaryOp::ContainmentOnce => fsm_contains_one(opts, net),
+        UnaryOp::ContainmentOpt => fsm_contains_opt_one(opts, net),
     })
 }
 
 fn build_binary(
+    opts: &FomaOptions,
     op: BinaryOp,
     left: &XreExpr,
     right: &XreExpr,
     mut nets: Option<&mut DefinedNetworks>,
     mut funcs: Option<&mut DefinedFunctions>,
 ) -> Option<Box<Fsm>> {
-    let l = build_net(left, nets.as_deref_mut(), funcs.as_deref_mut())?;
-    let r = build_net(right, nets.as_deref_mut(), funcs.as_deref_mut())?;
+    let l = build_net(opts, left, nets.as_deref_mut(), funcs.as_deref_mut())?;
+    let r = build_net(opts, right, nets.as_deref_mut(), funcs.as_deref_mut())?;
     match op {
-        BinaryOp::Concatenate => Some(fsm_concat(l, r)),
-        BinaryOp::Compose => Some(fsm_compose(l, r)),
-        BinaryOp::LenientCompose => Some(fsm_lenient_compose(l, r)),
-        BinaryOp::CrossProduct => Some(fsm_cross_product(l, r)),
+        BinaryOp::Concatenate => Some(fsm_concat(opts, l, r)),
+        BinaryOp::Compose => Some(fsm_compose(opts, l, r)),
+        BinaryOp::LenientCompose => Some(fsm_lenient_compose(opts, l, r)),
+        BinaryOp::CrossProduct => Some(fsm_cross_product(opts, l, r)),
         BinaryOp::Union => Some(fsm_union(l, r)),
-        BinaryOp::Intersect => Some(fsm_intersect(l, r)),
-        BinaryOp::Subtract => Some(fsm_minus(l, r)),
-        BinaryOp::UpperPriorityUnion => Some(fsm_priority_union_upper(l, r)),
-        BinaryOp::LowerPriorityUnion => Some(fsm_priority_union_lower(l, r)),
-        BinaryOp::Ignoring => Some(fsm_ignore(l, r, OP_IGNORE_ALL)),
-        BinaryOp::IgnoreInternally => Some(fsm_ignore(l, r, OP_IGNORE_INTERNAL)),
-        BinaryOp::LeftQuotient => Some(fsm_quotient_left(l, r)),
-        BinaryOp::Shuffle => Some(fsm_shuffle(l, r)),
+        BinaryOp::Intersect => Some(fsm_intersect(opts, l, r)),
+        BinaryOp::Subtract => Some(fsm_minus(opts, l, r)),
+        BinaryOp::UpperPriorityUnion => Some(fsm_priority_union_upper(opts, l, r)),
+        BinaryOp::LowerPriorityUnion => Some(fsm_priority_union_lower(opts, l, r)),
+        BinaryOp::Ignoring => Some(fsm_ignore(opts, l, r, OP_IGNORE_ALL)),
+        BinaryOp::IgnoreInternally => Some(fsm_ignore(opts, l, r, OP_IGNORE_INTERNAL)),
+        BinaryOp::LeftQuotient => Some(fsm_quotient_left(opts, l, r)),
+        BinaryOp::Shuffle => Some(fsm_shuffle(opts, l, r)),
         /* PRECEDES/FOLLOWS borrow (do not consume) their operands. */
         BinaryOp::Before => {
             let mut l = l;
             let mut r = r;
-            let res = fsm_precedes(&mut l, &mut r);
+            let res = fsm_precedes(opts, &mut l, &mut r);
             fsm_destroy(l);
             fsm_destroy(r);
             Some(res)
@@ -298,7 +316,7 @@ fn build_binary(
         BinaryOp::After => {
             let mut l = l;
             let mut r = r;
-            let res = fsm_follows(&mut l, &mut r);
+            let res = fsm_follows(opts, &mut l, &mut r);
             fsm_destroy(l);
             fsm_destroy(r);
             Some(res)
@@ -318,6 +336,7 @@ fn build_binary(
 }
 
 fn build_read_file(
+    opts: &FomaOptions,
     kind: ReadKind,
     path: &str,
     nets: Option<&mut DefinedNetworks>,
@@ -363,7 +382,7 @@ fn build_read_file(
                     return None;
                 }
             };
-            Some(fsm_minimize(my_yyparse(&s, nets, funcs)?))
+            Some(fsm_minimize(opts, my_yyparse(opts, &s, nets, funcs)?))
         }
         ReadKind::Prolog => {
             eprintln!("*** Syntax error: @pl\"…\" prolog files are not supported");
@@ -379,6 +398,7 @@ fn build_read_file(
 /// define each argument net under that symbol, reparse the substituted regex,
 /// then remove the temporaries.
 fn function_apply(
+    opts: &FomaOptions,
     name: &str,
     args: &[SpannedXre],
     mut nets: Option<&mut DefinedNetworks>,
@@ -404,6 +424,7 @@ fn function_apply(
     let mut arg_nets: Vec<Box<Fsm>> = Vec::new();
     for a in args {
         arg_nets.push(build_net(
+            opts,
             &a.value,
             nets.as_deref_mut(),
             funcs.as_deref_mut(),
@@ -447,7 +468,7 @@ fn function_apply(
         }
     };
 
-    let result = my_yyparse(&regex_str, nets.as_deref_mut(), funcs.as_deref_mut());
+    let result = my_yyparse(opts, &regex_str, nets.as_deref_mut(), funcs.as_deref_mut());
 
     if let Some(n) = nets.as_deref_mut() {
         for r in &created {
@@ -484,6 +505,7 @@ fn mark_to_dir(mark: ContextMark) -> i32 {
 }
 
 fn build_replace(
+    opts: &FomaOptions,
     arrow: ReplaceArrow,
     rules: &[ReplaceRule],
     mut nets: Option<&mut DefinedNetworks>,
@@ -501,6 +523,7 @@ fn build_replace(
         let mut rule_nodes: Vec<Box<Fsmrules>> = Vec::new();
         for mapping in &rule.mappings {
             build_mapping(
+                opts,
                 mapping,
                 arrow_type,
                 &mut rule_nodes,
@@ -516,11 +539,15 @@ fn build_replace(
                     /* regex.y add_context_pair: a missing side stores
                     fsm_empty_string() (never NULL). */
                     let left = match &item.left {
-                        Some(e) => build_net(&e.value, nets.as_deref_mut(), funcs.as_deref_mut())?,
+                        Some(e) => {
+                            build_net(opts, &e.value, nets.as_deref_mut(), funcs.as_deref_mut())?
+                        }
                         None => fsm_empty_string(),
                     };
                     let right = match &item.right {
-                        Some(e) => build_net(&e.value, nets.as_deref_mut(), funcs.as_deref_mut())?,
+                        Some(e) => {
+                            build_net(opts, &e.value, nets.as_deref_mut(), funcs.as_deref_mut())?
+                        }
                         None => fsm_empty_string(),
                     };
                     ctx_nodes.push(Box::new(Fsmcontexts {
@@ -545,28 +572,29 @@ fn build_replace(
 
     let mut head = link_rewritesets(set_nodes)?;
     /* networkA: fsm_rewrite(rewrite_rules); clear_rewrite_ruleset(...). */
-    let net = fsm_rewrite(&mut head);
+    let net = fsm_rewrite(opts, &mut head);
     /* clear_rewrite_ruleset — the owned chain drops here. */
     drop(head);
     Some(net)
 }
 
 fn build_restriction(
+    opts: &FomaOptions,
     body: &XreExpr,
     contexts: &[RestrContext],
     mut nets: Option<&mut DefinedNetworks>,
     mut funcs: Option<&mut DefinedFunctions>,
 ) -> Option<Box<Fsm>> {
     /* n0 CRESTRICT n0: fsm_context_restrict(body, contexts). */
-    let x = build_net(body, nets.as_deref_mut(), funcs.as_deref_mut())?;
+    let x = build_net(opts, body, nets.as_deref_mut(), funcs.as_deref_mut())?;
     let mut ctx_nodes: Vec<Box<Fsmcontexts>> = Vec::new();
     for item in contexts {
         let left = match &item.left {
-            Some(e) => build_net(&e.value, nets.as_deref_mut(), funcs.as_deref_mut())?,
+            Some(e) => build_net(opts, &e.value, nets.as_deref_mut(), funcs.as_deref_mut())?,
             None => fsm_empty_string(),
         };
         let right = match &item.right {
-            Some(e) => build_net(&e.value, nets.as_deref_mut(), funcs.as_deref_mut())?,
+            Some(e) => build_net(opts, &e.value, nets.as_deref_mut(), funcs.as_deref_mut())?,
             None => fsm_empty_string(),
         };
         ctx_nodes.push(Box::new(Fsmcontexts {
@@ -577,16 +605,17 @@ fn build_restriction(
             cpright: None,
         }));
     }
-    Some(fsm_context_restrict(x, link_fsmcontexts(ctx_nodes)))
+    Some(fsm_context_restrict(opts, x, link_fsmcontexts(ctx_nodes)))
 }
 
 fn build_substitute(
+    opts: &FomaOptions,
     haystack: &XreExpr,
     what: &SubstituteWhat,
     mut nets: Option<&mut DefinedNetworks>,
     mut funcs: Option<&mut DefinedFunctions>,
 ) -> Option<Box<Fsm>> {
-    let net = build_net(haystack, nets.as_deref_mut(), funcs.as_deref_mut())?;
+    let net = build_net(opts, haystack, nets.as_deref_mut(), funcs.as_deref_mut())?;
     match what {
         /* sub1 sub2: fsm_substitute_symbol(net, subval1, subval2) — exactly one
         symbol to one symbol. */
@@ -612,6 +641,7 @@ fn build_substitute(
 }
 
 fn build_mapping(
+    opts: &FomaOptions,
     m: &MappingPair,
     arrow_type: i32,
     out: &mut Vec<Box<Fsmrules>>,
@@ -620,19 +650,19 @@ fn build_mapping(
 ) -> Option<()> {
     match &m.upper {
         MappingSide::Expr(e) => {
-            let upper = build_net(&e.value, nets.as_deref_mut(), funcs.as_deref_mut())?;
-            let (r, r2) = build_rhs(&m.kind, nets.as_deref_mut(), funcs.as_deref_mut())?;
-            add_rule(out, upper, r, r2, arrow_type);
+            let upper = build_net(opts, &e.value, nets.as_deref_mut(), funcs.as_deref_mut())?;
+            let (r, r2) = build_rhs(opts, &m.kind, nets.as_deref_mut(), funcs.as_deref_mut())?;
+            add_rule(opts, out, upper, r, r2, arrow_type);
         }
         MappingSide::Dotted(Some(e)) => {
             /* LDOT n0 RDOT ARROW ...: add_rule with ARROW_DOTTED. */
-            let upper = build_net(&e.value, nets.as_deref_mut(), funcs.as_deref_mut())?;
-            let (r, r2) = build_rhs(&m.kind, nets.as_deref_mut(), funcs.as_deref_mut())?;
-            add_rule(out, upper, r, r2, arrow_type | ARROW_DOTTED);
+            let upper = build_net(opts, &e.value, nets.as_deref_mut(), funcs.as_deref_mut())?;
+            let (r, r2) = build_rhs(opts, &m.kind, nets.as_deref_mut(), funcs.as_deref_mut())?;
+            add_rule(opts, out, upper, r, r2, arrow_type | ARROW_DOTTED);
         }
         MappingSide::Dotted(None) => {
             /* LDOT RDOT ARROW n0: add_eprule with ARROW_DOTTED. */
-            let (r, r2) = build_rhs(&m.kind, nets.as_deref_mut(), funcs.as_deref_mut())?;
+            let (r, r2) = build_rhs(opts, &m.kind, nets.as_deref_mut(), funcs.as_deref_mut())?;
             add_eprule(out, r, r2, arrow_type | ARROW_DOTTED);
         }
     }
@@ -640,23 +670,24 @@ fn build_mapping(
 }
 
 fn build_rhs(
+    opts: &FomaOptions,
     kind: &MappingKind,
     mut nets: Option<&mut DefinedNetworks>,
     mut funcs: Option<&mut DefinedFunctions>,
 ) -> Option<(Option<Box<Fsm>>, Option<Box<Fsm>>)> {
     match kind {
         MappingKind::Plain { lower } => {
-            let r = build_side(lower, nets.as_deref_mut(), funcs.as_deref_mut())?;
+            let r = build_side(opts, lower, nets.as_deref_mut(), funcs.as_deref_mut())?;
             Some((Some(r), None))
         }
         MappingKind::Markup { pre, post } => {
             /* n0 ARROW [n0] TRIPLE_DOT [n0]: right = pre|0, right2 = post|0. */
             let r = match pre {
-                Some(s) => build_side(s, nets.as_deref_mut(), funcs.as_deref_mut())?,
+                Some(s) => build_side(opts, s, nets.as_deref_mut(), funcs.as_deref_mut())?,
                 None => fsm_empty_string(),
             };
             let r2 = match post {
-                Some(s) => build_side(s, nets.as_deref_mut(), funcs.as_deref_mut())?,
+                Some(s) => build_side(opts, s, nets.as_deref_mut(), funcs.as_deref_mut())?,
                 None => fsm_empty_string(),
             };
             Some((Some(r), Some(r2)))
@@ -665,13 +696,14 @@ fn build_rhs(
 }
 
 fn build_side(
+    opts: &FomaOptions,
     s: &MappingSide,
     nets: Option<&mut DefinedNetworks>,
     funcs: Option<&mut DefinedFunctions>,
 ) -> Option<Box<Fsm>> {
     match s {
-        MappingSide::Expr(e) => build_net(&e.value, nets, funcs),
-        MappingSide::Dotted(Some(e)) => build_net(&e.value, nets, funcs),
+        MappingSide::Expr(e) => build_net(opts, &e.value, nets, funcs),
+        MappingSide::Dotted(Some(e)) => build_net(opts, &e.value, nets, funcs),
         MappingSide::Dotted(None) => Some(fsm_empty_string()),
     }
 }
@@ -681,6 +713,7 @@ fn build_side(
 /// string); an extra rule keeping ARROW_DOTTED is emitted only when the LHS
 /// could match the empty string.
 fn add_rule(
+    opts: &FomaOptions,
     out: &mut Vec<Box<Fsmrules>>,
     l: Box<Fsm>,
     r: Option<Box<Fsm>>,
@@ -701,7 +734,7 @@ fn add_rule(
     }
 
     let mut l = l;
-    let main_left = fsm_minus(fsm_copy(&mut l), fsm_empty_string());
+    let main_left = fsm_minus(opts, fsm_copy(&mut l), fsm_empty_string());
     let mut main = Box::new(Fsmrules {
         left: Some(main_left),
         right: r,
@@ -713,8 +746,8 @@ fn add_rule(
     });
 
     /* test = L ∩ [] : add the empty-[..] rule only if non-empty. */
-    let mut test = fsm_intersect(l, fsm_empty_string());
-    if fsm_isempty(&mut test) == 0 {
+    let mut test = fsm_intersect(opts, l, fsm_empty_string());
+    if fsm_isempty(opts, &mut test) == 0 {
         let test_right = main.right.as_deref_mut().map(fsm_copy);
         let test_right2 = main.right2.as_deref_mut().map(fsm_copy);
         out.push(Box::new(Fsmrules {
@@ -779,6 +812,7 @@ mod tests {
     use crate::define::{
         add_defined, add_defined_function, defined_functions_init, defined_networks_init,
     };
+    use crate::options::FomaOptions;
     use crate::topsort::fsm_topsort;
     use crate::types::Fsm;
 
@@ -823,6 +857,7 @@ mod tests {
 
     #[test]
     fn end_to_end_compiles() {
+        let opts = &FomaOptions::default();
         /* Exercise the full walk + construction pipeline (no defined tables). */
         let cases = [
             "cat",
@@ -846,30 +881,32 @@ mod tests {
             "a b c ;",
         ];
         for src in cases {
-            let net = super::fsm_parse_regex(src, None, None);
+            let net = super::fsm_parse_regex(opts, src, None, None);
             assert!(net.is_some(), "failed to compile regex: {:?}", src);
         }
     }
 
     #[test]
     fn replace_and_restriction_compile() {
+        let opts = &FomaOptions::default();
         /* The rewrite batch API and context-restriction paths. */
-        assert!(super::fsm_parse_regex("a -> b", None, None).is_some());
-        assert!(super::fsm_parse_regex("a -> b || c _ d", None, None).is_some());
-        assert!(super::fsm_parse_regex("a -> b, c -> d", None, None).is_some());
-        assert!(super::fsm_parse_regex("[. a .] -> b", None, None).is_some());
-        assert!(super::fsm_parse_regex("a => b _ c", None, None).is_some());
-        assert!(super::fsm_parse_regex("a @-> b || _ c", None, None).is_some());
+        assert!(super::fsm_parse_regex(opts, "a -> b", None, None).is_some());
+        assert!(super::fsm_parse_regex(opts, "a -> b || c _ d", None, None).is_some());
+        assert!(super::fsm_parse_regex(opts, "a -> b, c -> d", None, None).is_some());
+        assert!(super::fsm_parse_regex(opts, "[. a .] -> b", None, None).is_some());
+        assert!(super::fsm_parse_regex(opts, "a => b _ c", None, None).is_some());
+        assert!(super::fsm_parse_regex(opts, "a @-> b || _ c", None, None).is_some());
     }
 
     // [spec:foma:sem:foma.my-yyparse-fn/test]
     // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
     #[test]
     fn syntax_error_returns_none() {
+        let opts = &FomaOptions::default();
         /* C: yyparse returns non-zero, my_yyparse propagates it, and
         fsm_parse_regex returns NULL. */
-        assert!(super::fsm_parse_regex("[ a b", None, None).is_none());
-        assert!(super::fsm_parse_regex("a |", None, None).is_none());
+        assert!(super::fsm_parse_regex(opts, "[ a b", None, None).is_none());
+        assert!(super::fsm_parse_regex(opts, "a |", None, None).is_none());
     }
 
     // fsm_parse_regex returns fsm_minimize(current_parse): the shapes below
@@ -878,13 +915,14 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
     #[test]
     fn parse_success_yields_minimized_c_shapes() {
+        let opts = &FomaOptions::default();
         let expect = [
             ("a", 2, 1, 1i64),
             ("a|b", 2, 2, 2),
             ("[a b]|[a c]", 3, 3, 2),
         ];
         for (src, states, arcs, paths) in expect {
-            let net = super::fsm_parse_regex(src, None, None).unwrap();
+            let net = super::fsm_parse_regex(opts, src, None, None).unwrap();
             assert_eq!(counted(net), (states, arcs, paths), "shape of {:?}", src);
         }
     }
@@ -895,11 +933,12 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
     #[test]
     fn semicolon_separated_regexes_keep_last() {
-        let net = super::fsm_parse_regex("a b ; x y z ;", None, None).unwrap();
-        let expected = super::fsm_parse_regex("x y z", None, None).unwrap();
+        let opts = &FomaOptions::default();
+        let net = super::fsm_parse_regex(opts, "a b ; x y z ;", None, None).unwrap();
+        let expected = super::fsm_parse_regex(opts, "x y z", None, None).unwrap();
         assert_eq!(fsm_equivalent(net, expected), 1);
-        let net = super::fsm_parse_regex("a ; b", None, None).unwrap();
-        let expected = super::fsm_parse_regex("b", None, None).unwrap();
+        let net = super::fsm_parse_regex(opts, "a ; b", None, None).unwrap();
+        let expected = super::fsm_parse_regex(opts, "b", None, None).unwrap();
         assert_eq!(fsm_equivalent(net, expected), 1);
     }
 
@@ -910,18 +949,19 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
     #[test]
     fn defined_net_names_substitute_from_the_table() {
+        let opts = &FomaOptions::default();
         let mut nets = defined_networks_init();
-        let def = super::fsm_parse_regex("x y", None, None).unwrap();
+        let def = super::fsm_parse_regex(opts, "x y", None, None).unwrap();
         assert_eq!(add_defined(&mut nets, Some(def), "Foo"), 0);
         // With the table: "Foo" compiles to the defined net [x y]
         // (C foma: 3 states, 2 arcs, 1 path).
-        let net = super::fsm_parse_regex("Foo", Some(&mut nets), None).unwrap();
+        let net = super::fsm_parse_regex(opts, "Foo", Some(&mut nets), None).unwrap();
         assert_eq!(counted(net), (3, 2, 1));
-        let net = super::fsm_parse_regex("Foo", Some(&mut nets), None).unwrap();
-        let expected = super::fsm_parse_regex("x y", None, None).unwrap();
+        let net = super::fsm_parse_regex(opts, "Foo", Some(&mut nets), None).unwrap();
+        let expected = super::fsm_parse_regex(opts, "x y", None, None).unwrap();
         assert_eq!(fsm_equivalent(net, expected), 1);
         // Without the table: "Foo" is one literal (multichar) symbol.
-        let net = super::fsm_parse_regex("Foo", None, None).unwrap();
+        let net = super::fsm_parse_regex(opts, "Foo", None, None).unwrap();
         assert_eq!(counted(net), (2, 1, 1));
     }
 
@@ -931,18 +971,19 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
     #[test]
     fn defined_function_application_expands_body() {
+        let opts = &FomaOptions::default();
         let mut nets = defined_networks_init();
         let mut funcs = defined_functions_init();
         // define F(X) [X X];  — stored body references @ARGUMENT01@.
-        add_defined_function(&mut funcs, "F", "[@ARGUMENT01@ @ARGUMENT01@]", 1);
-        let net = super::fsm_parse_regex("F(a)", Some(&mut nets), Some(&mut funcs)).unwrap();
+        add_defined_function(opts, &mut funcs, "F", "[@ARGUMENT01@ @ARGUMENT01@]", 1);
+        let net = super::fsm_parse_regex(opts, "F(a)", Some(&mut nets), Some(&mut funcs)).unwrap();
         // C foma: regex F(a); => 3 states, 2 arcs, 1 path (== [a a]).
         assert_eq!(counted(net), (3, 2, 1));
-        let net = super::fsm_parse_regex("F(a)", Some(&mut nets), Some(&mut funcs)).unwrap();
-        let expected = super::fsm_parse_regex("a a", None, None).unwrap();
+        let net = super::fsm_parse_regex(opts, "F(a)", Some(&mut nets), Some(&mut funcs)).unwrap();
+        let expected = super::fsm_parse_regex(opts, "a a", None, None).unwrap();
         assert_eq!(fsm_equivalent(net, expected), 1);
         // Undefined functions fail.
-        assert!(super::fsm_parse_regex("G(a)", Some(&mut nets), Some(&mut funcs)).is_none());
+        assert!(super::fsm_parse_regex(opts, "G(a)", Some(&mut nets), Some(&mut funcs)).is_none());
     }
 
     // my_yyparse's g_parse_depth guard: at MAX_PARSE_DEPTH (100) nested
@@ -951,14 +992,15 @@ mod tests {
     // [spec:foma:sem:foma.my-yyparse-fn/test]
     #[test]
     fn parse_depth_guard_stops_self_recursive_defines() {
+        let opts = &FomaOptions::default();
         let mut nets = defined_networks_init();
         let mut funcs = defined_functions_init();
         // define F(X) F(X); — every application reparses another F(...) call.
-        add_defined_function(&mut funcs, "F", "F(@ARGUMENT01@)", 1);
-        assert!(super::fsm_parse_regex("F(a)", Some(&mut nets), Some(&mut funcs)).is_none());
+        add_defined_function(opts, &mut funcs, "F", "F(@ARGUMENT01@)", 1);
+        assert!(super::fsm_parse_regex(opts, "F(a)", Some(&mut nets), Some(&mut funcs)).is_none());
         // The guard restores g_parse_depth on the way out, so the parser
         // still works afterwards.
         assert_eq!(super::G_PARSE_DEPTH.with(|c| c.get()), 0);
-        assert!(super::fsm_parse_regex("a", None, None).is_some());
+        assert!(super::fsm_parse_regex(opts, "a", None, None).is_some());
     }
 }

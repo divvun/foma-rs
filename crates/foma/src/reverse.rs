@@ -14,6 +14,8 @@ use crate::dynarray::{
     fsm_get_arc_source, fsm_get_arc_target, fsm_get_next_arc, fsm_get_next_final,
     fsm_get_next_initial, fsm_read_done, fsm_read_init,
 };
+#[cfg(test)]
+use crate::options::FomaOptions;
 use crate::structures::fsm_destroy;
 use crate::types::{EPSILON, Fsm};
 
@@ -79,7 +81,8 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-reverse-fn/test]
     #[test]
     fn reverse_shifts_states_and_adds_new_initial_with_epsilon_arcs() {
-        let net = fsm_parse_regex("a b c", None, None).unwrap();
+        let opts = &FomaOptions::default();
+        let net = fsm_parse_regex(opts, "a b c", None, None).unwrap();
         let old_statecount = net.statecount;
         let old = real_lines(&net);
         let old_arcs: Vec<(i32, i16, i16, i32)> = old
@@ -140,7 +143,8 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-reverse-fn/test]
     #[test]
     fn reverse_accepts_reversed_words() {
-        let rev = fsm_reverse(fsm_parse_regex("a b c", None, None).unwrap());
+        let opts = &FomaOptions::default();
+        let rev = fsm_reverse(fsm_parse_regex(opts, "a b c", None, None).unwrap());
         let mut h = apply_init(&rev);
         assert_eq!(apply_down(&mut h, Some("cba")), Some("cba".to_string()));
         assert_eq!(apply_down(&mut h, Some("abc")), None);
@@ -150,8 +154,9 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-reverse-fn/test]
     #[test]
     fn reverse_keeps_transducer_label_sides_unswapped() {
+        let opts = &FomaOptions::default();
         /* a:x b:y reversed maps upper "ba" to lower "yx" (and back) */
-        let rev = fsm_reverse(fsm_parse_regex("a:x b:y", None, None).unwrap());
+        let rev = fsm_reverse(fsm_parse_regex(opts, "a:x b:y", None, None).unwrap());
         let mut h = apply_init(&rev);
         assert_eq!(apply_down(&mut h, Some("ba")), Some("yx".to_string()));
         assert_eq!(apply_down(&mut h, Some("ab")), None);

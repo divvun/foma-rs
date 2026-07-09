@@ -22,7 +22,7 @@ pub fn iface_load_defined(filename: &str) {
 // [spec:foma:sem:foma.iface-read-att-fn]
 pub fn iface_read_att(session: &mut Session, filename: &str) -> i32 {
     print!("Reading AT&T file: {}\n", filename);
-    match read_att(filename) {
+    match read_att(&session.opts, filename) {
         None => {
             eprint!("{}: ", filename);
             perror("Error opening file");
@@ -66,7 +66,7 @@ pub fn iface_read_spaced_text(session: &mut Session, filename: &str) -> i32 {
             1
         }
         Some(net) => {
-            session.stack_add(fsm_topsort(fsm_minimize(net)));
+            session.stack_add(fsm_topsort(fsm_minimize(&session.opts, net)));
             0
         }
     }
@@ -84,7 +84,7 @@ pub fn iface_read_text(session: &mut Session, filename: &str) -> i32 {
             1
         }
         Some(net) => {
-            session.stack_add(fsm_topsort(fsm_minimize(net)));
+            session.stack_add(fsm_topsort(fsm_minimize(&session.opts, net)));
             0
         }
     }
@@ -134,7 +134,7 @@ pub fn iface_write_att(session: &mut Session, filename: Option<&str>) -> i32 {
             }
         }
     };
-    session.stack_entry_fsm(top, |f| net_print_att(f, &mut outfile));
+    session.stack_entry_fsm_with_opts(top, |opts, f| net_print_att(opts, f, &mut outfile));
     // fclose only when filename != NULL; stdout is not closed. Both drop here.
     0
 }

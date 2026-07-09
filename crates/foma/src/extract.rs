@@ -12,6 +12,8 @@ use crate::dynarray::{
     fsm_state_add_arc, fsm_state_close, fsm_state_end_state, fsm_state_init,
     fsm_state_set_current_state,
 };
+#[cfg(test)]
+use crate::options::FomaOptions;
 use crate::sigma::{sigma_cleanup, sigma_max};
 use crate::types::{Fsm, IDENTITY, NO, UNK, UNKNOWN};
 
@@ -145,7 +147,8 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-lower-fn/test]
     #[test]
     fn lower_projects_transducer_to_output_side() {
-        let net = fsm_lower(fsm_parse_regex("a:b", None, None).unwrap());
+        let opts = &FomaOptions::default();
+        let net = fsm_lower(fsm_parse_regex(opts, "a:b", None, None).unwrap());
         /* acceptor: both labels are the old `out` symbol */
         for (i, o) in arc_labels(&net) {
             assert_eq!(i, o);
@@ -172,7 +175,8 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-upper-fn/test]
     #[test]
     fn upper_projects_transducer_to_input_side() {
-        let net = fsm_upper(fsm_parse_regex("a:b", None, None).unwrap());
+        let opts = &FomaOptions::default();
+        let net = fsm_upper(fsm_parse_regex(opts, "a:b", None, None).unwrap());
         for (i, o) in arc_labels(&net) {
             assert_eq!(i, o);
         }
@@ -196,9 +200,10 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-lower-fn/test]
     #[test]
     fn lower_maps_unknown_label_to_identity() {
+        let opts = &FomaOptions::default();
         /* a:? has arcs a:UNKNOWN and a:a; on the lower side the lone
         UNKNOWN becomes an IDENTITY pair */
-        let src = fsm_parse_regex("a:?", None, None).unwrap();
+        let src = fsm_parse_regex(opts, "a:?", None, None).unwrap();
         assert!(
             arc_labels(&src).iter().any(|&(_, o)| o as i32 == UNKNOWN),
             "source transducer has an UNKNOWN on the lower side"
@@ -230,9 +235,10 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-upper-fn/test]
     #[test]
     fn upper_of_unknown_transducer_projects_all_arcs_to_input_side() {
+        let opts = &FomaOptions::default();
         /* a:? upper side: both arcs project to a:a with the same target,
         and the fsm_state_add_arc builder drops the exact duplicate */
-        let src = fsm_parse_regex("a:?", None, None).unwrap();
+        let src = fsm_parse_regex(opts, "a:?", None, None).unwrap();
         assert_eq!(arc_labels(&src).len(), 2, "source has a:UNKNOWN and a:a");
         let a_num = sigma_syms(&src)
             .into_iter()
@@ -254,9 +260,10 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-lower-fn/test]
     #[test]
     fn lower_epsilon_output_becomes_epsilon_arc() {
+        let opts = &FomaOptions::default();
         /* a:0 lower side: the EPSILON output becomes an eps:eps arc and the
         language is the empty string */
-        let net = fsm_lower(fsm_parse_regex("a:0", None, None).unwrap());
+        let net = fsm_lower(fsm_parse_regex(opts, "a:0", None, None).unwrap());
         assert_eq!(arc_labels(&net), vec![(EPSILON as i16, EPSILON as i16)]);
         let mut h = apply_init(&net);
         assert_eq!(apply_down(&mut h, Some("")), Some("".to_string()));

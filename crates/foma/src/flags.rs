@@ -5,8 +5,9 @@ use crate::constructions::{
     add_fsm_arc, fsm_complement, fsm_compose, fsm_concat, fsm_contains, fsm_intersect,
     fsm_optionality, fsm_symbol, fsm_union, fsm_universal,
 };
-use crate::mem::{G_FLAG_IS_EPSILON, G_VERBOSE, xxstrndup};
+use crate::mem::xxstrndup;
 use crate::minimize::fsm_minimize;
+use crate::options::FomaOptions;
 use crate::sigma::{sigma_cleanup, sigma_max, sigma_remove_num, sigma_sort};
 use crate::structures::{fsm_copy, fsm_empty_set};
 use crate::topsort::fsm_topsort;
@@ -56,11 +57,11 @@ pub struct Flags {
 // [spec:foma:sem:flags.flag-eliminate-fn+1]
 // [spec:foma:def:fomalib.flag-eliminate-fn]
 // [spec:foma:sem:fomalib.flag-eliminate-fn+1]
-pub fn flag_eliminate(net: Box<Fsm>, name: Option<&str>) -> Box<Fsm> {
+pub fn flag_eliminate(opts: &FomaOptions, net: Box<Fsm>, name: Option<&str>) -> Box<Fsm> {
     let mut filter: Option<Box<Fsm>> = None;
 
     if net.pathcount == 0 {
-        if G_VERBOSE.with(|v| v.get()) != 0 {
+        if opts.verbose {
             eprint!("Skipping flag elimination since there are no paths in network.\n");
             /* fflush(stderr) — stderr is unbuffered */
         }
@@ -80,7 +81,7 @@ pub fn flag_eliminate(net: Box<Fsm>, name: Option<&str>) -> Box<Fsm> {
             f = fl.next.as_deref();
         }
         if found == 0 {
-            if G_VERBOSE.with(|v| v.get()) != 0 {
+            if opts.verbose {
                 eprint!("Flag attribute '{}' does not occur in the network.\n", name);
                 /* fflush(stderr) */
             }
@@ -125,25 +126,31 @@ pub fn flag_eliminate(net: Box<Fsm>, name: Option<&str>) -> Box<Fsm> {
                     ffl.value.as_deref(),
                 );
                 if fstatus == FAIL {
-                    fail_flags = Some(fsm_minimize(fsm_union(
-                        fail_flags.take().unwrap(),
-                        flag_create_symbol(
-                            ffl.r#type,
-                            ffl.name.as_deref().unwrap(),
-                            ffl.value.as_deref(),
+                    fail_flags = Some(fsm_minimize(
+                        opts,
+                        fsm_union(
+                            fail_flags.take().unwrap(),
+                            flag_create_symbol(
+                                ffl.r#type,
+                                ffl.name.as_deref().unwrap(),
+                                ffl.value.as_deref(),
+                            ),
                         ),
-                    )));
+                    ));
                     flag = 1;
                 }
                 if fstatus == SUCCEED {
-                    succeed_flags = Some(fsm_minimize(fsm_union(
-                        succeed_flags.take().unwrap(),
-                        flag_create_symbol(
-                            ffl.r#type,
-                            ffl.name.as_deref().unwrap(),
-                            ffl.value.as_deref(),
+                    succeed_flags = Some(fsm_minimize(
+                        opts,
+                        fsm_union(
+                            succeed_flags.take().unwrap(),
+                            flag_create_symbol(
+                                ffl.r#type,
+                                ffl.name.as_deref().unwrap(),
+                                ffl.value.as_deref(),
+                            ),
                         ),
-                    )));
+                    ));
                     flag = 1;
                 }
                 ff = ffl.next.as_deref();
@@ -152,26 +159,45 @@ pub fn flag_eliminate(net: Box<Fsm>, name: Option<&str>) -> Box<Fsm> {
 
         if flag != 0 {
             let newfilter = if fl.r#type == FLAG_REQUIRE {
-                fsm_complement(fsm_concat(
-                    fsm_optionality(fsm_concat(fsm_universal(), fail_flags.take().unwrap())),
+                fsm_complement(
+                    opts,
                     fsm_concat(
-                        fsm_complement(fsm_contains(succeed_flags.take().unwrap())),
-                        fsm_concat(self_.take().unwrap(), fsm_universal()),
+                        opts,
+                        fsm_optionality(
+                            opts,
+                            fsm_concat(opts, fsm_universal(), fail_flags.take().unwrap()),
+                        ),
+                        fsm_concat(
+                            opts,
+                            fsm_complement(opts, fsm_contains(opts, succeed_flags.take().unwrap())),
+                            fsm_concat(opts, self_.take().unwrap(), fsm_universal()),
+                        ),
                     ),
-                ))
+                )
             } else {
-                fsm_complement(fsm_contains(fsm_concat(
-                    fail_flags.take().unwrap(),
-                    fsm_concat(
-                        fsm_complement(fsm_contains(succeed_flags.take().unwrap())),
-                        self_.take().unwrap(),
+                fsm_complement(
+                    opts,
+                    fsm_contains(
+                        opts,
+                        fsm_concat(
+                            opts,
+                            fail_flags.take().unwrap(),
+                            fsm_concat(
+                                opts,
+                                fsm_complement(
+                                    opts,
+                                    fsm_contains(opts, succeed_flags.take().unwrap()),
+                                ),
+                                self_.take().unwrap(),
+                            ),
+                        ),
                     ),
-                )))
+                )
             };
 
             filter = Some(match filter.take() {
                 None => newfilter,
-                Some(filter) => fsm_intersect(filter, newfilter),
+                Some(filter) => fsm_intersect(opts, filter, newfilter),
             });
         }
         flag = 0;
@@ -179,13 +205,17 @@ pub fn flag_eliminate(net: Box<Fsm>, name: Option<&str>) -> Box<Fsm> {
     }
 
     let newnet = if let Some(mut filter) = filter {
-        let old_g_flag_is_epsilon = G_FLAG_IS_EPSILON.with(|c| c.get());
-        G_FLAG_IS_EPSILON.with(|c| c.set(0));
+        /* C saved g_flag_is_epsilon, forced it to 0 around the two composes,
+        and restored it; here the composes get an option copy with it off. */
+        let compose_opts = FomaOptions {
+            flag_is_epsilon: false,
+            ..opts.clone()
+        };
         let newnet = fsm_compose(
+            &compose_opts,
             fsm_copy(&mut filter),
-            fsm_compose(net, fsm_copy(&mut filter)),
+            fsm_compose(&compose_opts, net, fsm_copy(&mut filter)),
         );
-        G_FLAG_IS_EPSILON.with(|c| c.set(old_g_flag_is_epsilon));
         /* the filter itself is never destroyed in C (leak); dropped here */
         newnet
     } else {
@@ -194,7 +224,7 @@ pub fn flag_eliminate(net: Box<Fsm>, name: Option<&str>) -> Box<Fsm> {
 
     let mut newnet = newnet;
     flag_purge(&mut newnet, name);
-    let mut newnet = fsm_minimize(newnet);
+    let mut newnet = fsm_minimize(opts, newnet);
     sigma_cleanup(&mut newnet, 0);
     sigma_sort(&mut newnet);
     /* free(flags) — C frees only the list head (remaining nodes and their
@@ -645,7 +675,7 @@ pub fn flag_get_value(string: &str) -> Option<String> {
 // [spec:foma:sem:flags.flag-twosided-fn]
 // [spec:foma:def:fomalib.flag-twosided-fn]
 // [spec:foma:sem:fomalib.flag-twosided-fn]
-pub fn flag_twosided(mut net: Box<Fsm>) -> Box<Fsm> {
+pub fn flag_twosided(opts: &FomaOptions, mut net: Box<Fsm>) -> Box<Fsm> {
     /* Enforces twosided flag diacritics */
 
     /* Mark flag symbols */
@@ -699,7 +729,7 @@ pub fn flag_twosided(mut net: Box<Fsm>) -> Box<Fsm> {
             net.is_deterministic = UNK;
             net.is_minimized = UNK;
             net.is_pruned = UNK;
-            return fsm_topsort(fsm_minimize(net));
+            return fsm_topsort(fsm_minimize(opts, net));
         }
         return net;
     }
@@ -776,7 +806,7 @@ pub fn flag_twosided(mut net: Box<Fsm>) -> Box<Fsm> {
     add_fsm_arc(&mut net.states, j, -1, -1, -1, -1, -1, -1);
     net.is_deterministic = UNK;
     net.is_minimized = UNK;
-    fsm_topsort(fsm_minimize(net))
+    fsm_topsort(fsm_minimize(opts, net))
 }
 
 #[cfg(test)]
@@ -1037,7 +1067,8 @@ mod tests {
     // [spec:foma:sem:flags.flag-extract-fn/test]
     #[test]
     fn flag_extract_from_sigma() {
-        let net = fsm_parse_regex(r#""@U.F.1@" a "@R.G@""#, None, None).unwrap();
+        let opts = &FomaOptions::default();
+        let net = fsm_parse_regex(opts, r#""@U.F.1@" a "@R.G@""#, None, None).unwrap();
         let flags = flag_extract(&net);
         /* Collect (type, name, value) triples; non-flag "a" is excluded. */
         let mut got: Vec<(i32, Option<String>, Option<String>)> = Vec::new();
@@ -1055,15 +1086,16 @@ mod tests {
             ]
         );
         /* A net with no flag symbols yields the empty list. */
-        let plain = fsm_parse_regex("a b c", None, None).unwrap();
+        let plain = fsm_parse_regex(opts, "a b c", None, None).unwrap();
         assert!(flag_extract(&plain).is_none());
     }
 
     // [spec:foma:sem:flags.flag-purge-fn/test]
     #[test]
     fn flag_purge_targeted() {
+        let opts = &FomaOptions::default();
         /* Purge only attribute F; G survives. */
-        let mut net = fsm_parse_regex(r#""@U.F.1@" a "@U.G.1@""#, None, None).unwrap();
+        let mut net = fsm_parse_regex(opts, r#""@U.F.1@" a "@U.G.1@""#, None, None).unwrap();
         flag_purge(&mut net, Some("F"));
         let syms = sigma_syms(&net);
         assert!(
@@ -1080,7 +1112,7 @@ mod tests {
         assert_eq!(net.is_epsilon_free, NO);
 
         /* name == None purges every flag. */
-        let mut net2 = fsm_parse_regex(r#""@U.F.1@" a "@U.G.1@""#, None, None).unwrap();
+        let mut net2 = fsm_parse_regex(opts, r#""@U.F.1@" a "@U.G.1@""#, None, None).unwrap();
         flag_purge(&mut net2, None);
         let syms2 = sigma_syms(&net2);
         assert!(!syms2.contains(&"@U.F.1@".to_string()));
@@ -1092,14 +1124,15 @@ mod tests {
     // [spec:foma:sem:fomalib.flag-eliminate-fn+1/test]
     #[test]
     fn flag_eliminate_end_to_end() {
+        let opts = &FomaOptions::default();
         /* U/R/D flags. Surviving paths (verified against C foma):
         @P.F.1@ a @U.F.1@ -> "a" (U unify equal), the @P.F.2@ b @U.F.1@ path
         fails (U unify unequal); @P.G.1@ c @R.G@ -> "c" (R require satisfied),
         d @R.G@ fails (nothing set G); e @D.H@ -> "e" (D disallow, H unset),
         @P.H.1@ f @D.H@ fails (D disallow but H set). */
         let src = r#"["@P.F.1@" a "@U.F.1@"] | ["@P.F.2@" b "@U.F.1@"] | ["@P.G.1@" c "@R.G@"] | [d "@R.G@"] | [e "@D.H@"] | ["@P.H.1@" f "@D.H@"]"#;
-        let net = fsm_parse_regex(src, None, None).unwrap();
-        let result = flag_eliminate(net, None);
+        let net = fsm_parse_regex(opts, src, None, None).unwrap();
+        let result = flag_eliminate(opts, net, None);
         /* Wave 4 fix (`&` type mask): the body now runs only for U/R/D/E flags.
         Because flag_build already classified nothing for the other types, the
         observable flag-filtered language is identical to the pre-fix behavior. */
@@ -1111,12 +1144,13 @@ mod tests {
 
         /* Eliminating a single named attribute leaves the other flags' effect. */
         let net2 = fsm_parse_regex(
+            opts,
             r#"["@P.F.1@" a "@U.F.1@"] | ["@P.F.2@" b "@U.F.1@"]"#,
             None,
             None,
         )
         .unwrap();
-        let result2 = flag_eliminate(net2, Some("F"));
+        let result2 = flag_eliminate(opts, net2, Some("F"));
         assert_eq!(all_words(&result2), vec!["a"]);
     }
 
@@ -1124,10 +1158,11 @@ mod tests {
     // [spec:foma:sem:fomalib.flag-twosided-fn/test]
     #[test]
     fn flag_twosided_arc_split() {
+        let opts = &FomaOptions::default();
         /* Pure repair: a flag:epsilon arc gains the flag on the output tape
         (newarcs == 0, change == 1). */
-        let net = fsm_parse_regex(r#""@U.F.1@":0"#, None, None).unwrap();
-        let net = flag_twosided(net);
+        let net = fsm_parse_regex(opts, r#""@U.F.1@":0"#, None, None).unwrap();
+        let net = flag_twosided(opts, net);
         assert_eq!(
             arc_labels(&net),
             vec![("@U.F.1@".to_string(), "@U.F.1@".to_string())]
@@ -1135,8 +1170,8 @@ mod tests {
 
         /* Arc splitting: flag:real (in is a flag, out a real symbol, in != out)
         splits into flag:flag then epsilon:real via a fresh intermediate state. */
-        let net = fsm_parse_regex(r#""@U.F.1@":a"#, None, None).unwrap();
-        let net = flag_twosided(net);
+        let net = fsm_parse_regex(opts, r#""@U.F.1@":a"#, None, None).unwrap();
+        let net = flag_twosided(opts, net);
         assert_eq!(
             arc_labels(&net),
             vec![

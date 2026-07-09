@@ -941,8 +941,15 @@ pub fn iface_help() {
 // [spec:foma:sem:foma.iface-apropos-fn]
 pub fn iface_apropos(s: &str) {
     // strstr(x, s) != NULL ↔ x contains s as a substring
-    let matches = || GLOBAL_HELP.iter().filter(|gh| gh.name.contains(s) || gh.help.contains(s));
-    let maxlen = matches().map(|gh| gh.name.chars().count()).max().unwrap_or(0);
+    let matches = || {
+        GLOBAL_HELP
+            .iter()
+            .filter(|gh| gh.name.contains(s) || gh.help.contains(s))
+    };
+    let maxlen = matches()
+        .map(|gh| gh.name.chars().count())
+        .max()
+        .unwrap_or(0);
     for gh in matches() {
         let pad = " ".repeat(maxlen + 1 - gh.name.chars().count());
         print!("{}{}{}\n", gh.name, pad, gh.help);
@@ -1022,7 +1029,7 @@ pub fn iface_print_net(session: &mut Session, netname: Option<&str>, filename: O
                 }
             });
             if !found {
-                if G_VERBOSE.with(|v| v.get()) != 0 {
+                if session.opts.verbose {
                     eprint!("No defined network {}.\n", netname);
                     // fflush(stderr) — stderr is unbuffered
                 }

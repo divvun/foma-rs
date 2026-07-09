@@ -31,7 +31,7 @@ use crate::apply::{apply_clear, apply_init};
 use crate::constructions::fsm_count;
 use crate::dynarray::rand;
 use crate::iface::print_stats;
-use crate::mem::G_VERBOSE;
+use crate::options::FomaOptions;
 use crate::session::Session;
 use crate::spelling::{apply_med_clear, apply_med_init, apply_med_set_align_symbol};
 use crate::structures::fsm_destroy;
@@ -130,12 +130,61 @@ impl Session {
             .expect("stack entry has no fsm"))
     }
 
+    /// Like `stack_entry_fsm`, but also lends the session options — for library
+    /// calls needing both (`f(&opts, &mut fsm)`), which a `&session.opts` borrow
+    /// inside a `stack_entry_fsm` closure would otherwise conflict with.
+    pub fn stack_entry_fsm_with_opts<R>(
+        &mut self,
+        index: usize,
+        f: impl FnOnce(&FomaOptions, &mut Fsm) -> R,
+    ) -> R {
+        f(
+            &self.opts,
+            self.stack_arena[index]
+                .fsm
+                .as_deref_mut()
+                .expect("stack entry has no fsm"),
+        )
+    }
+
     /// Run `f` on the apply handle owned by the entry at `index` (C: `entry->ah`).
     pub fn stack_entry_ah<R>(&mut self, index: usize, f: impl FnOnce(&mut ApplyHandle) -> R) -> R {
         f(self.stack_arena[index]
             .ah
             .as_deref_mut()
             .expect("stack entry has no ah"))
+    }
+
+    /// Like `stack_entry_ah`, but also lends the session options (see
+    /// `stack_entry_fsm_with_opts`).
+    pub fn stack_entry_ah_with_opts<R>(
+        &mut self,
+        index: usize,
+        f: impl FnOnce(&FomaOptions, &mut ApplyHandle) -> R,
+    ) -> R {
+        f(
+            &self.opts,
+            self.stack_arena[index]
+                .ah
+                .as_deref_mut()
+                .expect("stack entry has no ah"),
+        )
+    }
+
+    /// Like `stack_entry_amedh`, but also lends the session options (see
+    /// `stack_entry_fsm_with_opts`).
+    pub fn stack_entry_amedh_with_opts<R>(
+        &mut self,
+        index: usize,
+        f: impl FnOnce(&FomaOptions, &mut ApplyMedHandle) -> R,
+    ) -> R {
+        f(
+            &self.opts,
+            self.stack_arena[index]
+                .amedh
+                .as_deref_mut()
+                .expect("stack entry has no amedh"),
+        )
     }
 
     /// Read the `next` pointer of the entry at `index` (C: `entry->next`), so the
@@ -215,7 +264,7 @@ impl Session {
         self.stack_arena[stack_ptr].amedh = None;
         self.stack_arena[stack_ptr].number = i;
         self.stack_arena[stack_ptr].previous = stack_ptr_previous;
-        if G_VERBOSE.with(|v| v.get()) != 0 {
+        if self.opts.verbose {
             print_stats(self.stack_arena[stack_ptr].fsm.as_deref().unwrap());
         }
         self.e_number(stack_ptr)
@@ -682,7 +731,10 @@ mod tests {
         assert_eq!(bottom_fsm_name(&mut session), "topnet");
         assert_eq!(top_fsm_name(&mut session), "bottomnet");
         let second = session.stack_find_second().unwrap();
-        assert_eq!(session.stack_entry_fsm(second, |f| f.name.clone()), "midnet");
+        assert_eq!(
+            session.stack_entry_fsm(second, |f| f.name.clone()),
+            "midnet"
+        );
         // Numbers are NOT swapped...
         assert_eq!(session.e_number(session.stack_find_bottom().unwrap()), 0);
         assert_eq!(session.e_number(session.stack_find_top().unwrap()), 2);
@@ -749,7 +801,10 @@ mod tests {
         assert_eq!(bottom_fsm_name(&mut session), "third");
         assert_eq!(top_fsm_name(&mut session), "first");
         let second = session.stack_find_second().unwrap();
-        assert_eq!(session.stack_entry_fsm(second, |f| f.name.clone()), "second");
+        assert_eq!(
+            session.stack_entry_fsm(second, |f| f.name.clone()),
+            "second"
+        );
         // Entries travel with their own number (not renumbered): the new bottom
         // carries the former top's number 2, the new top the former bottom's 0.
         assert_eq!(session.e_number(session.stack_find_bottom().unwrap()), 2);

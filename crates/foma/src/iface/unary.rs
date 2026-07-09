@@ -9,7 +9,7 @@ use super::*;
 pub fn iface_ambiguous_upper(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let popped = session.stack_pop().unwrap();
-        session.stack_add(fsm_extract_ambiguous_domain(popped));
+        session.stack_add(fsm_extract_ambiguous_domain(&session.opts, popped));
     }
 }
 
@@ -20,7 +20,10 @@ pub fn iface_ambiguous_upper(session: &mut Session) {
 pub fn iface_close(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let popped = session.stack_pop().unwrap();
-        session.stack_add(fsm_topsort(fsm_minimize(fsm_close_sigma(popped, 0))));
+        session.stack_add(fsm_topsort(fsm_minimize(
+            &session.opts,
+            fsm_close_sigma(&session.opts, popped, 0),
+        )));
     }
 }
 
@@ -34,7 +37,7 @@ pub fn iface_compact(session: &mut Session) {
         session.stack_entry_fsm(top, |f| fsm_compact(f));
         session.stack_entry_fsm(top, |f| sigma_sort(f));
         let popped = session.stack_pop().unwrap();
-        session.stack_add(fsm_topsort(fsm_minimize(popped)));
+        session.stack_add(fsm_topsort(fsm_minimize(&session.opts, popped)));
     }
 }
 
@@ -45,7 +48,7 @@ pub fn iface_compact(session: &mut Session) {
 pub fn iface_complete(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let popped = session.stack_pop().unwrap();
-        session.stack_add(fsm_complete(popped));
+        session.stack_add(fsm_complete(&session.opts, popped));
     }
 }
 
@@ -67,7 +70,7 @@ pub fn iface_determinize(session: &mut Session) {
 pub fn iface_eliminate_flags(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let popped = session.stack_pop().unwrap();
-        session.stack_add(flag_eliminate(popped, None));
+        session.stack_add(flag_eliminate(&session.opts, popped, None));
     }
 }
 
@@ -78,7 +81,7 @@ pub fn iface_eliminate_flags(session: &mut Session) {
 pub fn iface_extract_ambiguous(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let popped = session.stack_pop().unwrap();
-        session.stack_add(fsm_extract_ambiguous(popped));
+        session.stack_add(fsm_extract_ambiguous(&session.opts, popped));
     }
 }
 
@@ -89,7 +92,7 @@ pub fn iface_extract_ambiguous(session: &mut Session) {
 pub fn iface_extract_unambiguous(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let popped = session.stack_pop().unwrap();
-        session.stack_add(fsm_extract_unambiguous(popped));
+        session.stack_add(fsm_extract_unambiguous(&session.opts, popped));
     }
 }
 
@@ -144,7 +147,7 @@ pub fn iface_extract_number(s: &str) -> i32 {
 pub fn iface_eliminate_flag(session: &mut Session, name: &str) {
     if iface_stack_check(session, 1) != 0 {
         let popped = session.stack_pop().unwrap();
-        session.stack_add(flag_eliminate(popped, Some(name)));
+        session.stack_add(flag_eliminate(&session.opts, popped, Some(name)));
     }
 }
 
@@ -199,7 +202,10 @@ pub fn iface_label_net(session: &mut Session) {
 pub fn iface_letter_machine(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let popped = session.stack_pop().unwrap();
-        session.stack_add(fsm_topsort(fsm_minimize(fsm_letter_machine(popped))));
+        session.stack_add(fsm_topsort(fsm_minimize(
+            &session.opts,
+            fsm_letter_machine(&session.opts, popped),
+        )));
     }
 }
 
@@ -210,7 +216,7 @@ pub fn iface_letter_machine(session: &mut Session) {
 pub fn iface_lower_side(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let popped = session.stack_pop().unwrap();
-        session.stack_add(fsm_topsort(fsm_minimize(fsm_lower(popped))));
+        session.stack_add(fsm_topsort(fsm_minimize(&session.opts, fsm_lower(popped))));
     }
 }
 
@@ -220,11 +226,11 @@ pub fn iface_lower_side(session: &mut Session) {
 // [spec:foma:sem:foma.iface-minimize-fn]
 pub fn iface_minimize(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
-        let store_minimal_var = G_MINIMAL.with(|v| v.get());
-        G_MINIMAL.with(|v| v.set(1));
+        let store_minimal_var = session.opts.minimal;
+        session.opts.minimal = true;
         let popped = session.stack_pop().unwrap();
-        session.stack_add(fsm_topsort(fsm_minimize(popped)));
-        G_MINIMAL.with(|v| v.set(store_minimal_var));
+        session.stack_add(fsm_topsort(fsm_minimize(&session.opts, popped)));
+        session.opts.minimal = store_minimal_var;
     }
 }
 
@@ -235,7 +241,10 @@ pub fn iface_minimize(session: &mut Session) {
 pub fn iface_one_plus(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let popped = session.stack_pop().unwrap();
-        session.stack_add(fsm_topsort(fsm_minimize(fsm_kleene_plus(popped))));
+        session.stack_add(fsm_topsort(fsm_minimize(
+            &session.opts,
+            fsm_kleene_plus(&session.opts, popped),
+        )));
     }
 }
 
@@ -246,7 +255,10 @@ pub fn iface_one_plus(session: &mut Session) {
 pub fn iface_negate(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let popped = session.stack_pop().unwrap();
-        session.stack_add(fsm_topsort(fsm_minimize(fsm_complement(popped))));
+        session.stack_add(fsm_topsort(fsm_minimize(
+            &session.opts,
+            fsm_complement(&session.opts, popped),
+        )));
     }
 }
 
@@ -325,7 +337,7 @@ pub fn iface_sort(session: &mut Session) {
 pub fn iface_twosided_flags(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let popped = session.stack_pop().unwrap();
-        session.stack_add(flag_twosided(popped));
+        session.stack_add(flag_twosided(&session.opts, popped));
     }
 }
 
@@ -336,7 +348,7 @@ pub fn iface_twosided_flags(session: &mut Session) {
 pub fn iface_upper_side(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let popped = session.stack_pop().unwrap();
-        session.stack_add(fsm_topsort(fsm_minimize(fsm_upper(popped))));
+        session.stack_add(fsm_topsort(fsm_minimize(&session.opts, fsm_upper(popped))));
     }
 }
 
@@ -347,6 +359,9 @@ pub fn iface_upper_side(session: &mut Session) {
 pub fn iface_zero_plus(session: &mut Session) {
     if iface_stack_check(session, 1) != 0 {
         let popped = session.stack_pop().unwrap();
-        session.stack_add(fsm_topsort(fsm_minimize(fsm_kleene_star(popped))));
+        session.stack_add(fsm_topsort(fsm_minimize(
+            &session.opts,
+            fsm_kleene_star(&session.opts, popped),
+        )));
     }
 }

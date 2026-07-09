@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 
 use crate::constructions::fsm_count;
-use crate::mem::G_VERBOSE;
+use crate::options::FomaOptions;
 use crate::structures::fsm_destroy;
 use crate::types::{DefinedFunctions, DefinedNetworks, FSM_NAME_LEN, Fsm};
 
@@ -179,6 +179,7 @@ pub fn find_defined_function<'a>(
 // [spec:foma:def:fomalib.add-defined-function-fn]
 // [spec:foma:sem:fomalib.add-defined-function-fn]
 pub fn add_defined_function(
+    opts: &FomaOptions,
     deff: &mut DefinedFunctions,
     name: &str,
     regex: &str,
@@ -189,7 +190,7 @@ pub fn add_defined_function(
         if node.name.as_deref() == Some(name) && node.numargs == numargs {
             /* free(d->regex); d->regex = strdup(regex) */
             node.regex = Some(regex.to_string());
-            if G_VERBOSE.with(|v| v.get()) != 0 {
+            if opts.verbose {
                 /* literal C message, including the unbalanced trailing ')' */
                 eprint!("redefined {}@{})\n", name, numargs);
                 /* fflush(stderr) — stderr is unbuffered */
@@ -401,10 +402,11 @@ mod tests {
     // [spec:foma:sem:fomalib.find-defined-function-fn/test]
     #[test]
     fn add_find_defined_functions() {
+        let opts = &FomaOptions::default();
         let mut deff = defined_functions_init();
         /* (name, numargs) is the key: same name, different arity is a new node. */
-        assert_eq!(add_defined_function(&mut deff, "@f", "a b", 2), 0);
-        assert_eq!(add_defined_function(&mut deff, "@f", "c d", 1), 0);
+        assert_eq!(add_defined_function(opts, &mut deff, "@f", "a b", 2), 0);
+        assert_eq!(add_defined_function(opts, &mut deff, "@f", "c d", 1), 0);
         assert_eq!(find_defined_function(&deff, "@f", 2), Some("a b"));
         assert_eq!(find_defined_function(&deff, "@f", 1), Some("c d"));
         /* Arity mismatch / unknown name are not found. */
@@ -414,9 +416,7 @@ mod tests {
         /* Redefinition (same name+numargs) replaces the regex and returns 1.
         Drive the g_verbose "redefined %s@%i)" message path (stderr, not
         asserted here). */
-        crate::mem::G_VERBOSE.with(|v| v.set(1));
-        assert_eq!(add_defined_function(&mut deff, "@f", "x y", 2), 1);
-        crate::mem::G_VERBOSE.with(|v| v.set(0));
+        assert_eq!(add_defined_function(opts, &mut deff, "@f", "x y", 2), 1);
         assert_eq!(find_defined_function(&deff, "@f", 2), Some("x y"));
         /* The arity-1 overload is untouched. */
         assert_eq!(find_defined_function(&deff, "@f", 1), Some("c d"));

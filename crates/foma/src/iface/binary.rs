@@ -11,7 +11,10 @@ pub fn iface_compose(session: &mut Session) {
         while session.stack_size() > 1 {
             let one = session.stack_pop().unwrap();
             let two = session.stack_pop().unwrap();
-            session.stack_add(fsm_topsort(fsm_minimize(fsm_compose(one, two))));
+            session.stack_add(fsm_topsort(fsm_minimize(
+                &session.opts,
+                fsm_compose(&session.opts, one, two),
+            )));
         }
     }
 }
@@ -26,7 +29,10 @@ pub fn iface_conc(session: &mut Session) {
             // Wave 4 fix: the C left a stray debug printf("dd") here — deleted.
             let one = session.stack_pop().unwrap();
             let two = session.stack_pop().unwrap();
-            session.stack_add(fsm_topsort(fsm_minimize(fsm_concat(one, two))));
+            session.stack_add(fsm_topsort(fsm_minimize(
+                &session.opts,
+                fsm_concat(&session.opts, one, two),
+            )));
         }
     }
 }
@@ -39,7 +45,10 @@ pub fn iface_crossproduct(session: &mut Session) {
     if iface_stack_check(session, 2) != 0 {
         let one = session.stack_pop().unwrap();
         let two = session.stack_pop().unwrap();
-        session.stack_add(fsm_topsort(fsm_minimize(fsm_cross_product(one, two))));
+        session.stack_add(fsm_topsort(fsm_minimize(
+            &session.opts,
+            fsm_cross_product(&session.opts, one, two),
+        )));
     }
 }
 
@@ -51,11 +60,10 @@ pub fn iface_ignore(session: &mut Session) {
     if iface_stack_check(session, 2) != 0 {
         let one = session.stack_pop().unwrap();
         let two = session.stack_pop().unwrap();
-        session.stack_add(fsm_topsort(fsm_minimize(fsm_ignore(
-            one,
-            two,
-            OP_IGNORE_ALL,
-        ))));
+        session.stack_add(fsm_topsort(fsm_minimize(
+            &session.opts,
+            fsm_ignore(&session.opts, one, two, OP_IGNORE_ALL),
+        )));
     }
 }
 
@@ -71,7 +79,10 @@ pub fn iface_intersect(session: &mut Session) {
             // left-to-right. Intersection is commutative, so the language matches.
             let a = session.stack_pop().unwrap();
             let b = session.stack_pop().unwrap();
-            session.stack_add(fsm_topsort(fsm_minimize(fsm_intersect(a, b))));
+            session.stack_add(fsm_topsort(fsm_minimize(
+                &session.opts,
+                fsm_intersect(&session.opts, a, b),
+            )));
         }
     }
 }
@@ -92,11 +103,10 @@ pub fn iface_substitute_symbol(session: &mut Session, original: &str, substitute
         let original = String::from_utf8_lossy(&original).into_owned();
         let substitute = String::from_utf8_lossy(&substitute).into_owned();
         let popped = session.stack_pop().unwrap();
-        session.stack_add(fsm_topsort(fsm_minimize(fsm_substitute_symbol(
-            popped,
-            &original,
-            &substitute,
-        ))));
+        session.stack_add(fsm_topsort(fsm_minimize(
+            &session.opts,
+            fsm_substitute_symbol(popped, &original, &substitute),
+        )));
         print!("Substituted '{}' for '{}'.\n", substitute, original);
     }
 }
@@ -133,13 +143,14 @@ pub fn iface_substitute_defined(session: &mut Session, original: &str, substitut
                     {
                         print!("Symbol '{}' does not occur.\n", original);
                     } else {
-                        let newnet = session
-                            .stack_entry_fsm(top, |f| fsm_substitute_label(f, &original, subnet));
+                        let newnet = session.stack_entry_fsm_with_opts(top, |opts, f| {
+                            fsm_substitute_label(opts, f, &original, subnet)
+                        });
                         // C: stack_pop() — the popped net is NOT fsm_destroy'd (latent
                         // leak); here the returned Box is dropped (freed) instead.
                         let _ = session.stack_pop();
                         print!("Substituted network '{}' for '{}'.\n", substitute, original);
-                        session.stack_add(fsm_topsort(fsm_minimize(newnet)));
+                        session.stack_add(fsm_topsort(fsm_minimize(&session.opts, newnet)));
                     }
                 }
             }
@@ -159,7 +170,10 @@ pub fn iface_shuffle(session: &mut Session) {
             // commutative, so the resulting language is the same.
             let a = session.stack_pop().unwrap();
             let b = session.stack_pop().unwrap();
-            session.stack_add(fsm_minimize(fsm_shuffle(a, b)));
+            session.stack_add(fsm_minimize(
+                &session.opts,
+                fsm_shuffle(&session.opts, a, b),
+            ));
         }
     }
 }
@@ -175,7 +189,7 @@ pub fn iface_union(session: &mut Session) {
             // order unspecified); union is commutative. Minimized, NOT topsorted.
             let a = session.stack_pop().unwrap();
             let b = session.stack_pop().unwrap();
-            session.stack_add(fsm_minimize(fsm_union(a, b)));
+            session.stack_add(fsm_minimize(&session.opts, fsm_union(a, b)));
         }
     }
 }

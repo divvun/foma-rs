@@ -15,6 +15,7 @@ use crate::constructions::{
 };
 use crate::extract::{fsm_lower, fsm_upper};
 use crate::minimize::fsm_minimize;
+use crate::options::FomaOptions;
 use crate::regex::fsm_parse_regex;
 use crate::sigma::{sigma_add, sigma_find, sigma_remove, sigma_sort, sigma_substitute};
 use crate::structures::{fsm_copy, fsm_destroy, fsm_empty_set, fsm_empty_string, fsm_identity};
@@ -85,7 +86,7 @@ pub static SPECIALSYMBOLS: [&str; 8] =
 // [spec:foma:sem:rewrite.fsm-rewrite-fn]
 // [spec:foma:def:fomalib.fsm-rewrite-fn]
 // [spec:foma:sem:fomalib.fsm-rewrite-fn]
-pub fn fsm_rewrite(all_rules: &mut RewriteSet) -> Box<Fsm> {
+pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
     let mut num_rules: i32;
     let mut rule_number: i32;
     let mut dir: i32;
@@ -125,18 +126,24 @@ pub fn fsm_rewrite(all_rules: &mut RewriteSet) -> Box<Fsm> {
         i += 1;
     }
 
-    rb.isyms = Some(fsm_minimize(fsm_union(
-        fsm_symbol("@I@"),
+    rb.isyms = Some(fsm_minimize(
+        opts,
         fsm_union(
-            fsm_symbol("@I[]@"),
-            fsm_union(fsm_symbol("@I[@"), fsm_symbol("@I]@")),
+            fsm_symbol("@I@"),
+            fsm_union(
+                fsm_symbol("@I[]@"),
+                fsm_union(fsm_symbol("@I[@"), fsm_symbol("@I]@")),
+            ),
         ),
-    )));
+    ));
     rb.rulenames = Some(fsm_empty_set());
     i = 1;
     while i <= num_rules {
         let sym = fsm_symbol(&rb.namestrings[(i - 1) as usize]);
-        rb.rulenames = Some(fsm_minimize(fsm_union(rb.rulenames.take().unwrap(), sym)));
+        rb.rulenames = Some(fsm_minimize(
+            opts,
+            fsm_union(rb.rulenames.take().unwrap(), sym),
+        ));
         i += 1;
     }
     rb.any = Some(fsm_identity());
@@ -180,13 +187,13 @@ pub fn fsm_rewrite(all_rules: &mut RewriteSet) -> Box<Fsm> {
                 if r.right.is_none() {
                     /* T(x)-type rule */
                     let left_copy = fsm_copy(r.left.as_deref_mut().unwrap());
-                    let mut cp_new = rewrite_cp_transducer(&mut rb, left_copy, rule_number);
+                    let mut cp_new = rewrite_cp_transducer(opts, &mut rb, left_copy, rule_number);
                     r.cross_product = Some(fsm_copy(&mut cp_new));
                     let left_copy = fsm_copy(r.left.as_deref_mut().unwrap());
-                    r.right = Some(fsm_minimize(fsm_lower(left_copy)));
+                    r.right = Some(fsm_minimize(opts, fsm_lower(left_copy)));
                     let left_copy = fsm_copy(r.left.as_deref_mut().unwrap());
                     /* replace the center with its upper side (old center dropped) */
-                    r.left = Some(fsm_minimize(fsm_upper(left_copy)));
+                    r.left = Some(fsm_minimize(opts, fsm_upper(left_copy)));
                     rewrite_add_special_syms(&rb, r.right.as_deref_mut());
                     rewrite_add_special_syms(&rb, r.left.as_deref_mut());
                     cp = cp_new;
@@ -194,7 +201,7 @@ pub fn fsm_rewrite(all_rules: &mut RewriteSet) -> Box<Fsm> {
                     /* Regular rewrite rule */
                     let left_copy = fsm_copy(r.left.as_deref_mut().unwrap());
                     let right_copy = fsm_copy(r.right.as_deref_mut().unwrap());
-                    let mut cp_new = rewrite_cp(&mut rb, left_copy, right_copy, rule_number);
+                    let mut cp_new = rewrite_cp(opts, &mut rb, left_copy, right_copy, rule_number);
                     r.cross_product = Some(fsm_copy(&mut cp_new));
                     cp = cp_new;
                 } else {
@@ -202,12 +209,18 @@ pub fn fsm_rewrite(all_rules: &mut RewriteSet) -> Box<Fsm> {
                     let left_copy = fsm_copy(r.left.as_deref_mut().unwrap());
                     let right_copy = fsm_copy(r.right.as_deref_mut().unwrap());
                     let right2_copy = fsm_copy(r.right2.as_deref_mut().unwrap());
-                    let mut cp_new =
-                        rewrite_cp_markup(&mut rb, left_copy, right_copy, right2_copy, rule_number);
+                    let mut cp_new = rewrite_cp_markup(
+                        opts,
+                        &mut rb,
+                        left_copy,
+                        right_copy,
+                        right2_copy,
+                        rule_number,
+                    );
                     r.cross_product = Some(fsm_copy(&mut cp_new));
                     cp = cp_new;
                 }
-                rule_cp = fsm_minimize(fsm_union(rule_cp, cp));
+                rule_cp = fsm_minimize(opts, fsm_union(rule_cp, cp));
                 rule_number += 1;
                 rules = r.next.as_deref_mut();
             }
@@ -216,19 +229,33 @@ pub fn fsm_rewrite(all_rules: &mut RewriteSet) -> Box<Fsm> {
     }
 
     /* Create Base language */
-    let mut boundary = fsm_parse_regex("\"@O@\" \"@0@\" \"@#@\" \"@ID@\"", None, None).unwrap();
+    let mut boundary =
+        fsm_parse_regex(opts, "\"@O@\" \"@0@\" \"@#@\" \"@ID@\"", None, None).unwrap();
     let any_copy = fsm_copy(rb.any.as_deref_mut().unwrap());
-    let outside = fsm_minimize(fsm_concat(
-        fsm_symbol("@O@"),
-        fsm_concat(fsm_symbol("@0@"), fsm_concat(any_copy, fsm_symbol("@ID@"))),
-    ));
-    let mut base = fsm_minimize(fsm_concat(
-        fsm_copy(&mut boundary),
+    let outside = fsm_minimize(
+        opts,
         fsm_concat(
-            fsm_kleene_star(fsm_union(rule_cp, outside)),
-            fsm_copy(&mut boundary),
+            opts,
+            fsm_symbol("@O@"),
+            fsm_concat(
+                opts,
+                fsm_symbol("@0@"),
+                fsm_concat(opts, any_copy, fsm_symbol("@ID@")),
+            ),
         ),
-    ));
+    );
+    let mut base = fsm_minimize(
+        opts,
+        fsm_concat(
+            opts,
+            fsm_copy(&mut boundary),
+            fsm_concat(
+                opts,
+                fsm_kleene_star(opts, fsm_union(rule_cp, outside)),
+                fsm_copy(&mut boundary),
+            ),
+        ),
+    );
     fsm_destroy(boundary);
     rule_number = 1;
     {
@@ -249,33 +276,33 @@ pub fn fsm_rewrite(all_rules: &mut RewriteSet) -> Box<Fsm> {
                 match dir {
                     OP_UPWARD_REPLACE => {
                         let left_copy = fsm_copy(c.left.as_deref_mut().unwrap());
-                        c.cpleft = Some(rewrite_upper(&mut rb, left_copy));
+                        c.cpleft = Some(rewrite_upper(opts, &mut rb, left_copy));
                         let right_copy = fsm_copy(c.right.as_deref_mut().unwrap());
-                        c.cpright = Some(rewrite_upper(&mut rb, right_copy));
+                        c.cpright = Some(rewrite_upper(opts, &mut rb, right_copy));
                     }
                     OP_RIGHTWARD_REPLACE => {
                         let left_copy = fsm_copy(c.left.as_deref_mut().unwrap());
-                        c.cpleft = Some(rewrite_lower(&mut rb, left_copy));
+                        c.cpleft = Some(rewrite_lower(opts, &mut rb, left_copy));
                         let right_copy = fsm_copy(c.right.as_deref_mut().unwrap());
-                        c.cpright = Some(rewrite_upper(&mut rb, right_copy));
+                        c.cpright = Some(rewrite_upper(opts, &mut rb, right_copy));
                     }
                     OP_LEFTWARD_REPLACE => {
                         let left_copy = fsm_copy(c.left.as_deref_mut().unwrap());
-                        c.cpleft = Some(rewrite_upper(&mut rb, left_copy));
+                        c.cpleft = Some(rewrite_upper(opts, &mut rb, left_copy));
                         let right_copy = fsm_copy(c.right.as_deref_mut().unwrap());
-                        c.cpright = Some(rewrite_lower(&mut rb, right_copy));
+                        c.cpright = Some(rewrite_lower(opts, &mut rb, right_copy));
                     }
                     OP_DOWNWARD_REPLACE => {
                         let left_copy = fsm_copy(c.left.as_deref_mut().unwrap());
-                        c.cpleft = Some(rewrite_lower(&mut rb, left_copy));
+                        c.cpleft = Some(rewrite_lower(opts, &mut rb, left_copy));
                         let right_copy = fsm_copy(c.right.as_deref_mut().unwrap());
-                        c.cpright = Some(rewrite_lower(&mut rb, right_copy));
+                        c.cpright = Some(rewrite_lower(opts, &mut rb, right_copy));
                     }
                     OP_TWO_LEVEL_REPLACE => {
                         let left_copy = fsm_copy(c.left.as_deref_mut().unwrap());
-                        c.cpleft = Some(rewrite_two_level(&mut rb, left_copy, 0));
+                        c.cpleft = Some(rewrite_two_level(opts, &mut rb, left_copy, 0));
                         let right_copy = fsm_copy(c.right.as_deref_mut().unwrap());
-                        c.cpright = Some(rewrite_two_level(&mut rb, right_copy, 1));
+                        c.cpright = Some(rewrite_two_level(opts, &mut rb, right_copy, 1));
                     }
                     _ => {} /* C: switch has no default */
                 }
@@ -292,36 +319,60 @@ pub fn fsm_rewrite(all_rules: &mut RewriteSet) -> Box<Fsm> {
                     /* ~[?* Center ~[EP ?*]] & ~[~[?* EP] Center ?*] */
                     let mut center = fsm_copy(r.cross_product.as_deref_mut().unwrap());
                     base = fsm_intersect(
+                        opts,
                         fsm_intersect(
+                            opts,
                             base,
-                            fsm_complement(fsm_concat(
-                                rewrite_any_4tape(&mut rb),
+                            fsm_complement(
+                                opts,
                                 fsm_concat(
-                                    fsm_copy(&mut center),
-                                    fsm_complement(fsm_concat(
-                                        rewrite_epextend(&mut rb),
-                                        rewrite_any_4tape(&mut rb),
-                                    )),
+                                    opts,
+                                    rewrite_any_4tape(opts, &mut rb),
+                                    fsm_concat(
+                                        opts,
+                                        fsm_copy(&mut center),
+                                        fsm_complement(
+                                            opts,
+                                            fsm_concat(
+                                                opts,
+                                                rewrite_epextend(opts, &mut rb),
+                                                rewrite_any_4tape(opts, &mut rb),
+                                            ),
+                                        ),
+                                    ),
                                 ),
-                            )),
+                            ),
                         ),
-                        fsm_complement(fsm_concat(
-                            fsm_complement(fsm_concat(
-                                rewrite_any_4tape(&mut rb),
-                                rewrite_epextend(&mut rb),
-                            )),
-                            fsm_concat(fsm_copy(&mut center), rewrite_any_4tape(&mut rb)),
-                        )),
+                        fsm_complement(
+                            opts,
+                            fsm_concat(
+                                opts,
+                                fsm_complement(
+                                    opts,
+                                    fsm_concat(
+                                        opts,
+                                        rewrite_any_4tape(opts, &mut rb),
+                                        rewrite_epextend(opts, &mut rb),
+                                    ),
+                                ),
+                                fsm_concat(
+                                    opts,
+                                    fsm_copy(&mut center),
+                                    rewrite_any_4tape(opts, &mut rb),
+                                ),
+                            ),
+                        ),
                     );
                     fsm_destroy(center);
                 }
                 if rewrite_contexts.is_some() {
                     let restriction = rewr_context_restrict(
+                        opts,
                         &mut rb,
                         r.cross_product.as_deref_mut().unwrap(),
                         rewrite_contexts.as_deref_mut(),
                     );
-                    base = fsm_intersect(base, restriction);
+                    base = fsm_intersect(opts, base, restriction);
                 }
                 /* Determine C (based on rule type) */
                 let mut c = fsm_empty_set();
@@ -330,8 +381,9 @@ pub fn fsm_rewrite(all_rules: &mut RewriteSet) -> Box<Fsm> {
                     c = fsm_union(
                         c,
                         rewr_unrewritten(
+                            opts,
                             &mut rb,
-                            fsm_minimize(fsm_minus(left_copy, fsm_empty_string())),
+                            fsm_minimize(opts, fsm_minus(opts, left_copy, fsm_empty_string())),
                         ),
                     );
                 }
@@ -340,72 +392,77 @@ pub fn fsm_rewrite(all_rules: &mut RewriteSet) -> Box<Fsm> {
                     c = fsm_union(
                         c,
                         rewr_unrewritten(
+                            opts,
                             &mut rb,
-                            fsm_minimize(fsm_minus(right_copy, fsm_empty_string())),
+                            fsm_minimize(opts, fsm_minus(opts, right_copy, fsm_empty_string())),
                         ),
                     );
                 }
                 if r.arrow_type & ARROW_LONGEST_MATCH != 0 {
                     if r.arrow_type & ARROW_RIGHT != 0 {
                         let left_copy = fsm_copy(r.left.as_deref_mut().unwrap());
-                        let mut lang = rewrite_upper(&mut rb, left_copy);
+                        let mut lang = rewrite_upper(opts, &mut rb, left_copy);
                         c = fsm_union(
                             c,
-                            rewr_notleftmost(&rb, &mut lang, rule_number, r.arrow_type),
+                            rewr_notleftmost(opts, &rb, &mut lang, rule_number, r.arrow_type),
                         );
                         let left_copy = fsm_copy(r.left.as_deref_mut().unwrap());
-                        let mut lang = rewrite_upper(&mut rb, left_copy);
+                        let mut lang = rewrite_upper(opts, &mut rb, left_copy);
                         c = fsm_union(
                             c,
-                            rewr_notlongest(&rb, &mut lang, rule_number, r.arrow_type),
+                            rewr_notlongest(opts, &rb, &mut lang, rule_number, r.arrow_type),
                         );
                     }
                     if r.arrow_type & ARROW_LEFT != 0 {
                         let right_copy = fsm_copy(r.right.as_deref_mut().unwrap());
-                        let mut lang = rewrite_lower(&mut rb, right_copy);
+                        let mut lang = rewrite_lower(opts, &mut rb, right_copy);
                         c = fsm_union(
                             c,
-                            rewr_notleftmost(&rb, &mut lang, rule_number, r.arrow_type),
+                            rewr_notleftmost(opts, &rb, &mut lang, rule_number, r.arrow_type),
                         );
                         let right_copy = fsm_copy(r.right.as_deref_mut().unwrap());
-                        let mut lang = rewrite_lower(&mut rb, right_copy);
+                        let mut lang = rewrite_lower(opts, &mut rb, right_copy);
                         c = fsm_union(
                             c,
-                            rewr_notlongest(&rb, &mut lang, rule_number, r.arrow_type),
+                            rewr_notlongest(opts, &rb, &mut lang, rule_number, r.arrow_type),
                         );
                     }
                 }
                 if r.arrow_type & ARROW_SHORTEST_MATCH != 0 {
                     if r.arrow_type & ARROW_RIGHT != 0 {
                         let left_copy = fsm_copy(r.left.as_deref_mut().unwrap());
-                        let mut lang = rewrite_upper(&mut rb, left_copy);
+                        let mut lang = rewrite_upper(opts, &mut rb, left_copy);
                         c = fsm_union(
                             c,
-                            rewr_notleftmost(&rb, &mut lang, rule_number, r.arrow_type),
+                            rewr_notleftmost(opts, &rb, &mut lang, rule_number, r.arrow_type),
                         );
                         let left_copy = fsm_copy(r.left.as_deref_mut().unwrap());
-                        let mut lang = rewrite_upper(&mut rb, left_copy);
-                        c = fsm_union(c, rewr_notshortest(&rb, &mut lang, rule_number));
+                        let mut lang = rewrite_upper(opts, &mut rb, left_copy);
+                        c = fsm_union(c, rewr_notshortest(opts, &rb, &mut lang, rule_number));
                     }
                     if r.arrow_type & ARROW_LEFT != 0 {
                         let right_copy = fsm_copy(r.right.as_deref_mut().unwrap());
-                        let mut lang = rewrite_lower(&mut rb, right_copy);
+                        let mut lang = rewrite_lower(opts, &mut rb, right_copy);
                         c = fsm_union(
                             c,
-                            rewr_notleftmost(&rb, &mut lang, rule_number, r.arrow_type),
+                            rewr_notleftmost(opts, &rb, &mut lang, rule_number, r.arrow_type),
                         );
                         let right_copy = fsm_copy(r.right.as_deref_mut().unwrap());
-                        let mut lang = rewrite_lower(&mut rb, right_copy);
-                        c = fsm_union(c, rewr_notshortest(&rb, &mut lang, rule_number));
+                        let mut lang = rewrite_lower(opts, &mut rb, right_copy);
+                        c = fsm_union(c, rewr_notshortest(opts, &rb, &mut lang, rule_number));
                     }
                 }
                 if rewrite_contexts.is_none() {
                     if r.arrow_type & ARROW_DOTTED != 0 && (r.arrow_type & ARROW_OPTIONAL) == 0 {
-                        let epep = fsm_concat(rewrite_epextend(&mut rb), rewrite_epextend(&mut rb));
-                        base = fsm_minus(base, rewr_contains(&mut rb, epep));
+                        let epep = fsm_concat(
+                            opts,
+                            rewrite_epextend(opts, &mut rb),
+                            rewrite_epextend(opts, &mut rb),
+                        );
+                        base = fsm_minus(opts, base, rewr_contains(opts, &mut rb, epep));
                     } else {
                         let c_copy = fsm_copy(&mut c);
-                        base = fsm_minus(base, rewr_contains(&mut rb, c_copy));
+                        base = fsm_minus(opts, base, rewr_contains(opts, &mut rb, c_copy));
                     }
                 }
                 let mut contexts = rewrite_contexts.as_deref_mut();
@@ -415,23 +472,41 @@ pub fn fsm_rewrite(all_rules: &mut RewriteSet) -> Box<Fsm> {
                     if r.arrow_type & ARROW_DOTTED != 0 && (r.arrow_type & ARROW_OPTIONAL) == 0 {
                         /* Extend left and right */
                         let cpleft_copy = fsm_copy(ctx.cpleft.as_deref_mut().unwrap());
-                        let left_extend = fsm_minimize(fsm_intersect(
-                            fsm_concat(rewrite_any_4tape(&mut rb), cpleft_copy),
-                            fsm_concat(rewrite_any_4tape(&mut rb), rewrite_epextend(&mut rb)),
-                        ));
+                        let left_extend = fsm_minimize(
+                            opts,
+                            fsm_intersect(
+                                opts,
+                                fsm_concat(opts, rewrite_any_4tape(opts, &mut rb), cpleft_copy),
+                                fsm_concat(
+                                    opts,
+                                    rewrite_any_4tape(opts, &mut rb),
+                                    rewrite_epextend(opts, &mut rb),
+                                ),
+                            ),
+                        );
                         let cpright_copy = fsm_copy(ctx.cpright.as_deref_mut().unwrap());
-                        let right_extend = fsm_minimize(fsm_intersect(
-                            fsm_concat(rewrite_epextend(&mut rb), rewrite_any_4tape(&mut rb)),
-                            fsm_concat(cpright_copy, rewrite_any_4tape(&mut rb)),
-                        ));
-                        let extended = fsm_minimize(fsm_concat(left_extend, right_extend));
-                        base = fsm_minus(base, rewr_contains(&mut rb, extended));
+                        let right_extend = fsm_minimize(
+                            opts,
+                            fsm_intersect(
+                                opts,
+                                fsm_concat(
+                                    opts,
+                                    rewrite_epextend(opts, &mut rb),
+                                    rewrite_any_4tape(opts, &mut rb),
+                                ),
+                                fsm_concat(opts, cpright_copy, rewrite_any_4tape(opts, &mut rb)),
+                            ),
+                        );
+                        let extended =
+                            fsm_minimize(opts, fsm_concat(opts, left_extend, right_extend));
+                        base = fsm_minus(opts, base, rewr_contains(opts, &mut rb, extended));
                     } else {
                         let cpleft_copy = fsm_copy(ctx.cpleft.as_deref_mut().unwrap());
                         let c_copy = fsm_copy(&mut c);
                         let cpright_copy = fsm_copy(ctx.cpright.as_deref_mut().unwrap());
-                        let lcr = fsm_concat(cpleft_copy, fsm_concat(c_copy, cpright_copy));
-                        base = fsm_minus(base, rewr_contains(&mut rb, lcr));
+                        let lcr =
+                            fsm_concat(opts, cpleft_copy, fsm_concat(opts, c_copy, cpright_copy));
+                        base = fsm_minus(opts, base, rewr_contains(opts, &mut rb, lcr));
                     }
                     contexts = ctx.next.as_deref_mut();
                 }
@@ -442,11 +517,15 @@ pub fn fsm_rewrite(all_rules: &mut RewriteSet) -> Box<Fsm> {
             ruleset = next.as_deref_mut();
         }
     }
-    base = fsm_minimize(fsm_lower(fsm_compose(
-        base,
-        fsm_parse_regex("[?:0]^4 [?:0 ?:0 ? ?]* [?:0]^4", None, None).unwrap(),
-    )));
-    base = fsm_unflatten(base, "@0@", "@ID@");
+    base = fsm_minimize(
+        opts,
+        fsm_lower(fsm_compose(
+            opts,
+            base,
+            fsm_parse_regex(opts, "[?:0]^4 [?:0 ?:0 ? ?]* [?:0]^4", None, None).unwrap(),
+        )),
+    );
+    base = fsm_unflatten(opts, base, "@0@", "@ID@");
 
     /* C: for (i = 0; specialsymbols[i] != NULL; i++) */
     let mut si: usize = 0;
@@ -503,57 +582,85 @@ pub fn rewrite_cleanup(rb: RewriteBatch) {
 // [spec:foma:def:rewrite.rewr-notlongest-fn]
 // [spec:foma:sem:rewrite.rewr-notlongest-fn]
 pub fn rewr_notlongest(
+    opts: &FomaOptions,
     rb: &RewriteBatch,
     lang: &mut Fsm,
     rule_number: i32,
     arrow_type: i32,
 ) -> Box<Fsm> {
     /* define NotLongest(X)  [Upper(X)/Lower(X) & Tape1of4(IOpen Tape1Sig* ["@O@" | IOpen] Tape1Sig*)] */
-    let mut nl = fsm_parse_regex(
+    let mut nl = fsm_parse_regex(opts,
         "[\"@I[@\"|\"@I[]@\"] [\"@I[@\"|\"@I[]@\"|\"@I]@\"|\"@I@\"|\"@O@\"]* [\"@O@\"|\"@I[@\"|\"@I[]@\"] [\"@I[@\"|\"@I[]@\"|\"@I]@\"|\"@I@\"|\"@O@\"]*",
         None,
         None,
     )
     .unwrap();
-    nl = rewrite_tape_m_to_n_of_k(nl, 1, 1, 4);
-    let rulenum = fsm_minimize(fsm_concat(
-        fsm_identity(),
+    nl = rewrite_tape_m_to_n_of_k(opts, nl, 1, 1, 4);
+    let rulenum = fsm_minimize(
+        opts,
         fsm_concat(
-            fsm_symbol(&rb.namestrings[(rule_number - 1) as usize]),
-            fsm_concat(fsm_identity(), fsm_concat(fsm_identity(), fsm_universal())),
+            opts,
+            fsm_identity(),
+            fsm_concat(
+                opts,
+                fsm_symbol(&rb.namestrings[(rule_number - 1) as usize]),
+                fsm_concat(
+                    opts,
+                    fsm_identity(),
+                    fsm_concat(opts, fsm_identity(), fsm_universal()),
+                ),
+            ),
         ),
-    ));
-    nl = fsm_intersect(nl, rulenum);
+    );
+    nl = fsm_intersect(opts, nl, rulenum);
     /* lang can't end in @0@ */
     let flt;
     if arrow_type & ARROW_RIGHT != 0 {
-        flt = fsm_parse_regex("[? ? ? ?]* [? ? [?-\"@0@\"] ?]", None, None).unwrap();
+        flt = fsm_parse_regex(opts, "[? ? ? ?]* [? ? [?-\"@0@\"] ?]", None, None).unwrap();
     } else {
-        flt = fsm_parse_regex("[? ? ? ?]* [? ? ? [?-\"@0@\"]]", None, None).unwrap();
+        flt = fsm_parse_regex(opts, "[? ? ? ?]* [? ? ? [?-\"@0@\"]]", None, None).unwrap();
     }
-    fsm_minimize(fsm_intersect(fsm_intersect(nl, fsm_copy(lang)), flt))
+    fsm_minimize(
+        opts,
+        fsm_intersect(opts, fsm_intersect(opts, nl, fsm_copy(lang)), flt),
+    )
 }
 
 // [spec:foma:def:rewrite.rewr-notshortest-fn]
 // [spec:foma:sem:rewrite.rewr-notshortest-fn]
-pub fn rewr_notshortest(rb: &RewriteBatch, lang: &mut Fsm, rule_number: i32) -> Box<Fsm> {
+pub fn rewr_notshortest(
+    opts: &FomaOptions,
+    rb: &RewriteBatch,
+    lang: &mut Fsm,
+    rule_number: i32,
+) -> Box<Fsm> {
     /* define NotShortest(X)   [Upper/Lower(X) & Tape1of4("@I[@" \IClose*)] */
-    let mut ns = fsm_parse_regex("[\"@I[@\"] \\[\"@I]@\"]*", None, None).unwrap();
-    let rulenum = fsm_minimize(fsm_concat(
-        fsm_identity(),
+    let mut ns = fsm_parse_regex(opts, "[\"@I[@\"] \\[\"@I]@\"]*", None, None).unwrap();
+    let rulenum = fsm_minimize(
+        opts,
         fsm_concat(
-            fsm_symbol(&rb.namestrings[(rule_number - 1) as usize]),
-            fsm_concat(fsm_identity(), fsm_concat(fsm_identity(), fsm_universal())),
+            opts,
+            fsm_identity(),
+            fsm_concat(
+                opts,
+                fsm_symbol(&rb.namestrings[(rule_number - 1) as usize]),
+                fsm_concat(
+                    opts,
+                    fsm_identity(),
+                    fsm_concat(opts, fsm_identity(), fsm_universal()),
+                ),
+            ),
         ),
-    ));
-    ns = rewrite_tape_m_to_n_of_k(ns, 1, 1, 4);
-    ns = fsm_intersect(ns, rulenum);
-    fsm_minimize(fsm_intersect(ns, fsm_copy(lang)))
+    );
+    ns = rewrite_tape_m_to_n_of_k(opts, ns, 1, 1, 4);
+    ns = fsm_intersect(opts, ns, rulenum);
+    fsm_minimize(opts, fsm_intersect(opts, ns, fsm_copy(lang)))
 }
 
 // [spec:foma:def:rewrite.rewr-notleftmost-fn]
 // [spec:foma:sem:rewrite.rewr-notleftmost-fn]
 pub fn rewr_notleftmost(
+    opts: &FomaOptions,
     rb: &RewriteBatch,
     lang: &mut Fsm,
     rule_number: i32,
@@ -561,108 +668,180 @@ pub fn rewr_notleftmost(
 ) -> Box<Fsm> {
     /* define Leftmost(X)   [Upper/Lower(X) & Tape1of4("@O@" Tape1Sig* IOpen Tape1Sig*) ] */
     let mut nl = fsm_parse_regex(
+        opts,
         "\"@O@\" [\"@O@\"]* [\"@I[@\"|\"@I[]@\"] [\"@I[@\"|\"@I[]@\"|\"@I]@\"|\"@I@\"|\"@O@\"]*",
         None,
         None,
     )
     .unwrap();
-    nl = rewrite_tape_m_to_n_of_k(nl, 1, 1, 4);
-    let rulenum = fsm_minimize(fsm_concat(
+    nl = rewrite_tape_m_to_n_of_k(opts, nl, 1, 1, 4);
+    let rulenum = fsm_minimize(
+        opts,
         fsm_concat(
-            fsm_symbol("@O@"),
-            fsm_concat(fsm_identity(), fsm_concat(fsm_identity(), fsm_identity())),
-        ),
-        fsm_concat(
-            fsm_kleene_star(fsm_concat(
-                fsm_symbol("@O@"),
-                fsm_concat(fsm_identity(), fsm_concat(fsm_identity(), fsm_identity())),
-            )),
+            opts,
             fsm_concat(
-                fsm_union(fsm_symbol("@I[@"), fsm_symbol("@I[]@")),
+                opts,
+                fsm_symbol("@O@"),
                 fsm_concat(
-                    fsm_symbol(&rb.namestrings[(rule_number - 1) as usize]),
-                    fsm_universal(),
+                    opts,
+                    fsm_identity(),
+                    fsm_concat(opts, fsm_identity(), fsm_identity()),
+                ),
+            ),
+            fsm_concat(
+                opts,
+                fsm_kleene_star(
+                    opts,
+                    fsm_concat(
+                        opts,
+                        fsm_symbol("@O@"),
+                        fsm_concat(
+                            opts,
+                            fsm_identity(),
+                            fsm_concat(opts, fsm_identity(), fsm_identity()),
+                        ),
+                    ),
+                ),
+                fsm_concat(
+                    opts,
+                    fsm_union(fsm_symbol("@I[@"), fsm_symbol("@I[]@")),
+                    fsm_concat(
+                        opts,
+                        fsm_symbol(&rb.namestrings[(rule_number - 1) as usize]),
+                        fsm_universal(),
+                    ),
                 ),
             ),
         ),
-    ));
-    nl = fsm_intersect(nl, rulenum);
+    );
+    nl = fsm_intersect(opts, nl, rulenum);
     let flt;
     if arrow_type & ARROW_RIGHT != 0 {
-        flt = fsm_parse_regex("[? ? ? ?]* [? ? [?-\"@0@\"] ?]", None, None).unwrap();
+        flt = fsm_parse_regex(opts, "[? ? ? ?]* [? ? [?-\"@0@\"] ?]", None, None).unwrap();
     } else {
-        flt = fsm_parse_regex("[? ? ? ?]* [? ? ? [?-\"@0@\"]]", None, None).unwrap();
+        flt = fsm_parse_regex(opts, "[? ? ? ?]* [? ? ? [?-\"@0@\"]]", None, None).unwrap();
     }
-    fsm_minimize(fsm_intersect(fsm_intersect(nl, fsm_copy(lang)), flt))
+    fsm_minimize(
+        opts,
+        fsm_intersect(opts, fsm_intersect(opts, nl, fsm_copy(lang)), flt),
+    )
 }
 
 // [spec:foma:def:rewrite.rewr-unrewritten-fn]
 // [spec:foma:sem:rewrite.rewr-unrewritten-fn]
-pub fn rewr_unrewritten(rb: &mut RewriteBatch, lang: Box<Fsm>) -> Box<Fsm> {
+pub fn rewr_unrewritten(opts: &FomaOptions, rb: &mut RewriteBatch, lang: Box<Fsm>) -> Box<Fsm> {
     /* define Unrewritten(X) [X .o. [0:"@O@" 0:"@0@" ? 0:"@ID@"]*].l; */
-    let c = fsm_minimize(fsm_kleene_star(fsm_concat(
-        fsm_cross_product(fsm_empty_string(), fsm_symbol("@O@")),
-        fsm_concat(
-            fsm_cross_product(fsm_empty_string(), fsm_symbol("@0@")),
+    let c = fsm_minimize(
+        opts,
+        fsm_kleene_star(
+            opts,
             fsm_concat(
-                fsm_copy(rb.any.as_deref_mut().unwrap()),
-                fsm_cross_product(fsm_empty_string(), fsm_symbol("@ID@")),
+                opts,
+                fsm_cross_product(opts, fsm_empty_string(), fsm_symbol("@O@")),
+                fsm_concat(
+                    opts,
+                    fsm_cross_product(opts, fsm_empty_string(), fsm_symbol("@0@")),
+                    fsm_concat(
+                        opts,
+                        fsm_copy(rb.any.as_deref_mut().unwrap()),
+                        fsm_cross_product(opts, fsm_empty_string(), fsm_symbol("@ID@")),
+                    ),
+                ),
             ),
         ),
-    )));
-    fsm_minimize(fsm_lower(fsm_compose(lang, c)))
+    );
+    fsm_minimize(opts, fsm_lower(fsm_compose(opts, lang, c)))
 }
 
 // [spec:foma:def:rewrite.rewr-contains-fn]
 // [spec:foma:sem:rewrite.rewr-contains-fn]
-pub fn rewr_contains(rb: &mut RewriteBatch, lang: Box<Fsm>) -> Box<Fsm> {
+pub fn rewr_contains(opts: &FomaOptions, rb: &mut RewriteBatch, lang: Box<Fsm>) -> Box<Fsm> {
     /* define NotContain(X) ~[[Tape1Sig Tape2Sig Tape3Sig Tape4Sig]* X ?*];
     (NO complement is taken despite the name — callers subtract) */
-    let first = rewrite_any_4tape(rb);
-    let second = rewrite_any_4tape(rb);
-    fsm_minimize(fsm_concat(first, fsm_concat(lang, second)))
+    let first = rewrite_any_4tape(opts, rb);
+    let second = rewrite_any_4tape(opts, rb);
+    fsm_minimize(
+        opts,
+        fsm_concat(opts, first, fsm_concat(opts, lang, second)),
+    )
 }
 
 // [spec:foma:def:rewrite.rewrite-tape-m-to-n-of-k-fn]
 // [spec:foma:sem:rewrite.rewrite-tape-m-to-n-of-k-fn]
-pub fn rewrite_tape_m_to_n_of_k(lang: Box<Fsm>, m: i32, n: i32, k: i32) -> Box<Fsm> {
+pub fn rewrite_tape_m_to_n_of_k(
+    opts: &FomaOptions,
+    lang: Box<Fsm>,
+    m: i32,
+    n: i32,
+    k: i32,
+) -> Box<Fsm> {
     /* [X .o. [0:?^(m-1) ?^(n-m+1) 0:?^(k-n)]*].l */
-    fsm_minimize(fsm_lower(fsm_compose(
-        lang,
-        fsm_kleene_star(fsm_concat(
-            fsm_concat_n(fsm_cross_product(fsm_empty_string(), fsm_identity()), m - 1),
-            fsm_concat(
-                fsm_concat_n(fsm_identity(), n - m + 1),
-                fsm_concat_n(fsm_cross_product(fsm_empty_string(), fsm_identity()), k - n),
+    fsm_minimize(
+        opts,
+        fsm_lower(fsm_compose(
+            opts,
+            lang,
+            fsm_kleene_star(
+                opts,
+                fsm_concat(
+                    opts,
+                    fsm_concat_n(
+                        opts,
+                        fsm_cross_product(opts, fsm_empty_string(), fsm_identity()),
+                        m - 1,
+                    ),
+                    fsm_concat(
+                        opts,
+                        fsm_concat_n(opts, fsm_identity(), n - m + 1),
+                        fsm_concat_n(
+                            opts,
+                            fsm_cross_product(opts, fsm_empty_string(), fsm_identity()),
+                            k - n,
+                        ),
+                    ),
+                ),
             ),
         )),
-    )))
+    )
 }
 
 // [spec:foma:def:rewrite.rewrite-two-level-fn]
 // [spec:foma:sem:rewrite.rewrite-two-level-fn]
-pub fn rewrite_two_level(rb: &mut RewriteBatch, lang: Box<Fsm>, rightside: i32) -> Box<Fsm> {
+pub fn rewrite_two_level(
+    opts: &FomaOptions,
+    rb: &mut RewriteBatch,
+    lang: Box<Fsm>,
+    rightside: i32,
+) -> Box<Fsm> {
     let mut lang = lang;
-    let lower = rewrite_lower(rb, fsm_minimize(fsm_lower(fsm_copy(&mut lang))));
-    let upper = rewrite_upper(rb, fsm_minimize(fsm_upper(lang)));
+    let lower = rewrite_lower(opts, rb, fsm_minimize(opts, fsm_lower(fsm_copy(&mut lang))));
+    let upper = rewrite_upper(opts, rb, fsm_minimize(opts, fsm_upper(lang)));
     let result;
     if rightside == 1 {
-        result = fsm_minimize(fsm_intersect(
-            fsm_concat(lower, rewrite_any_4tape(rb)),
-            fsm_concat(upper, rewrite_any_4tape(rb)),
-        ));
+        result = fsm_minimize(
+            opts,
+            fsm_intersect(
+                opts,
+                fsm_concat(opts, lower, rewrite_any_4tape(opts, rb)),
+                fsm_concat(opts, upper, rewrite_any_4tape(opts, rb)),
+            ),
+        );
     } else {
-        result = fsm_minimize(fsm_intersect(
-            fsm_concat(rewrite_any_4tape(rb), lower),
-            fsm_concat(rewrite_any_4tape(rb), upper),
-        ));
+        result = fsm_minimize(
+            opts,
+            fsm_intersect(
+                opts,
+                fsm_concat(opts, rewrite_any_4tape(opts, rb), lower),
+                fsm_concat(opts, rewrite_any_4tape(opts, rb), upper),
+            ),
+        );
     }
     result
 }
 
 // [spec:foma:def:rewrite.rewrite-lower-fn]
 // [spec:foma:sem:rewrite.rewrite-lower-fn]
-pub fn rewrite_lower(rb: &mut RewriteBatch, lower: Box<Fsm>) -> Box<Fsm> {
+pub fn rewrite_lower(opts: &FomaOptions, rb: &mut RewriteBatch, lower: Box<Fsm>) -> Box<Fsm> {
     /*
        Lower:
 
@@ -676,61 +855,91 @@ pub fn rewrite_lower(rb: &mut RewriteBatch, lower: Box<Fsm>) -> Box<Fsm> {
 
     */
 
-    let one = fsm_minimize(fsm_concat(
-        fsm_cross_product(fsm_empty_string(), fsm_symbol("@O@")),
+    let one = fsm_minimize(
+        opts,
         fsm_concat(
-            fsm_cross_product(fsm_empty_string(), fsm_symbol("@0@")),
+            opts,
+            fsm_cross_product(opts, fsm_empty_string(), fsm_symbol("@O@")),
             fsm_concat(
-                fsm_union(fsm_symbol("@#@"), fsm_copy(rb.any.as_deref_mut().unwrap())),
-                fsm_cross_product(fsm_empty_string(), fsm_symbol("@ID@")),
-            ),
-        ),
-    ));
-
-    let two = fsm_minimize(fsm_concat(
-        fsm_cross_product(
-            fsm_empty_string(),
-            fsm_copy(rb.isyms.as_deref_mut().unwrap()),
-        ),
-        fsm_concat(
-            fsm_cross_product(
-                fsm_empty_string(),
-                fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
-            ),
-            fsm_concat(
-                fsm_cross_product(
-                    fsm_empty_string(),
-                    fsm_union(fsm_copy(rb.any.as_deref_mut().unwrap()), fsm_symbol("@0@")),
+                opts,
+                fsm_cross_product(opts, fsm_empty_string(), fsm_symbol("@0@")),
+                fsm_concat(
+                    opts,
+                    fsm_union(fsm_symbol("@#@"), fsm_copy(rb.any.as_deref_mut().unwrap())),
+                    fsm_cross_product(opts, fsm_empty_string(), fsm_symbol("@ID@")),
                 ),
-                fsm_copy(rb.any.as_deref_mut().unwrap()),
             ),
         ),
-    ));
+    );
 
-    let three = fsm_minimize(fsm_concat(
-        fsm_cross_product(
-            fsm_empty_string(),
-            fsm_copy(rb.isyms.as_deref_mut().unwrap()),
-        ),
+    let two = fsm_minimize(
+        opts,
         fsm_concat(
+            opts,
             fsm_cross_product(
+                opts,
                 fsm_empty_string(),
-                fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
+                fsm_copy(rb.isyms.as_deref_mut().unwrap()),
             ),
             fsm_concat(
-                fsm_cross_product(fsm_empty_string(), fsm_copy(rb.any.as_deref_mut().unwrap())),
-                fsm_cross_product(fsm_empty_string(), fsm_symbol("@0@")),
+                opts,
+                fsm_cross_product(
+                    opts,
+                    fsm_empty_string(),
+                    fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
+                ),
+                fsm_concat(
+                    opts,
+                    fsm_cross_product(
+                        opts,
+                        fsm_empty_string(),
+                        fsm_union(fsm_copy(rb.any.as_deref_mut().unwrap()), fsm_symbol("@0@")),
+                    ),
+                    fsm_copy(rb.any.as_deref_mut().unwrap()),
+                ),
             ),
         ),
-    ));
+    );
 
-    let filter = fsm_minimize(fsm_kleene_star(fsm_union(one, fsm_union(two, three))));
-    fsm_minimize(fsm_lower(fsm_compose(lower, filter)))
+    let three = fsm_minimize(
+        opts,
+        fsm_concat(
+            opts,
+            fsm_cross_product(
+                opts,
+                fsm_empty_string(),
+                fsm_copy(rb.isyms.as_deref_mut().unwrap()),
+            ),
+            fsm_concat(
+                opts,
+                fsm_cross_product(
+                    opts,
+                    fsm_empty_string(),
+                    fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
+                ),
+                fsm_concat(
+                    opts,
+                    fsm_cross_product(
+                        opts,
+                        fsm_empty_string(),
+                        fsm_copy(rb.any.as_deref_mut().unwrap()),
+                    ),
+                    fsm_cross_product(opts, fsm_empty_string(), fsm_symbol("@0@")),
+                ),
+            ),
+        ),
+    );
+
+    let filter = fsm_minimize(
+        opts,
+        fsm_kleene_star(opts, fsm_union(one, fsm_union(two, three))),
+    );
+    fsm_minimize(opts, fsm_lower(fsm_compose(opts, lower, filter)))
 }
 
 // [spec:foma:def:rewrite.rewrite-any-4tape-fn]
 // [spec:foma:sem:rewrite.rewrite-any-4tape-fn]
-pub fn rewrite_any_4tape(rb: &mut RewriteBatch) -> Box<Fsm> {
+pub fn rewrite_any_4tape(opts: &FomaOptions, rb: &mut RewriteBatch) -> Box<Fsm> {
     /*
       Upper:
 
@@ -743,38 +952,56 @@ pub fn rewrite_any_4tape(rb: &mut RewriteBatch) -> Box<Fsm> {
       <R> = any real symbol, not inserted
     */
     if rb.any4tape.is_none() {
-        rb.any4tape = Some(fsm_minimize(fsm_kleene_star(fsm_union(
-            fsm_concat(
-                fsm_symbol("@O@"),
-                fsm_concat(
-                    fsm_symbol("@0@"),
+        rb.any4tape = Some(fsm_minimize(
+            opts,
+            fsm_kleene_star(
+                opts,
+                fsm_union(
                     fsm_concat(
-                        fsm_union(fsm_copy(rb.any.as_deref_mut().unwrap()), fsm_symbol("@#@")),
-                        fsm_symbol("@ID@"),
+                        opts,
+                        fsm_symbol("@O@"),
+                        fsm_concat(
+                            opts,
+                            fsm_symbol("@0@"),
+                            fsm_concat(
+                                opts,
+                                fsm_union(
+                                    fsm_copy(rb.any.as_deref_mut().unwrap()),
+                                    fsm_symbol("@#@"),
+                                ),
+                                fsm_symbol("@ID@"),
+                            ),
+                        ),
                     ),
-                ),
-            ),
-            fsm_concat(
-                fsm_copy(rb.isyms.as_deref_mut().unwrap()),
-                fsm_concat(
-                    fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
                     fsm_concat(
-                        fsm_union(fsm_copy(rb.any.as_deref_mut().unwrap()), fsm_symbol("@0@")),
-                        fsm_union(
-                            fsm_copy(rb.any.as_deref_mut().unwrap()),
-                            fsm_union(fsm_symbol("@ID@"), fsm_symbol("@0@")),
+                        opts,
+                        fsm_copy(rb.isyms.as_deref_mut().unwrap()),
+                        fsm_concat(
+                            opts,
+                            fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
+                            fsm_concat(
+                                opts,
+                                fsm_union(
+                                    fsm_copy(rb.any.as_deref_mut().unwrap()),
+                                    fsm_symbol("@0@"),
+                                ),
+                                fsm_union(
+                                    fsm_copy(rb.any.as_deref_mut().unwrap()),
+                                    fsm_union(fsm_symbol("@ID@"), fsm_symbol("@0@")),
+                                ),
+                            ),
                         ),
                     ),
                 ),
             ),
-        ))));
+        ));
     }
     fsm_copy(rb.any4tape.as_deref_mut().unwrap())
 }
 
 // [spec:foma:def:rewrite.rewrite-upper-fn]
 // [spec:foma:sem:rewrite.rewrite-upper-fn]
-pub fn rewrite_upper(rb: &mut RewriteBatch, upper: Box<Fsm>) -> Box<Fsm> {
+pub fn rewrite_upper(opts: &FomaOptions, rb: &mut RewriteBatch, upper: Box<Fsm>) -> Box<Fsm> {
     /*
       Upper:
 
@@ -787,143 +1014,205 @@ pub fn rewrite_upper(rb: &mut RewriteBatch, upper: Box<Fsm>) -> Box<Fsm> {
       <R> = any real symbol, not inserted
     */
 
-    let one = fsm_minimize(fsm_concat(
-        fsm_cross_product(fsm_empty_string(), fsm_symbol("@O@")),
+    let one = fsm_minimize(
+        opts,
         fsm_concat(
-            fsm_cross_product(fsm_empty_string(), fsm_symbol("@0@")),
+            opts,
+            fsm_cross_product(opts, fsm_empty_string(), fsm_symbol("@O@")),
             fsm_concat(
-                fsm_union(fsm_symbol("@#@"), fsm_copy(rb.any.as_deref_mut().unwrap())),
-                fsm_cross_product(fsm_empty_string(), fsm_symbol("@ID@")),
+                opts,
+                fsm_cross_product(opts, fsm_empty_string(), fsm_symbol("@0@")),
+                fsm_concat(
+                    opts,
+                    fsm_union(fsm_symbol("@#@"), fsm_copy(rb.any.as_deref_mut().unwrap())),
+                    fsm_cross_product(opts, fsm_empty_string(), fsm_symbol("@ID@")),
+                ),
             ),
         ),
-    ));
+    );
 
-    let two = fsm_minimize(fsm_concat(
-        fsm_cross_product(
-            fsm_empty_string(),
-            fsm_copy(rb.isyms.as_deref_mut().unwrap()),
-        ),
+    let two = fsm_minimize(
+        opts,
         fsm_concat(
+            opts,
             fsm_cross_product(
+                opts,
                 fsm_empty_string(),
-                fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
+                fsm_copy(rb.isyms.as_deref_mut().unwrap()),
             ),
             fsm_concat(
-                fsm_cross_product(fsm_empty_string(), fsm_symbol("@0@")),
-                fsm_cross_product(fsm_empty_string(), fsm_copy(rb.any.as_deref_mut().unwrap())),
-            ),
-        ),
-    ));
-
-    let three = fsm_minimize(fsm_concat(
-        fsm_cross_product(
-            fsm_empty_string(),
-            fsm_copy(rb.isyms.as_deref_mut().unwrap()),
-        ),
-        fsm_concat(
-            fsm_cross_product(
-                fsm_empty_string(),
-                fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
-            ),
-            fsm_concat(
-                fsm_copy(rb.any.as_deref_mut().unwrap()),
+                opts,
                 fsm_cross_product(
+                    opts,
                     fsm_empty_string(),
-                    fsm_union(
-                        fsm_union(fsm_symbol("@0@"), fsm_copy(rb.any.as_deref_mut().unwrap())),
-                        fsm_symbol("@ID@"),
+                    fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
+                ),
+                fsm_concat(
+                    opts,
+                    fsm_cross_product(opts, fsm_empty_string(), fsm_symbol("@0@")),
+                    fsm_cross_product(
+                        opts,
+                        fsm_empty_string(),
+                        fsm_copy(rb.any.as_deref_mut().unwrap()),
                     ),
                 ),
             ),
         ),
-    ));
+    );
 
-    let filter = fsm_minimize(fsm_kleene_star(fsm_union(one, fsm_union(two, three))));
-    fsm_minimize(fsm_lower(fsm_compose(upper, filter)))
+    let three = fsm_minimize(
+        opts,
+        fsm_concat(
+            opts,
+            fsm_cross_product(
+                opts,
+                fsm_empty_string(),
+                fsm_copy(rb.isyms.as_deref_mut().unwrap()),
+            ),
+            fsm_concat(
+                opts,
+                fsm_cross_product(
+                    opts,
+                    fsm_empty_string(),
+                    fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
+                ),
+                fsm_concat(
+                    opts,
+                    fsm_copy(rb.any.as_deref_mut().unwrap()),
+                    fsm_cross_product(
+                        opts,
+                        fsm_empty_string(),
+                        fsm_union(
+                            fsm_union(fsm_symbol("@0@"), fsm_copy(rb.any.as_deref_mut().unwrap())),
+                            fsm_symbol("@ID@"),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    );
+
+    let filter = fsm_minimize(
+        opts,
+        fsm_kleene_star(opts, fsm_union(one, fsm_union(two, three))),
+    );
+    fsm_minimize(opts, fsm_lower(fsm_compose(opts, upper, filter)))
 }
 
 // [spec:foma:def:rewrite.rewrite-align-fn]
 // [spec:foma:sem:rewrite.rewrite-align-fn]
-pub fn rewrite_align(upper: Box<Fsm>, lower: Box<Fsm>) -> Box<Fsm> {
+pub fn rewrite_align(opts: &FomaOptions, upper: Box<Fsm>, lower: Box<Fsm>) -> Box<Fsm> {
     /* `[[`[[Tape1of2(upper "@0@"*) & Tape2of2(lower "@0@"*) & ~[[? ?]* "@0@" "@0@" [? ?]*]], %@%_IDENTITY%_SYMBOL%_%@,%@UNK%@] .o. [? ?|"@UNK@" "@UNK@":"@ID@"]*].l, %@UNK%@,%@%_IDENTITY%_SYMBOL%_%@] */
-    let first = fsm_minimize(rewrite_tape_m_to_n_of_k(
-        fsm_concat(upper, fsm_kleene_star(fsm_symbol("@0@"))),
-        1,
-        1,
-        2,
-    ));
-    let second = fsm_minimize(rewrite_tape_m_to_n_of_k(
-        fsm_concat(lower, fsm_kleene_star(fsm_symbol("@0@"))),
-        2,
-        2,
-        2,
-    ));
-    let third =
-        fsm_minimize(fsm_parse_regex("~[[? ?]* \"@0@\" \"@0@\" [? ?]*]", None, None).unwrap());
+    let first = fsm_minimize(
+        opts,
+        rewrite_tape_m_to_n_of_k(
+            opts,
+            fsm_concat(opts, upper, fsm_kleene_star(opts, fsm_symbol("@0@"))),
+            1,
+            1,
+            2,
+        ),
+    );
+    let second = fsm_minimize(
+        opts,
+        rewrite_tape_m_to_n_of_k(
+            opts,
+            fsm_concat(opts, lower, fsm_kleene_star(opts, fsm_symbol("@0@"))),
+            2,
+            2,
+            2,
+        ),
+    );
+    let third = fsm_minimize(
+        opts,
+        fsm_parse_regex(opts, "~[[? ?]* \"@0@\" \"@0@\" [? ?]*]", None, None).unwrap(),
+    );
 
-    let mut align = fsm_minimize(fsm_intersect(third, fsm_intersect(first, second)));
-    align = fsm_minimize(fsm_substitute_symbol(align, "@_IDENTITY_SYMBOL_@", "@UNK@"));
-    let mut align2 = fsm_minimize(fsm_lower(fsm_compose(
-        align,
-        fsm_parse_regex("[? ? | \"@UNK@\" \"@UNK@\":\"@ID@\" ]*", None, None).unwrap(),
-    )));
-    align2 = fsm_minimize(fsm_substitute_symbol(
-        align2,
-        "@UNK@",
-        "@_IDENTITY_SYMBOL_@",
-    ));
+    let mut align = fsm_minimize(
+        opts,
+        fsm_intersect(opts, third, fsm_intersect(opts, first, second)),
+    );
+    align = fsm_minimize(
+        opts,
+        fsm_substitute_symbol(align, "@_IDENTITY_SYMBOL_@", "@UNK@"),
+    );
+    let mut align2 = fsm_minimize(
+        opts,
+        fsm_lower(fsm_compose(
+            opts,
+            align,
+            fsm_parse_regex(opts, "[? ? | \"@UNK@\" \"@UNK@\":\"@ID@\" ]*", None, None).unwrap(),
+        )),
+    );
+    align2 = fsm_minimize(
+        opts,
+        fsm_substitute_symbol(align2, "@UNK@", "@_IDENTITY_SYMBOL_@"),
+    );
     align2
 }
 
 // [spec:foma:def:rewrite.rewrite-align-markup-fn]
 // [spec:foma:sem:rewrite.rewrite-align-markup-fn]
-pub fn rewrite_align_markup(upper: Box<Fsm>, lower1: Box<Fsm>, lower2: Box<Fsm>) -> Box<Fsm> {
+pub fn rewrite_align_markup(
+    opts: &FomaOptions,
+    upper: Box<Fsm>,
+    lower1: Box<Fsm>,
+    lower2: Box<Fsm>,
+) -> Box<Fsm> {
     /* [Tape1of2("@0@"*) & Tape2of2(lower1)] [Tape1of2(upper) & Tape2of2("@ID@"*)] [ Tape1of2(lower1) & Tape2of2("@0@"*)] */
     /* + make sure IDENTITY and UNKNOWN are taken care of */
-    let first = fsm_minimize(rewrite_tape_m_to_n_of_k(
-        fsm_kleene_star(fsm_symbol("@0@")),
-        1,
-        1,
-        2,
-    ));
-    let second = fsm_minimize(rewrite_tape_m_to_n_of_k(lower1, 2, 2, 2));
-    let third = fsm_minimize(rewrite_tape_m_to_n_of_k(upper, 1, 1, 2));
-    let fourth = fsm_minimize(rewrite_tape_m_to_n_of_k(
-        fsm_kleene_star(fsm_symbol("@ID@")),
-        2,
-        2,
-        2,
-    ));
-    let fifth = fsm_minimize(rewrite_tape_m_to_n_of_k(
-        fsm_kleene_star(fsm_symbol("@0@")),
-        1,
-        1,
-        2,
-    ));
-    let sixth = fsm_minimize(rewrite_tape_m_to_n_of_k(lower2, 2, 2, 2));
-    let mut align = fsm_minimize(fsm_concat(
-        fsm_intersect(first, second),
-        fsm_concat(fsm_intersect(third, fourth), fsm_intersect(fifth, sixth)),
-    ));
-    align = fsm_minimize(fsm_substitute_symbol(align, "@_IDENTITY_SYMBOL_@", "@UNK@"));
-    let mut align2 = fsm_minimize(fsm_lower(fsm_compose(
-        align,
-        fsm_parse_regex("[? ? | \"@UNK@\" \"@UNK@\":\"@ID@\" ]*", None, None).unwrap(),
-    )));
-    align2 = fsm_minimize(fsm_substitute_symbol(
-        align2,
-        "@UNK@",
-        "@_IDENTITY_SYMBOL_@",
-    ));
+    let first = fsm_minimize(
+        opts,
+        rewrite_tape_m_to_n_of_k(opts, fsm_kleene_star(opts, fsm_symbol("@0@")), 1, 1, 2),
+    );
+    let second = fsm_minimize(opts, rewrite_tape_m_to_n_of_k(opts, lower1, 2, 2, 2));
+    let third = fsm_minimize(opts, rewrite_tape_m_to_n_of_k(opts, upper, 1, 1, 2));
+    let fourth = fsm_minimize(
+        opts,
+        rewrite_tape_m_to_n_of_k(opts, fsm_kleene_star(opts, fsm_symbol("@ID@")), 2, 2, 2),
+    );
+    let fifth = fsm_minimize(
+        opts,
+        rewrite_tape_m_to_n_of_k(opts, fsm_kleene_star(opts, fsm_symbol("@0@")), 1, 1, 2),
+    );
+    let sixth = fsm_minimize(opts, rewrite_tape_m_to_n_of_k(opts, lower2, 2, 2, 2));
+    let mut align = fsm_minimize(
+        opts,
+        fsm_concat(
+            opts,
+            fsm_intersect(opts, first, second),
+            fsm_concat(
+                opts,
+                fsm_intersect(opts, third, fourth),
+                fsm_intersect(opts, fifth, sixth),
+            ),
+        ),
+    );
+    align = fsm_minimize(
+        opts,
+        fsm_substitute_symbol(align, "@_IDENTITY_SYMBOL_@", "@UNK@"),
+    );
+    let mut align2 = fsm_minimize(
+        opts,
+        fsm_lower(fsm_compose(
+            opts,
+            align,
+            fsm_parse_regex(opts, "[? ? | \"@UNK@\" \"@UNK@\":\"@ID@\" ]*", None, None).unwrap(),
+        )),
+    );
+    align2 = fsm_minimize(
+        opts,
+        fsm_substitute_symbol(align2, "@UNK@", "@_IDENTITY_SYMBOL_@"),
+    );
     align2
 }
 
 // [spec:foma:def:rewrite.rewrite-itape-fn]
 // [spec:foma:sem:rewrite.rewrite-itape-fn]
-pub fn rewrite_itape(rb: &mut RewriteBatch) -> Box<Fsm> {
+pub fn rewrite_itape(opts: &FomaOptions, rb: &mut RewriteBatch) -> Box<Fsm> {
     if rb.itape.is_none() {
         rb.itape = Some(
-            fsm_parse_regex(
+            fsm_parse_regex(opts,
                 "[\"@I[]@\" ? ? ? | \"@I[@\" ? ? ? [\"@I@\" ? ? ?]* \"@I]@\" ? [?-\"@0@\"] ? ] [\"@I]@\" ? \"@0@\" ?]* | 0",
                 None,
                 None,
@@ -937,6 +1226,7 @@ pub fn rewrite_itape(rb: &mut RewriteBatch) -> Box<Fsm> {
 // [spec:foma:def:rewrite.rewrite-cp-markup-fn]
 // [spec:foma:sem:rewrite.rewrite-cp-markup-fn]
 pub fn rewrite_cp_markup(
+    opts: &FomaOptions,
     rb: &mut RewriteBatch,
     upper: Box<Fsm>,
     lower1: Box<Fsm>,
@@ -945,60 +1235,81 @@ pub fn rewrite_cp_markup(
 ) -> Box<Fsm> {
     /* Same as rewrite_cp, could be consolidated */
     /* define CP(X,Y) Tape23of3(Align2(X,Y)) & [ "@I[@"  ? ? ["@I@" ? ?]* "@I]@" ? ? | "@I[]@" ? ? | 0 ] */
-    let mut aligned = rewrite_align_markup(upper, lower1, lower2);
-    aligned = rewrite_tape_m_to_n_of_k(aligned, 3, 4, 4);
-    let threetape = fsm_minimize(fsm_intersect(aligned, rewrite_itape(rb)));
+    let mut aligned = rewrite_align_markup(opts, upper, lower1, lower2);
+    aligned = rewrite_tape_m_to_n_of_k(opts, aligned, 3, 4, 4);
+    let threetape = fsm_minimize(opts, fsm_intersect(opts, aligned, rewrite_itape(opts, rb)));
     let rulenumtape = rewrite_tape_m_to_n_of_k(
-        fsm_minimize(fsm_kleene_star(fsm_symbol(
-            &rb.namestrings[(rule_number - 1) as usize],
-        ))),
+        opts,
+        fsm_minimize(
+            opts,
+            fsm_kleene_star(
+                opts,
+                fsm_symbol(&rb.namestrings[(rule_number - 1) as usize]),
+            ),
+        ),
         2,
         2,
         4,
     );
-    fsm_minimize(fsm_intersect(threetape, rulenumtape))
+    fsm_minimize(opts, fsm_intersect(opts, threetape, rulenumtape))
 }
 
 // [spec:foma:def:rewrite.rewrite-cp-transducer-fn]
 // [spec:foma:sem:rewrite.rewrite-cp-transducer-fn]
-pub fn rewrite_cp_transducer(rb: &mut RewriteBatch, t: Box<Fsm>, rule_number: i32) -> Box<Fsm> {
+pub fn rewrite_cp_transducer(
+    opts: &FomaOptions,
+    rb: &mut RewriteBatch,
+    t: Box<Fsm>,
+    rule_number: i32,
+) -> Box<Fsm> {
     /* C: fsm_flatten's NULL return is a dead branch (see the fsm-flatten
     sem rule) — unwrap here */
-    let mut aligned = fsm_flatten(t, fsm_symbol("@0@")).unwrap();
-    aligned = rewrite_tape_m_to_n_of_k(aligned, 3, 4, 4);
-    let threetape = fsm_minimize(fsm_intersect(aligned, rewrite_itape(rb)));
+    let mut aligned = fsm_flatten(opts, t, fsm_symbol("@0@")).unwrap();
+    aligned = rewrite_tape_m_to_n_of_k(opts, aligned, 3, 4, 4);
+    let threetape = fsm_minimize(opts, fsm_intersect(opts, aligned, rewrite_itape(opts, rb)));
     let rulenumtape = rewrite_tape_m_to_n_of_k(
-        fsm_minimize(fsm_kleene_star(fsm_symbol(
-            &rb.namestrings[(rule_number - 1) as usize],
-        ))),
+        opts,
+        fsm_minimize(
+            opts,
+            fsm_kleene_star(
+                opts,
+                fsm_symbol(&rb.namestrings[(rule_number - 1) as usize]),
+            ),
+        ),
         2,
         2,
         4,
     );
-    fsm_minimize(fsm_intersect(threetape, rulenumtape))
+    fsm_minimize(opts, fsm_intersect(opts, threetape, rulenumtape))
 }
 
 // [spec:foma:def:rewrite.rewrite-cp-fn]
 // [spec:foma:sem:rewrite.rewrite-cp-fn]
 pub fn rewrite_cp(
+    opts: &FomaOptions,
     rb: &mut RewriteBatch,
     upper: Box<Fsm>,
     lower: Box<Fsm>,
     rule_number: i32,
 ) -> Box<Fsm> {
     /* define CP(X,Y) Tape23of3(Align2(X,Y)) & [ "@I[@"  ? ? ["@I@" ? ?]* "@I]@" ? ? | "@I[]@" ? ? | 0 ] */
-    let mut aligned = rewrite_align(upper, lower);
-    aligned = rewrite_tape_m_to_n_of_k(aligned, 3, 4, 4);
-    let threetape = fsm_minimize(fsm_intersect(aligned, rewrite_itape(rb)));
+    let mut aligned = rewrite_align(opts, upper, lower);
+    aligned = rewrite_tape_m_to_n_of_k(opts, aligned, 3, 4, 4);
+    let threetape = fsm_minimize(opts, fsm_intersect(opts, aligned, rewrite_itape(opts, rb)));
     let rulenumtape = rewrite_tape_m_to_n_of_k(
-        fsm_minimize(fsm_kleene_star(fsm_symbol(
-            &rb.namestrings[(rule_number - 1) as usize],
-        ))),
+        opts,
+        fsm_minimize(
+            opts,
+            fsm_kleene_star(
+                opts,
+                fsm_symbol(&rb.namestrings[(rule_number - 1) as usize]),
+            ),
+        ),
         2,
         2,
         4,
     );
-    fsm_minimize(fsm_intersect(threetape, rulenumtape))
+    fsm_minimize(opts, fsm_intersect(opts, threetape, rulenumtape))
 }
 
 // [spec:foma:def:rewrite.rewrite-add-special-syms-fn]
@@ -1061,13 +1372,18 @@ pub fn fsm_clear_contexts(contexts: Option<Box<Fsmcontexts>>) {
 // [spec:foma:def:rewrite.rewr-context-restrict-fn]
 // [spec:foma:sem:rewrite.rewr-context-restrict-fn]
 pub fn rewr_context_restrict(
+    opts: &FomaOptions,
     rb: &mut RewriteBatch,
     x: &mut Fsm,
     lr: Option<&mut Fsmcontexts>,
 ) -> Box<Fsm> {
     let mut var = fsm_symbol("@VARX@");
     //Notvar = fsm_minimize(fsm_kleene_star(fsm_term_negation(fsm_symbol("@VARX@"))));
-    let mut notvar = fsm_minus(rewrite_any_4tape(rb), fsm_contains(fsm_symbol("@VARX@")));
+    let mut notvar = fsm_minus(
+        opts,
+        rewrite_any_4tape(opts, rb),
+        fsm_contains(opts, fsm_symbol("@VARX@")),
+    );
     /* We add the variable symbol to all alphabets to avoid ? matching it */
     /* which would cause extra nondeterminism */
 
@@ -1100,10 +1416,16 @@ pub fn rewr_context_restrict(
         }
         union_p = fsm_union(
             fsm_concat(
+                opts,
                 left,
                 fsm_concat(
+                    opts,
                     fsm_copy(&mut var),
-                    fsm_concat(fsm_copy(&mut notvar), fsm_concat(fsm_copy(&mut var), right)),
+                    fsm_concat(
+                        opts,
+                        fsm_copy(&mut notvar),
+                        fsm_concat(opts, fsm_copy(&mut var), right),
+                    ),
                 ),
             ),
             union_p,
@@ -1111,31 +1433,35 @@ pub fn rewr_context_restrict(
         pairs = p.next.as_deref_mut();
     }
     let union_l = fsm_concat(
+        opts,
         fsm_copy(&mut notvar),
         fsm_concat(
+            opts,
             fsm_copy(&mut var),
             fsm_concat(
+                opts,
                 fsm_copy(&mut newx),
-                fsm_concat(fsm_copy(&mut var), fsm_copy(&mut notvar)),
+                fsm_concat(opts, fsm_copy(&mut var), fsm_copy(&mut notvar)),
             ),
         ),
     );
     let mut result = fsm_minus(
+        opts,
         union_l,
         fsm_concat(
+            opts,
             fsm_copy(&mut notvar),
-            fsm_concat(fsm_copy(&mut union_p), fsm_copy(&mut notvar)),
+            fsm_concat(opts, fsm_copy(&mut union_p), fsm_copy(&mut notvar)),
         ),
     );
 
     if sigma_find("@VARX@", result.sigma.as_deref()) != -1 {
-        result = fsm_complement(fsm_substitute_symbol(
-            result,
-            "@VARX@",
-            "@_EPSILON_SYMBOL_@",
-        ));
+        result = fsm_complement(
+            opts,
+            fsm_substitute_symbol(result, "@VARX@", "@_EPSILON_SYMBOL_@"),
+        );
     } else {
-        result = fsm_complement(result);
+        result = fsm_complement(opts, result);
     }
     fsm_destroy(union_p);
     fsm_destroy(var);
@@ -1146,7 +1472,7 @@ pub fn rewr_context_restrict(
 
 // [spec:foma:def:rewrite.rewrite-epextend-fn]
 // [spec:foma:sem:rewrite.rewrite-epextend-fn]
-pub fn rewrite_epextend(rb: &mut RewriteBatch) -> Box<Fsm> {
+pub fn rewrite_epextend(opts: &FomaOptions, rb: &mut RewriteBatch) -> Box<Fsm> {
     /* 1.  @O@   @0@     [ANY|@#@] @ID@           */
     /* 2.  @I[]@ @#Rule@ [ANY]     [@ID@|@0@|ANY] */
     /* 3a. @I[@  @#Rule@ [ANY]     [@ID@|@0@|ANY] */
@@ -1157,71 +1483,111 @@ pub fn rewrite_epextend(rb: &mut RewriteBatch) -> Box<Fsm> {
     /* TODO lower version as well */
 
     if rb.epextend.is_none() {
-        let one = fsm_minimize(fsm_concat(
-            fsm_symbol("@O@"),
+        let one = fsm_minimize(
+            opts,
             fsm_concat(
-                fsm_symbol("@0@"),
+                opts,
+                fsm_symbol("@O@"),
                 fsm_concat(
-                    fsm_union(fsm_copy(rb.any.as_deref_mut().unwrap()), fsm_symbol("@#@")),
-                    fsm_symbol("@ID@"),
-                ),
-            ),
-        ));
-        let two = fsm_minimize(fsm_concat(
-            fsm_symbol("@I[]@"),
-            fsm_concat(
-                fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
-                fsm_concat(
-                    fsm_copy(rb.any.as_deref_mut().unwrap()),
-                    fsm_union(
-                        fsm_symbol("@0@"),
-                        fsm_union(fsm_symbol("@ID@"), fsm_copy(rb.any.as_deref_mut().unwrap())),
+                    opts,
+                    fsm_symbol("@0@"),
+                    fsm_concat(
+                        opts,
+                        fsm_union(fsm_copy(rb.any.as_deref_mut().unwrap()), fsm_symbol("@#@")),
+                        fsm_symbol("@ID@"),
                     ),
                 ),
             ),
-        ));
-        let allzeroupper = fsm_parse_regex("~[[? ? \"@0@\" ?]*]", None, None).unwrap();
-        let threea = fsm_minimize(fsm_concat(
-            fsm_symbol("@I[@"),
+        );
+        let two = fsm_minimize(
+            opts,
             fsm_concat(
-                fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
+                opts,
+                fsm_symbol("@I[]@"),
                 fsm_concat(
-                    fsm_union(fsm_copy(rb.any.as_deref_mut().unwrap()), fsm_symbol("@0@")),
-                    fsm_union(
-                        fsm_symbol("@0@"),
-                        fsm_union(fsm_symbol("@ID@"), fsm_copy(rb.any.as_deref_mut().unwrap())),
+                    opts,
+                    fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
+                    fsm_concat(
+                        opts,
+                        fsm_copy(rb.any.as_deref_mut().unwrap()),
+                        fsm_union(
+                            fsm_symbol("@0@"),
+                            fsm_union(fsm_symbol("@ID@"), fsm_copy(rb.any.as_deref_mut().unwrap())),
+                        ),
                     ),
                 ),
             ),
-        ));
-        let threeb = fsm_minimize(fsm_kleene_star(fsm_concat(
-            fsm_symbol("@I@"),
+        );
+        let allzeroupper = fsm_parse_regex(opts, "~[[? ? \"@0@\" ?]*]", None, None).unwrap();
+        let threea = fsm_minimize(
+            opts,
             fsm_concat(
-                fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
+                opts,
+                fsm_symbol("@I[@"),
                 fsm_concat(
-                    fsm_union(fsm_copy(rb.any.as_deref_mut().unwrap()), fsm_symbol("@0@")),
-                    fsm_union(
-                        fsm_symbol("@0@"),
-                        fsm_union(fsm_symbol("@ID@"), fsm_copy(rb.any.as_deref_mut().unwrap())),
+                    opts,
+                    fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
+                    fsm_concat(
+                        opts,
+                        fsm_union(fsm_copy(rb.any.as_deref_mut().unwrap()), fsm_symbol("@0@")),
+                        fsm_union(
+                            fsm_symbol("@0@"),
+                            fsm_union(fsm_symbol("@ID@"), fsm_copy(rb.any.as_deref_mut().unwrap())),
+                        ),
                     ),
                 ),
             ),
-        )));
-        let threec = fsm_minimize(fsm_concat(
-            fsm_symbol("@I]@"),
-            fsm_concat(
-                fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
+        );
+        let threeb = fsm_minimize(
+            opts,
+            fsm_kleene_star(
+                opts,
                 fsm_concat(
-                    fsm_union(fsm_copy(rb.any.as_deref_mut().unwrap()), fsm_symbol("@0@")),
-                    fsm_union(
-                        fsm_symbol("@0@"),
-                        fsm_union(fsm_symbol("@ID@"), fsm_copy(rb.any.as_deref_mut().unwrap())),
+                    opts,
+                    fsm_symbol("@I@"),
+                    fsm_concat(
+                        opts,
+                        fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
+                        fsm_concat(
+                            opts,
+                            fsm_union(fsm_copy(rb.any.as_deref_mut().unwrap()), fsm_symbol("@0@")),
+                            fsm_union(
+                                fsm_symbol("@0@"),
+                                fsm_union(
+                                    fsm_symbol("@ID@"),
+                                    fsm_copy(rb.any.as_deref_mut().unwrap()),
+                                ),
+                            ),
+                        ),
                     ),
                 ),
             ),
-        ));
-        let three = fsm_intersect(allzeroupper, fsm_concat(threea, fsm_concat(threeb, threec)));
-        rb.epextend = Some(fsm_minimize(fsm_union(fsm_union(one, two), three)));
+        );
+        let threec = fsm_minimize(
+            opts,
+            fsm_concat(
+                opts,
+                fsm_symbol("@I]@"),
+                fsm_concat(
+                    opts,
+                    fsm_copy(rb.rulenames.as_deref_mut().unwrap()),
+                    fsm_concat(
+                        opts,
+                        fsm_union(fsm_copy(rb.any.as_deref_mut().unwrap()), fsm_symbol("@0@")),
+                        fsm_union(
+                            fsm_symbol("@0@"),
+                            fsm_union(fsm_symbol("@ID@"), fsm_copy(rb.any.as_deref_mut().unwrap())),
+                        ),
+                    ),
+                ),
+            ),
+        );
+        let three = fsm_intersect(
+            opts,
+            allzeroupper,
+            fsm_concat(opts, threea, fsm_concat(opts, threeb, threec)),
+        );
+        rb.epextend = Some(fsm_minimize(opts, fsm_union(fsm_union(one, two), three)));
     }
     fsm_copy(rb.epextend.as_deref_mut().unwrap())
 }
@@ -1235,6 +1601,7 @@ mod tests {
     use crate::apply::{apply_down, apply_init, apply_up, apply_words};
     use crate::constructions::{fsm_intersect, fsm_symbol, fsm_union};
     use crate::minimize::fsm_minimize;
+    use crate::options::FomaOptions;
     use crate::regex::fsm_parse_regex;
     use crate::structures::{fsm_copy, fsm_empty_set, fsm_empty_string, fsm_identity, fsm_isempty};
     use crate::types::{ARROW_RIGHT, Fsm, Fsmcontexts, Fsmrules, OP_TWO_LEVEL_REPLACE, RewriteSet};
@@ -1284,6 +1651,7 @@ mod tests {
     /* A minimal rewrite_batch (num_rules == 0) for direct-call tests, built the
     same way fsm_rewrite bootstraps rb. */
     fn mini_rb() -> RewriteBatch {
+        let opts = &FomaOptions::default();
         let mut rb = RewriteBatch {
             rewrite_set: None,
             rulenames: None,
@@ -1297,13 +1665,16 @@ mod tests {
             num_rules: 0,
             namestrings: Vec::new(),
         };
-        rb.isyms = Some(fsm_minimize(fsm_union(
-            fsm_symbol("@I@"),
+        rb.isyms = Some(fsm_minimize(
+            opts,
             fsm_union(
-                fsm_symbol("@I[]@"),
-                fsm_union(fsm_symbol("@I[@"), fsm_symbol("@I]@")),
+                fsm_symbol("@I@"),
+                fsm_union(
+                    fsm_symbol("@I[]@"),
+                    fsm_union(fsm_symbol("@I[@"), fsm_symbol("@I]@")),
+                ),
             ),
-        )));
+        ));
         rb.rulenames = Some(fsm_empty_set());
         let mut any = fsm_identity();
         rewrite_add_special_syms(&rb, Some(&mut any));
@@ -1327,7 +1698,8 @@ mod tests {
     // [spec:foma:sem:rewrite.rewrite-cleanup-fn/test]
     #[test]
     fn rewrite_simple_replacement() {
-        let net = fsm_parse_regex("a -> b", None, None).unwrap();
+        let opts = &FomaOptions::default();
+        let net = fsm_parse_regex(opts, "a -> b", None, None).unwrap();
         assert_eq!(down_all(&net, "aaa"), vec!["bbb"]);
         assert_eq!(down_all(&net, "bab"), vec!["bbb"]);
         assert_eq!(down_all(&net, ""), vec![""]);
@@ -1343,7 +1715,8 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-rewrite-fn/test]
     #[test]
     fn rewrite_optional() {
-        let net = fsm_parse_regex("a (->) b", None, None).unwrap();
+        let opts = &FomaOptions::default();
+        let net = fsm_parse_regex(opts, "a (->) b", None, None).unwrap();
         assert_eq!(down_all(&net, "a"), vec!["a", "b"]);
     }
 
@@ -1353,7 +1726,8 @@ mod tests {
     // [spec:foma:sem:rewrite.rewr-context-restrict-fn/test]
     #[test]
     fn rewrite_contextual_upper() {
-        let net = fsm_parse_regex("a -> b || l _ r", None, None).unwrap();
+        let opts = &FomaOptions::default();
+        let net = fsm_parse_regex(opts, "a -> b || l _ r", None, None).unwrap();
         assert_eq!(down_all(&net, "lar"), vec!["lbr"]);
         assert_eq!(down_all(&net, "aaa"), vec!["aaa"]);
         assert_eq!(down_all(&net, "lara"), vec!["lbra"]);
@@ -1364,7 +1738,8 @@ mod tests {
     // [spec:foma:sem:rewrite.rewrite-lower-fn/test]
     #[test]
     fn rewrite_contextual_lower() {
-        let net = fsm_parse_regex("a -> b \\/ l _ r", None, None).unwrap();
+        let opts = &FomaOptions::default();
+        let net = fsm_parse_regex(opts, "a -> b \\/ l _ r", None, None).unwrap();
         assert_eq!(down_all(&net, "lar"), vec!["lbr"]);
         assert_eq!(down_all(&net, "aar"), vec!["aar"]);
     }
@@ -1375,7 +1750,8 @@ mod tests {
     // [spec:foma:sem:rewrite.rewr-notlongest-fn/test]
     #[test]
     fn rewrite_longest_match() {
-        let net = fsm_parse_regex("a+ @-> x", None, None).unwrap();
+        let opts = &FomaOptions::default();
+        let net = fsm_parse_regex(opts, "a+ @-> x", None, None).unwrap();
         assert_eq!(down_all(&net, "aaa"), vec!["x"]);
         assert_eq!(down_all(&net, "aaba"), vec!["xbx"]);
     }
@@ -1384,7 +1760,8 @@ mod tests {
     // [spec:foma:sem:rewrite.rewr-notshortest-fn/test]
     #[test]
     fn rewrite_shortest_match() {
-        let net = fsm_parse_regex("a+ @> x", None, None).unwrap();
+        let opts = &FomaOptions::default();
+        let net = fsm_parse_regex(opts, "a+ @> x", None, None).unwrap();
         assert_eq!(down_all(&net, "aaa"), vec!["xxx"]);
     }
 
@@ -1393,7 +1770,8 @@ mod tests {
     // [spec:foma:sem:rewrite.rewrite-epextend-fn/test]
     #[test]
     fn rewrite_epenthesis() {
-        let net = fsm_parse_regex("[..] -> x", None, None).unwrap();
+        let opts = &FomaOptions::default();
+        let net = fsm_parse_regex(opts, "[..] -> x", None, None).unwrap();
         assert_eq!(down_all(&net, ""), vec!["x"]);
         assert_eq!(down_all(&net, "ab"), vec!["xaxbx"]);
     }
@@ -1404,7 +1782,8 @@ mod tests {
     // [spec:foma:sem:rewrite.rewrite-align-markup-fn/test]
     #[test]
     fn rewrite_markup() {
-        let net = fsm_parse_regex("a -> b ... c", None, None).unwrap();
+        let opts = &FomaOptions::default();
+        let net = fsm_parse_regex(opts, "a -> b ... c", None, None).unwrap();
         assert_eq!(down_all(&net, "a"), vec!["bac"]);
         assert_eq!(down_all(&net, "aa"), vec!["bacbac"]);
     }
@@ -1415,7 +1794,8 @@ mod tests {
     // [spec:foma:sem:rewrite.rewrite-cp-transducer-fn/test]
     #[test]
     fn rewrite_transducer_center() {
-        let center = fsm_parse_regex("a:b", None, None).unwrap();
+        let opts = &FomaOptions::default();
+        let center = fsm_parse_regex(opts, "a:b", None, None).unwrap();
         let rule = Box::new(Fsmrules {
             left: Some(center),
             right: None,
@@ -1431,7 +1811,7 @@ mod tests {
             next: None,
             rule_direction: 0,
         };
-        let net = fsm_rewrite(&mut rs);
+        let net = fsm_rewrite(opts, &mut rs);
         assert_eq!(down_all(&net, "a"), vec!["b"]);
         assert_eq!(down_all(&net, "aa"), vec!["bb"]);
         assert_eq!(down_all(&net, "b"), vec!["b"]);
@@ -1445,6 +1825,7 @@ mod tests {
     // [spec:foma:sem:rewrite.rewrite-two-level-fn/test]
     #[test]
     fn rewrite_two_level_context() {
+        let opts = &FomaOptions::default();
         let rule = Box::new(Fsmrules {
             left: Some(fsm_symbol("a")),
             right: Some(fsm_symbol("b")),
@@ -1467,7 +1848,7 @@ mod tests {
             next: None,
             rule_direction: OP_TWO_LEVEL_REPLACE,
         };
-        let net = fsm_rewrite(&mut rs);
+        let net = fsm_rewrite(opts, &mut rs);
         assert_eq!(down_all(&net, "lar"), vec!["lbr"]);
         assert_eq!(down_all(&net, "aar"), vec!["aar"]);
     }
@@ -1477,7 +1858,8 @@ mod tests {
     // [spec:foma:sem:rewrite.rewrite-align-fn/test]
     #[test]
     fn rewrite_align_tiny_pair() {
-        let net = rewrite_align(fsm_symbol("a"), fsm_symbol("b"));
+        let opts = &FomaOptions::default();
+        let net = rewrite_align(opts, fsm_symbol("a"), fsm_symbol("b"));
         assert_eq!(all_words(&net), vec!["ab"]);
     }
 
@@ -1487,16 +1869,17 @@ mod tests {
     // [spec:foma:sem:rewrite.rewr-contains-fn/test]
     #[test]
     fn rewr_contains_no_complement() {
+        let opts = &FomaOptions::default();
         let mut rb = mini_rb();
-        let mut net = rewr_contains(&mut rb, fsm_symbol("a"));
+        let mut net = rewr_contains(opts, &mut rb, fsm_symbol("a"));
         assert_eq!(
-            fsm_isempty(&mut net),
+            fsm_isempty(opts, &mut net),
             0,
             "containment language is non-empty"
         );
-        let mut probe = fsm_intersect(fsm_copy(&mut net), fsm_empty_string());
+        let mut probe = fsm_intersect(opts, fsm_copy(&mut net), fsm_empty_string());
         assert_eq!(
-            fsm_isempty(&mut probe),
+            fsm_isempty(opts, &mut probe),
             1,
             "empty string not accepted -> no complement was taken"
         );

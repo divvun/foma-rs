@@ -3,25 +3,28 @@
 //! so every `/test` facet keeps a stable home here.
 use super::*;
 use crate::define::{add_defined, defined_networks_init};
+use crate::options::FomaOptions;
 use crate::regex::fsm_parse_regex;
 use crate::session::Session;
 use crate::types::Fsm;
 
 /// Push a compiled regex onto the CLI stack (fixture).
 fn push(session: &mut Session, re: &str) {
-    session.stack_add(fsm_parse_regex(re, None, None).unwrap());
+    session.stack_add(fsm_parse_regex(&session.opts, re, None, None).unwrap());
 }
 
 /// Push a topsorted regex (fixture). fsm_count leaves pathcount untouched, so
 /// a cyclic net only gets pathcount == PATHCOUNT_CYCLIC after fsm_topsort (the
 /// REPL topsorts regex results; a bare fsm_parse_regex leaves it UNKNOWN).
 fn push_topsorted(session: &mut Session, re: &str) {
-    session.stack_add(fsm_topsort(fsm_parse_regex(re, None, None).unwrap()));
+    session.stack_add(fsm_topsort(
+        fsm_parse_regex(&session.opts, re, None, None).unwrap(),
+    ));
 }
 
 /// Pop the top net and test recognizer-language equality against `re`.
 fn top_is(session: &mut Session, re: &str) -> bool {
-    let expected = fsm_parse_regex(re, None, None).unwrap();
+    let expected = fsm_parse_regex(&session.opts, re, None, None).unwrap();
     fsm_equivalent(session.stack_pop().unwrap(), expected) == 1
 }
 
@@ -81,7 +84,8 @@ fn help_family_prints_without_touching_the_stack() {
 // [spec:foma:sem:iface.foma-net-print-fn/test]
 #[test]
 fn foma_net_print_writes_save_format_and_returns_1() {
-    let net = fsm_parse_regex("a", None, None).unwrap();
+    let opts = &FomaOptions::default();
+    let net = fsm_parse_regex(opts, "a", None, None).unwrap();
     let mut buf: Vec<u8> = Vec::new();
     assert_eq!(foma_net_print(&net, &mut buf), 1);
     let s = String::from_utf8_lossy(&buf);
@@ -94,19 +98,23 @@ fn foma_net_print_writes_save_format_and_returns_1() {
     assert!(s.trim_end().ends_with("##end##"));
 }
 
-// iface_apply_set_params copies the four apply globals onto the handle in
+// iface_apply_set_params copies the four apply options onto the handle in
 // order: print_space, print_pairs, show_flags, obey_flags.
 // [spec:foma:sem:iface.iface-apply-set-params-fn/test]
 // [spec:foma:sem:foma.iface-apply-set-params-fn/test]
 #[test]
 fn apply_set_params_copies_the_four_globals() {
-    let net = fsm_parse_regex("a", None, None).unwrap();
+    let opts = &FomaOptions::default();
+    let net = fsm_parse_regex(opts, "a", None, None).unwrap();
     let mut h = apply_init(&net);
-    G_PRINT_SPACE.with(|v| v.set(1));
-    G_PRINT_PAIRS.with(|v| v.set(1));
-    G_SHOW_FLAGS.with(|v| v.set(1));
-    G_OBEY_FLAGS.with(|v| v.set(0));
-    iface_apply_set_params(&mut h);
+    let set_opts = FomaOptions {
+        print_space: true,
+        print_pairs: true,
+        show_flags: true,
+        obey_flags: false,
+        ..FomaOptions::default()
+    };
+    iface_apply_set_params(&set_opts, &mut h);
     assert_eq!(h.print_space, 1);
     assert_eq!(h.print_pairs, 1);
     assert_eq!(h.show_flags, 1);
@@ -404,17 +412,17 @@ fn letter_machine_preserves_single_char_language() {
     assert!(top_is(&mut session, "a b"));
 }
 
-// minimize net: forces g_minimal = 1 for the op, then RESTORES the saved
-// value; size unchanged, language preserved.
+// minimize net: forces the `minimal` option on for the op, then RESTORES the
+// saved value; size unchanged, language preserved.
 // [spec:foma:sem:iface.iface-minimize-fn/test]
 // [spec:foma:sem:foma.iface-minimize-fn/test]
 #[test]
 fn minimize_restores_g_minimal_and_preserves_language() {
     let mut session = Session::new();
-    G_MINIMAL.with(|v| v.set(0)); // user turned `minimal` OFF
+    session.opts.minimal = false; // user turned `minimal` OFF
     push(&mut session, "a | b");
     iface_minimize(&mut session);
-    assert_eq!(G_MINIMAL.with(|v| v.get()), 0); // restored to saved value
+    assert!(!session.opts.minimal); // restored to saved value
     assert_eq!(session.stack_size(), 1);
     assert!(top_is(&mut session, "a | b"));
 }
@@ -660,7 +668,7 @@ fn print_net_named_and_top_paths() {
     iface_print_net(&mut session, Some("Foo"), None);
     // Populate g_defines with Foo, then print it by name.
     G_DEFINES.with(|g| *g.borrow_mut() = Some(defined_networks_init()));
-    let def = fsm_parse_regex("x y", None, None).unwrap();
+    let def = fsm_parse_regex(&session.opts, "x y", None, None).unwrap();
     G_DEFINES.with(|g| {
         let mut g = g.borrow_mut();
         add_defined(g.as_deref_mut().unwrap(), Some(def), "Foo");
@@ -700,7 +708,7 @@ fn print_cmatrix_reports_missing_matrix() {
 #[test]
 fn print_cmatrix_att_unwritable_path_does_not_crash() {
     let mut session = Session::new();
-    let mut net = fsm_parse_regex("a b", None, None).unwrap();
+    let mut net = fsm_parse_regex(&session.opts, "a b", None, None).unwrap();
     crate::spelling::cmatrix_init(&mut net); // attach a confusion matrix
     session.stack_add(net);
     iface_print_cmatrix_att(&mut session, Some("/foma_no_such_dir_xyz123/cm.att"));
@@ -717,7 +725,7 @@ fn print_defined_handles_empty_and_populated() {
     let session = Session::new();
     iface_print_defined(); // g_defines None: "No defined symbols."
     G_DEFINES.with(|g| *g.borrow_mut() = Some(defined_networks_init()));
-    let def = fsm_parse_regex("x y", None, None).unwrap();
+    let def = fsm_parse_regex(&session.opts, "x y", None, None).unwrap();
     G_DEFINES.with(|g| {
         let mut g = g.borrow_mut();
         add_defined(g.as_deref_mut().unwrap(), Some(def), "Foo");
@@ -735,6 +743,7 @@ fn print_defined_handles_empty_and_populated() {
 // [spec:foma:sem:foma.iface-load-defined-fn/test]
 #[test]
 fn load_defined_restores_saved_definitions() {
+    let opts = &FomaOptions::default();
     let path = std::env::temp_dir().join("foma_s1_defined.gz");
     let p = path.to_str().unwrap();
     // Missing file: load reports "File error" (g_defines initialized so the
@@ -748,7 +757,7 @@ fn load_defined_restores_saved_definitions() {
     assert!(!missing);
 
     // Define Foo = [x y] and write the file via the io primitive.
-    let def = fsm_parse_regex("x y", None, None).unwrap();
+    let def = fsm_parse_regex(opts, "x y", None, None).unwrap();
     G_DEFINES.with(|g| {
         let mut g = g.borrow_mut();
         add_defined(g.as_deref_mut().unwrap(), Some(def), "Foo");
@@ -763,7 +772,7 @@ fn load_defined_restores_saved_definitions() {
         find_defined(g.as_deref_mut().unwrap(), "Foo").map(|f| fsm_copy(f))
     });
     let restored = restored.expect("Foo should be restored");
-    let expected = fsm_parse_regex("x y", None, None).unwrap();
+    let expected = fsm_parse_regex(opts, "x y", None, None).unwrap();
     assert_eq!(fsm_equivalent(restored, expected), 1);
 }
 
@@ -774,6 +783,7 @@ fn load_defined_restores_saved_definitions() {
 // [spec:foma:sem:foma.iface-load-stack-fn/test]
 #[test]
 fn load_stack_pushes_in_file_order_last_on_top() {
+    let opts = &FomaOptions::default();
     let path = std::env::temp_dir().join("foma_s1_stack.gz");
     let p = path.to_str().unwrap();
     // Build a bottom->top save file (a, b, c) exactly as iface_save_stack
@@ -784,7 +794,7 @@ fn load_stack_pushes_in_file_order_last_on_top() {
         let file = File::create(p).unwrap();
         let mut gz = GzEncoder::new(file, Compression::default());
         for r in ["a", "b", "c"] {
-            let mut net = fsm_parse_regex(r, None, None).unwrap();
+            let mut net = fsm_parse_regex(opts, r, None, None).unwrap();
             fsm_count(&mut net);
             foma_net_print(&net, &mut gz);
         }
@@ -893,18 +903,19 @@ fn print_shortest_string_both_arities_keep_net() {
 // [spec:foma:sem:foma.iface-read-prolog-fn/test]
 #[test]
 fn read_att_and_prolog_roundtrip_and_error() {
+    let opts = &FomaOptions::default();
     let dir = std::env::temp_dir();
     let attp = dir.join("foma_s2_read.att");
     let att = attp.to_str().unwrap();
     {
-        let net = fsm_parse_regex("a b", None, None).unwrap();
+        let net = fsm_parse_regex(opts, "a b", None, None).unwrap();
         let mut f = File::create(att).unwrap();
-        net_print_att(&net, &mut f);
+        net_print_att(opts, &net, &mut f);
     }
     let plp = dir.join("foma_s2_read.prolog");
     let pl = plp.to_str().unwrap();
     {
-        let mut net = fsm_parse_regex("a b", None, None).unwrap();
+        let mut net = fsm_parse_regex(opts, "a b", None, None).unwrap();
         foma_write_prolog(&mut net, Some(pl));
     }
     let mut session = Session::new();
@@ -991,7 +1002,7 @@ fn substitute_symbol_and_defined() {
 
     // substitute defined: X = [p] replaces the arc labelled `a`.
     G_DEFINES.with(|g| *g.borrow_mut() = Some(defined_networks_init()));
-    let def = fsm_parse_regex("p", None, None).unwrap();
+    let def = fsm_parse_regex(&session.opts, "p", None, None).unwrap();
     G_DEFINES.with(|g| {
         let mut g = g.borrow_mut();
         add_defined(g.as_deref_mut().unwrap(), Some(def), "X");
@@ -1118,6 +1129,7 @@ fn rotate_swaps_ends_turn_reverses() {
 // [spec:foma:sem:foma.iface-save-stack-fn/test]
 #[test]
 fn save_defined_and_save_stack_roundtrip() {
+    let opts = &FomaOptions::default();
     let dir = std::env::temp_dir();
     let dp = dir.join("foma_s2_saved.gz");
     let d = dp.to_str().unwrap();
@@ -1127,7 +1139,7 @@ fn save_defined_and_save_stack_roundtrip() {
     assert!(!std::path::Path::new(d).exists());
     // Populate, save, reset, load back.
     G_DEFINES.with(|g| *g.borrow_mut() = Some(defined_networks_init()));
-    let def = fsm_parse_regex("x y", None, None).unwrap();
+    let def = fsm_parse_regex(opts, "x y", None, None).unwrap();
     G_DEFINES.with(|g| {
         let mut g = g.borrow_mut();
         add_defined(g.as_deref_mut().unwrap(), Some(def), "Foo");
@@ -1139,7 +1151,7 @@ fn save_defined_and_save_stack_roundtrip() {
         let mut g = g.borrow_mut();
         find_defined(g.as_deref_mut().unwrap(), "Foo").map(|f| fsm_copy(f))
     });
-    let expected = fsm_parse_regex("x y", None, None).unwrap();
+    let expected = fsm_parse_regex(opts, "x y", None, None).unwrap();
     assert_eq!(fsm_equivalent(restored.expect("Foo restored"), expected), 1);
 
     // save stack: writes bottom→top (a, b, c); load pushes in file order.
@@ -1177,47 +1189,47 @@ fn save_defined_and_save_stack_roundtrip() {
 // [spec:foma:sem:foma.iface-show-variables-fn/test]
 #[test]
 fn set_and_show_variables() {
-    let session = Session::new();
+    let mut session = Session::new();
     // BOOL: ON/OFF/1/0 all recognised.
-    iface_set_variable("minimal", "OFF");
-    assert_eq!(G_MINIMAL.with(|v| v.get()), 0);
-    iface_set_variable("minimal", "ON");
-    assert_eq!(G_MINIMAL.with(|v| v.get()), 1);
-    iface_set_variable("minimal", "0");
-    assert_eq!(G_MINIMAL.with(|v| v.get()), 0);
-    iface_set_variable("minimal", "1");
-    assert_eq!(G_MINIMAL.with(|v| v.get()), 1);
-    iface_set_variable("minimal", "bogus"); // invalid → unchanged
-    assert_eq!(G_MINIMAL.with(|v| v.get()), 1);
+    iface_set_variable(&mut session, "minimal", "OFF");
+    assert!(!session.opts.minimal);
+    iface_set_variable(&mut session, "minimal", "ON");
+    assert!(session.opts.minimal);
+    iface_set_variable(&mut session, "minimal", "0");
+    assert!(!session.opts.minimal);
+    iface_set_variable(&mut session, "minimal", "1");
+    assert!(session.opts.minimal);
+    iface_set_variable(&mut session, "minimal", "bogus"); // invalid → unchanged
+    assert!(session.opts.minimal);
 
     // Full-name match: "hopcroft-XYZ" shares an 8-char prefix with "hopcroft-min"
     // but is not it, so it must NOT touch the variable (C's strncmp-8 collided).
-    iface_set_variable("hopcroft-min", "ON");
-    assert_eq!(G_MINIMIZE_HOPCROFT.with(|v| v.get()), 1);
-    iface_set_variable("hopcroft-XYZ", "OFF"); // prefix-equal but different: no match
-    assert_eq!(G_MINIMIZE_HOPCROFT.with(|v| v.get()), 1); // unchanged
+    iface_set_variable(&mut session, "hopcroft-min", "ON");
+    assert!(session.opts.minimize_hopcroft);
+    iface_set_variable(&mut session, "hopcroft-XYZ", "OFF"); // prefix-equal but different: no match
+    assert!(session.opts.minimize_hopcroft); // unchanged
 
     // INT: strtol truncation; no-digit / negative are rejected.
-    iface_set_variable("med-limit", "7");
-    assert_eq!(G_MED_LIMIT.with(|v| v.get()), 7);
-    iface_set_variable("med-limit", "abc"); // no digits → unchanged
-    assert_eq!(G_MED_LIMIT.with(|v| v.get()), 7);
-    iface_set_variable("med-limit", "-3"); // negative → unchanged
-    assert_eq!(G_MED_LIMIT.with(|v| v.get()), 7);
+    iface_set_variable(&mut session, "med-limit", "7");
+    assert_eq!(session.opts.med_limit, 7);
+    iface_set_variable(&mut session, "med-limit", "abc"); // no digits → unchanged
+    assert_eq!(session.opts.med_limit, 7);
+    iface_set_variable(&mut session, "med-limit", "-3"); // negative → unchanged
+    assert_eq!(session.opts.med_limit, 7);
 
     // STRING: verbatim replace.
-    iface_set_variable("att-epsilon", "@E@");
-    assert_eq!(G_ATT_EPSILON.with(|s| s.borrow().clone()), "@E@");
+    iface_set_variable(&mut session, "att-epsilon", "@E@");
+    assert_eq!(session.opts.att_epsilon, "@E@");
 
     // Unknown variable: message only, no panic.
-    iface_set_variable("zzznope", "ON");
+    iface_set_variable(&mut session, "zzznope", "ON");
 
     // show variable / variables: non-panic, no stack effect.
-    iface_show_variable("med-limit"); // Wave 4 fix: prints the value (7), not OFF
-    iface_show_variable("att-epsilon");
-    iface_show_variable("minimal");
-    iface_show_variable("zzznope"); // "no global variable"
-    iface_show_variables();
+    iface_show_variable(&mut session, "med-limit"); // Wave 4 fix: prints the value (7), not OFF
+    iface_show_variable(&mut session, "att-epsilon");
+    iface_show_variable(&mut session, "minimal");
+    iface_show_variable(&mut session, "zzznope"); // "no global variable"
+    iface_show_variables(&mut session);
     assert_eq!(session.stack_size(), 0);
 }
 
@@ -1328,37 +1340,55 @@ fn test_family_pins_predicate_and_preserves_stack() {
     // functional: true for a:b, false for a:b|a:c.
     push(&mut session, "a:b");
     let t = session.stack_find_top().unwrap();
-    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isfunctional(f)), 1);
+    assert_eq!(
+        session.stack_entry_fsm_with_opts(t, |opts, f| fsm_isfunctional(opts, f)),
+        1
+    );
     iface_test_functional(&mut session);
     assert_eq!(session.stack_size(), 1);
     let _ = session.stack_pop();
     push(&mut session, "[a:b] | [a:c]");
     let t = session.stack_find_top().unwrap();
-    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isfunctional(f)), 0);
+    assert_eq!(
+        session.stack_entry_fsm_with_opts(t, |opts, f| fsm_isfunctional(opts, f)),
+        0
+    );
     iface_test_functional(&mut session);
     let _ = session.stack_pop();
 
     // identity: true for a, false for a:b.
     push(&mut session, "a");
     let t = session.stack_find_top().unwrap();
-    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isidentity(f)), 1);
+    assert_eq!(
+        session.stack_entry_fsm_with_opts(t, |opts, f| fsm_isidentity(opts, f)),
+        1
+    );
     iface_test_identity(&mut session);
     let _ = session.stack_pop();
     push(&mut session, "a:b");
     let t = session.stack_find_top().unwrap();
-    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isidentity(f)), 0);
+    assert_eq!(
+        session.stack_entry_fsm_with_opts(t, |opts, f| fsm_isidentity(opts, f)),
+        0
+    );
     iface_test_identity(&mut session);
     let _ = session.stack_pop();
 
     // unambiguous: true for a:b, false for a:b|a:c.
     push(&mut session, "a:b");
     let t = session.stack_find_top().unwrap();
-    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isunambiguous(f)), 1);
+    assert_eq!(
+        session.stack_entry_fsm_with_opts(t, |opts, f| fsm_isunambiguous(opts, f)),
+        1
+    );
     iface_test_unambiguous(&mut session);
     let _ = session.stack_pop();
     push(&mut session, "[a:b] | [a:c]");
     let t = session.stack_find_top().unwrap();
-    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isunambiguous(f)), 0);
+    assert_eq!(
+        session.stack_entry_fsm_with_opts(t, |opts, f| fsm_isunambiguous(opts, f)),
+        0
+    );
     iface_test_unambiguous(&mut session);
     let _ = session.stack_pop();
 
@@ -1372,14 +1402,20 @@ fn test_family_pins_predicate_and_preserves_stack() {
     // null / nonnull: empty language vs. non-empty.
     push(&mut session, "[a] - [a]"); // empty
     let t = session.stack_find_top().unwrap();
-    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isempty(f)), 1);
+    assert_eq!(
+        session.stack_entry_fsm_with_opts(t, |opts, f| fsm_isempty(opts, f)),
+        1
+    );
     iface_test_null(&mut session);
     iface_test_nonnull(&mut session);
     assert_eq!(session.stack_size(), 1);
     let _ = session.stack_pop();
     push(&mut session, "a"); // non-empty
     let t = session.stack_find_top().unwrap();
-    assert_eq!(session.stack_entry_fsm(t, |f| fsm_isempty(f)), 0);
+    assert_eq!(
+        session.stack_entry_fsm_with_opts(t, |opts, f| fsm_isempty(opts, f)),
+        0
+    );
     iface_test_null(&mut session);
     iface_test_nonnull(&mut session);
     let _ = session.stack_pop();
@@ -1580,14 +1616,14 @@ fn write_att_and_prolog_roundtrip() {
     push(&mut session, "a b");
     assert_eq!(iface_write_att(&mut session, Some(att)), 0);
     assert_eq!(session.stack_size(), 1); // net not consumed
-    let back = read_att(att).unwrap();
-    let expected = fsm_parse_regex("a b", None, None).unwrap();
+    let back = read_att(&session.opts, att).unwrap();
+    let expected = fsm_parse_regex(&session.opts, "a b", None, None).unwrap();
     assert_eq!(fsm_equivalent(back, expected), 1);
 
     iface_write_prolog(&mut session, Some(pl));
     assert_eq!(session.stack_size(), 1);
     let back = fsm_read_prolog(pl).unwrap();
-    let expected = fsm_parse_regex("a b", None, None).unwrap();
+    let expected = fsm_parse_regex(&session.opts, "a b", None, None).unwrap();
     assert_eq!(fsm_equivalent(back, expected), 1);
 }
 
@@ -1634,7 +1670,8 @@ fn sigptr_maps_reserved_and_special_symbols() {
 // [spec:foma:sem:iface.print-sigma-fn/test]
 #[test]
 fn print_sigma_static_formats_alphabet() {
-    let net = fsm_parse_regex("a b", None, None).unwrap();
+    let opts = &FomaOptions::default();
+    let net = fsm_parse_regex(opts, "a b", None, None).unwrap();
     let mut buf: Vec<u8> = Vec::new();
     assert_eq!(print_sigma(net.sigma.as_deref(), &mut buf), 1);
     let s = String::from_utf8(buf).unwrap();
@@ -1651,7 +1688,8 @@ fn print_sigma_static_formats_alphabet() {
 // [spec:foma:sem:iface.print-mem-size-fn/test]
 #[test]
 fn print_stats_static_returns_zero() {
-    let mut net = fsm_parse_regex("a b | c", None, None).unwrap();
+    let opts = &FomaOptions::default();
+    let mut net = fsm_parse_regex(opts, "a b | c", None, None).unwrap();
     fsm_count(&mut net);
     assert_eq!(print_stats(&net), 0);
     // exercise print_mem_size directly as well (side-effect only).
@@ -1663,10 +1701,11 @@ fn print_stats_static_returns_zero() {
 // [spec:foma:sem:iface.print-net-fn/test]
 #[test]
 fn print_net_static_writes_dump() {
-    let mut net = fsm_parse_regex("a b", None, None).unwrap();
+    let opts = &FomaOptions::default();
+    let mut net = fsm_parse_regex(opts, "a b", None, None).unwrap();
     assert_eq!(print_net(&mut net, None), 0); // to stdout
     let p = std::env::temp_dir().join("foma_s2_printnet.txt");
-    let mut net = fsm_parse_regex("a b", None, None).unwrap();
+    let mut net = fsm_parse_regex(opts, "a b", None, None).unwrap();
     assert_eq!(print_net(&mut net, Some(p.to_str().unwrap())), 0);
     let s = std::fs::read_to_string(&p).unwrap();
     assert!(s.contains("Sigma:"));
@@ -1678,10 +1717,11 @@ fn print_net_static_writes_dump() {
 // [spec:foma:sem:iface.print-dot-fn+1/test]
 #[test]
 fn print_dot_static_writes_digraph() {
-    let mut net = fsm_parse_regex("a b", None, None).unwrap();
+    let opts = &FomaOptions::default();
+    let mut net = fsm_parse_regex(opts, "a b", None, None).unwrap();
     assert_eq!(print_dot(&mut net, None), 1); // to stdout
     let p = std::env::temp_dir().join("foma_s2_printdot.dot");
-    let mut net = fsm_parse_regex("a b", None, None).unwrap();
+    let mut net = fsm_parse_regex(opts, "a b", None, None).unwrap();
     assert_eq!(print_dot(&mut net, Some(p.to_str().unwrap())), 1);
     let s = std::fs::read_to_string(&p).unwrap();
     assert!(
@@ -1692,7 +1732,7 @@ fn print_dot_static_writes_digraph() {
     assert!(s.trim_end().ends_with("}"));
     // Unwritable path (a file under a non-existent directory): report the error
     // and return 1 instead of crashing.
-    let mut net = fsm_parse_regex("a b", None, None).unwrap();
+    let mut net = fsm_parse_regex(opts, "a b", None, None).unwrap();
     assert_eq!(
         print_dot(&mut net, Some("/foma_no_such_dir_xyz123/out.dot")),
         1

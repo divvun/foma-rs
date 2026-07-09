@@ -7,9 +7,9 @@
 //! former `MAIN_STACK` / `ARENA` thread_locals, so independent sessions can
 //! coexist on one thread (embeddable) with nothing hidden shared between them.
 //!
-//! Later tiers fold the remaining CLI globals (the `G_*` option flags and the
-//! define registry) in as further `Session` fields.
+//! The define registry follows in a later tier as a further `Session` field.
 
+use crate::options::FomaOptions;
 use crate::types::StackEntry;
 
 /// The mutable state of one interactive foma session.
@@ -20,14 +20,18 @@ pub struct Session {
     pub(crate) stack_head: Option<usize>,
     /// Arena backing the malloc'd `stack_entry` nodes (see `stack.rs`).
     pub(crate) stack_arena: Vec<StackEntry>,
+    /// The session's option set (C: the `g_*` globals; CLI `set variable`).
+    pub opts: FomaOptions,
 }
 
 impl Session {
-    /// Create a session with a freshly-initialised, empty command stack.
+    /// Create a session with a freshly-initialised, empty command stack and
+    /// default options.
     pub fn new() -> Session {
         let mut session = Session {
             stack_head: None,
             stack_arena: Vec::new(),
+            opts: FomaOptions::default(),
         };
         session.stack_init();
         session

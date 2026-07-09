@@ -6,7 +6,7 @@ use super::*;
 // [spec:foma:sem:constructions.fsm-intersect-fn]
 // [spec:foma:def:fomalib.fsm-intersect-fn]
 // [spec:foma:sem:fomalib.fsm-intersect-fn]
-pub fn fsm_intersect(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
+pub fn fsm_intersect(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
     /* C: struct blookup {int mainloop; int target; } *array, *bptr; —
     function-local type */
     #[derive(Clone)]
@@ -15,10 +15,10 @@ pub fn fsm_intersect(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
         target: i32,
     }
 
-    let mut net1 = fsm_minimize(net1);
-    let mut net2 = fsm_minimize(net2);
+    let mut net1 = fsm_minimize(opts, net1);
+    let mut net2 = fsm_minimize(opts, net2);
 
-    if fsm_isempty(&mut net1) != 0 || fsm_isempty(&mut net2) != 0 {
+    if fsm_isempty(opts, &mut net1) != 0 || fsm_isempty(opts, &mut net2) != 0 {
         fsm_destroy(net1);
         fsm_destroy(net2);
         return fsm_empty_set();
@@ -156,7 +156,7 @@ pub fn fsm_intersect(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
 // [spec:foma:sem:constructions.fsm-compose-fn]
 // [spec:foma:def:fomalib.fsm-compose-fn]
 // [spec:foma:sem:fomalib.fsm-compose-fn]
-pub fn fsm_compose(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
+pub fn fsm_compose(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
     /* The composition algorithm is the basic naive composition where we lazily      */
     /* take the cross-product of states P and Q and move to a new state with symbols */
     /* ain, bout if the symbols aout = bin.  Also, if aout = 0 state p goes to       */
@@ -201,13 +201,13 @@ pub fn fsm_compose(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
         tail: usize,
     }
 
-    let g_compose_tristate = G_COMPOSE_TRISTATE.with(|c| c.get());
-    let g_flag_is_epsilon = G_FLAG_IS_EPSILON.with(|c| c.get());
+    let g_compose_tristate = opts.compose_tristate;
+    let g_flag_is_epsilon = opts.flag_is_epsilon;
 
-    let mut net1 = fsm_minimize(net1);
-    let mut net2 = fsm_minimize(net2);
+    let mut net1 = fsm_minimize(opts, net1);
+    let mut net2 = fsm_minimize(opts, net2);
 
-    if fsm_isempty(&mut net1) != 0 || fsm_isempty(&mut net2) != 0 {
+    if fsm_isempty(opts, &mut net1) != 0 || fsm_isempty(opts, &mut net2) != 0 {
         fsm_destroy(net1);
         fsm_destroy(net2);
         return fsm_empty_set();
@@ -219,7 +219,7 @@ pub fn fsm_compose(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
     /* supposed to have the behavior of EPSILON                     */
     /* And we need to do this before merging the sigmas, of course  */
 
-    if g_flag_is_epsilon != 0 {
+    if g_flag_is_epsilon {
         let mut flags1 = 0;
         let mut flags2 = 0;
         let max2sigma = sigma_max(net2.sigma.as_deref());
@@ -264,7 +264,7 @@ pub fn fsm_compose(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
     fsm_merge_sigma(&mut net1, &mut net2);
 
     let mut is_flag: Vec<bool> = Vec::new();
-    if g_flag_is_epsilon != 0 {
+    if g_flag_is_epsilon {
         /* Create lookup table for quickly checking if a symbol is a flag */
         /* C: malloc'd (uninitialized for numbers absent from the sigma);
         zero-initialized here */
@@ -438,13 +438,13 @@ pub fn fsm_compose(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
         let mut ai = point_a[a as usize].transitions;
         while net1.states[ai].state_no == a {
             let aout = net1.states[ai].out as i32;
-            if aout != EPSILON && g_flag_is_epsilon == 0 {
+            if aout != EPSILON && !g_flag_is_epsilon {
                 ai += 1;
                 continue;
             }
             let ain = net1.states[ai].r#in as i32;
 
-            if g_flag_is_epsilon != 0 && aout != -1 && mode == 0 && is_flag[aout as usize] {
+            if g_flag_is_epsilon && aout != -1 && mode == 0 && is_flag[aout as usize] {
                 let atarget = net1.states[ai].target;
                 let mut target_number = triplet_hash_find(&th, atarget, b, 0);
                 if target_number == -1 {
@@ -464,7 +464,7 @@ pub fn fsm_compose(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
                 );
             }
 
-            if g_compose_tristate == 0 {
+            if !g_compose_tristate {
                 /* Check A:0 arcs on upper side */
                 if aout == EPSILON && mode == 0 {
                     /* mode -> 0 */
@@ -487,7 +487,7 @@ pub fn fsm_compose(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
                         current_start,
                     );
                 }
-            } else if g_compose_tristate != 0 {
+            } else if g_compose_tristate {
                 if aout == EPSILON && mode != 2 {
                     /* mode -> 1 */
                     let atarget = net1.states[ai].target;
@@ -517,14 +517,14 @@ pub fn fsm_compose(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
         let mut bi = point_b[b as usize].transitions;
         while net2.states[bi].state_no == b {
             let bin = net2.states[bi].r#in as i32;
-            if bin != EPSILON && g_flag_is_epsilon == 0 {
+            if bin != EPSILON && !g_flag_is_epsilon {
                 bi += 1;
                 continue;
             }
 
             let bout = net2.states[bi].out as i32;
 
-            if g_flag_is_epsilon != 0 && bin != -1 && is_flag[bin as usize] {
+            if g_flag_is_epsilon && bin != -1 && is_flag[bin as usize] {
                 let btarget = net2.states[bi].target;
                 let mut target_number = triplet_hash_find(&th, a, btarget, 1);
                 if target_number == -1 {
@@ -544,7 +544,7 @@ pub fn fsm_compose(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
                 );
             }
 
-            if g_compose_tristate == 0 {
+            if !g_compose_tristate {
                 /* Check 0:A arcs on lower side */
                 if bin == EPSILON {
                     /* mode -> 1 */
@@ -567,7 +567,7 @@ pub fn fsm_compose(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
                         current_start,
                     );
                 }
-            } else if g_compose_tristate != 0 {
+            } else if g_compose_tristate {
                 /* Check 0:A arcs on lower side */
                 if bin == EPSILON && mode != 1 {
                     /* mode -> 1 */
@@ -606,7 +606,7 @@ pub fn fsm_compose(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
     drop(index);
     drop(outarray);
 
-    if g_flag_is_epsilon != 0 {
+    if g_flag_is_epsilon {
         /* free(is_flag) */
         drop(is_flag);
     }
@@ -619,7 +619,7 @@ pub fn fsm_compose(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
 // [spec:foma:sem:constructions.fsm-cross-product-fn]
 // [spec:foma:def:fomalib.fsm-cross-product-fn]
 // [spec:foma:sem:fomalib.fsm-cross-product-fn]
-pub fn fsm_cross_product(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
+pub fn fsm_cross_product(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
     /* Perform a cross product by running two machines in parallel */
     /* The approach here allows a state to stay, creating a a:0 or 0:b transition */
     /* with the a/b-state waiting, and the arc going to {a,stay} or {stay,b} */
@@ -639,8 +639,8 @@ pub fn fsm_cross_product(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
     /* This function is only used for explicit cross products */
     /* such as a:b or A.x.B, etc.  In rewrite rules, we use rewrite_cp() */
 
-    let mut net1 = fsm_minimize(net1);
-    let mut net2 = fsm_minimize(net2);
+    let mut net1 = fsm_minimize(opts, net1);
+    let mut net2 = fsm_minimize(opts, net2);
 
     fsm_merge_sigma(&mut net1, &mut net2);
 

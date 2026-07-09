@@ -11,6 +11,8 @@
 
 use crate::constructions::{add_fsm_arc, fsm_count};
 use crate::int_stack::{int_stack_clear, int_stack_isempty, int_stack_pop, int_stack_push};
+#[cfg(test)]
+use crate::options::FomaOptions;
 use crate::types::{Fsm, FsmState, PATHCOUNT_CYCLIC, PATHCOUNT_OVERFLOW};
 
 // [spec:foma:def:topsort.fsm-topsort-fn]
@@ -268,8 +270,9 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-topsort-fn+1/test]
     #[test]
     fn topsort_counts_paths_of_small_acyclic_languages() {
+        let opts = &FomaOptions::default();
         for (re, expected) in [("[a|b] c", 2i64), ("[a|b] [c|d]", 4), ("a b c", 1)] {
-            let net = fsm_topsort(fsm_parse_regex(re, None, None).unwrap());
+            let net = fsm_topsort(fsm_parse_regex(opts, re, None, None).unwrap());
             assert_eq!(net.pathcount, expected, "pathcount of {re}");
             assert_eq!(net.is_loop_free, 1, "loop-free flag of {re}");
             /* state numbers equal topological rank: lines stay grouped in
@@ -295,8 +298,9 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-topsort-fn+1/test]
     #[test]
     fn topsort_selfloop_marks_cyclic_and_leaves_states_untouched() {
+        let opts = &FomaOptions::default();
         /* a+ has a self-loop: caught in pass 1 over the line array */
-        let net = fsm_parse_regex("a+", None, None).unwrap();
+        let net = fsm_parse_regex(opts, "a+", None, None).unwrap();
         let before = lines(&net);
         let net = fsm_topsort(net);
         assert_eq!(net.pathcount, PATHCOUNT_CYCLIC);
@@ -309,9 +313,10 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-topsort-fn+1/test]
     #[test]
     fn topsort_two_state_cycle_marks_cyclic_via_treatcount() {
+        let opts = &FomaOptions::default();
         /* [a b]+ has the cycle 1 -b-> 2 -a-> 1 and no self-loop: no state on
         the cycle ever reaches invcount 0, so treatcount stays > 0 */
-        let net = fsm_parse_regex("[a b]+", None, None).unwrap();
+        let net = fsm_parse_regex(opts, "[a b]+", None, None).unwrap();
         let before = lines(&net);
         let net = fsm_topsort(net);
         assert_eq!(net.pathcount, PATHCOUNT_CYCLIC);
@@ -323,9 +328,10 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-topsort-fn+1/test]
     #[test]
     fn topsort_back_edge_into_treated_state_marks_cyclic() {
+        let opts = &FomaOptions::default();
         /* [a b]* loops back into the initial state: the arc into already-
         treated state 0 triggers the treated[target] == 1 cyclic exit */
-        let net = fsm_parse_regex("[a b]*", None, None).unwrap();
+        let net = fsm_parse_regex(opts, "[a b]*", None, None).unwrap();
         let before = lines(&net);
         let net = fsm_topsort(net);
         assert_eq!(net.pathcount, PATHCOUNT_CYCLIC);

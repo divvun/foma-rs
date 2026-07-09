@@ -9,11 +9,11 @@ const LINE_LIMIT: usize = 8192;
 // [spec:foma:sem:iface.iface-apply-set-params-fn]
 // [spec:foma:def:foma.iface-apply-set-params-fn]
 // [spec:foma:sem:foma.iface-apply-set-params-fn]
-pub fn iface_apply_set_params(h: &mut ApplyHandle) {
-    apply_set_print_space(h, G_PRINT_SPACE.with(|v| v.get()));
-    apply_set_print_pairs(h, G_PRINT_PAIRS.with(|v| v.get()));
-    apply_set_show_flags(h, G_SHOW_FLAGS.with(|v| v.get()));
-    apply_set_obey_flags(h, G_OBEY_FLAGS.with(|v| v.get()));
+pub fn iface_apply_set_params(opts: &FomaOptions, h: &mut ApplyHandle) {
+    apply_set_print_space(h, opts.print_space as i32);
+    apply_set_print_pairs(h, opts.print_pairs as i32);
+    apply_set_show_flags(h, opts.show_flags as i32);
+    apply_set_obey_flags(h, opts.obey_flags as i32);
 }
 
 // [spec:foma:def:iface.iface-apply-med-fn]
@@ -27,10 +27,10 @@ pub fn iface_apply_med(session: &mut Session, word: &str) {
     // amedh = stack_get_med_ah() — arena index of the top entry (see module notes)
     let amedh = session.stack_get_med_ah().unwrap();
 
-    session.stack_entry_amedh(amedh, |h| {
+    session.stack_entry_amedh_with_opts(amedh, |opts, h| {
         apply_med_set_heap_max(h, 4194304 + 1);
-        apply_med_set_med_limit(h, G_MED_LIMIT.with(|v| v.get()));
-        apply_med_set_med_cutoff(h, G_MED_CUTOFF.with(|v| v.get()));
+        apply_med_set_med_limit(h, opts.med_limit);
+        apply_med_set_med_cutoff(h, opts.med_cutoff);
     });
 
     let result = session.stack_entry_amedh(amedh, |h| apply_med(h, Some(word)));
@@ -111,7 +111,7 @@ pub fn iface_apply_file(
     };
 
     let ah = session.stack_get_ah().unwrap();
-    session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
+    session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
 
     let mut reader = BufReader::new(infile);
     let mut inword = String::new();
@@ -175,7 +175,7 @@ pub fn iface_apply_down(session: &mut Session, word: &str) {
         return;
     }
     let ah = session.stack_get_ah().unwrap();
-    session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
+    session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
     let result = session.stack_entry_ah(ah, |h| apply_down(h, Some(word)));
     match result {
         None => {
@@ -186,7 +186,7 @@ pub fn iface_apply_down(session: &mut Session, word: &str) {
             print!("{}\n", r);
         }
     }
-    let mut i = G_LIST_LIMIT.with(|v| v.get());
+    let mut i = session.opts.list_limit;
     while i > 0 {
         let result = session.stack_entry_ah(ah, |h| apply_down(h, None));
         match result {
@@ -206,7 +206,7 @@ pub fn iface_apply_up(session: &mut Session, word: &str) {
         return;
     }
     let ah = session.stack_get_ah().unwrap();
-    session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
+    session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
     let result = session.stack_entry_ah(ah, |h| apply_up(h, Some(word)));
     match result {
         None => {
@@ -217,7 +217,7 @@ pub fn iface_apply_up(session: &mut Session, word: &str) {
             print!("{}\n", r);
         }
     }
-    let mut i = G_LIST_LIMIT.with(|v| v.get());
+    let mut i = session.opts.list_limit;
     while i > 0 {
         let result = session.stack_entry_ah(ah, |h| apply_up(h, None));
         match result {
@@ -237,13 +237,13 @@ pub fn iface_lower_words(session: &mut Session, limit: i32) {
         return;
     }
     let limit = if limit == -1 {
-        G_LIST_LIMIT.with(|v| v.get())
+        session.opts.list_limit
     } else {
         limit
     };
     if iface_stack_check(session, 1) != 0 {
         let ah = session.stack_get_ah().unwrap();
-        session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
+        session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
         let mut i = limit;
         while i > 0 {
             let result = session.stack_entry_ah(ah, |h| apply_lower_words(h));
@@ -293,7 +293,7 @@ pub fn iface_apply_random(
     limit: i32,
 ) {
     let limit = if limit == -1 {
-        G_LIST_RANDOM_LIMIT.with(|v| v.get())
+        session.opts.list_random_limit
     } else {
         limit
     };
@@ -301,7 +301,7 @@ pub fn iface_apply_random(
         // calloc(limit, sizeof(struct apply_results {char *string; int count;}))
         let mut results: Vec<(Option<String>, i32)> = vec![(None, 0); limit as usize];
         let ah = session.stack_get_ah().unwrap();
-        session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
+        session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
         let mut i = limit;
         while i > 0 {
             let result = session.stack_entry_ah(ah, |h| applyer(h));
@@ -341,19 +341,40 @@ pub fn iface_print_shortest_string(session: &mut Session) {
         let top = session.stack_find_top().unwrap();
         let mut one = session.stack_entry_fsm(top, |f| fsm_copy(f));
         if session.stack_entry_fsm(top, |f| f.arity) == 1 {
-            let result = fsm_minimize(fsm_minus(
-                fsm_copy(&mut one),
-                fsm_concat(
-                    fsm_kleene_plus(fsm_identity()),
-                    fsm_lower(fsm_compose(
+            let result = fsm_minimize(
+                &session.opts,
+                fsm_minus(
+                    &session.opts,
+                    fsm_copy(&mut one),
+                    fsm_concat(
+                        &session.opts,
+                        fsm_kleene_plus(&session.opts, fsm_identity()),
                         fsm_lower(fsm_compose(
-                            fsm_copy(&mut one),
-                            fsm_kleene_star(fsm_cross_product(fsm_identity(), fsm_symbol("@TMP@"))),
+                            &session.opts,
+                            fsm_lower(fsm_compose(
+                                &session.opts,
+                                fsm_copy(&mut one),
+                                fsm_kleene_star(
+                                    &session.opts,
+                                    fsm_cross_product(
+                                        &session.opts,
+                                        fsm_identity(),
+                                        fsm_symbol("@TMP@"),
+                                    ),
+                                ),
+                            )),
+                            fsm_kleene_star(
+                                &session.opts,
+                                fsm_cross_product(
+                                    &session.opts,
+                                    fsm_symbol("@TMP@"),
+                                    fsm_identity(),
+                                ),
+                            ),
                         )),
-                        fsm_kleene_star(fsm_cross_product(fsm_symbol("@TMP@"), fsm_identity())),
-                    )),
+                    ),
                 ),
-            ));
+            );
             let mut ah = apply_init(&result);
             let word = apply_words(&mut ah);
             if let Some(w) = &word {
@@ -365,32 +386,74 @@ pub fn iface_print_shortest_string(session: &mut Session) {
         } else {
             let mut onel = fsm_lower(fsm_copy(&mut one));
             let mut oneu = fsm_upper(one);
-            let result_u = fsm_minimize(fsm_minus(
-                fsm_copy(&mut oneu),
-                fsm_concat(
-                    fsm_kleene_plus(fsm_identity()),
-                    fsm_lower(fsm_compose(
+            let result_u = fsm_minimize(
+                &session.opts,
+                fsm_minus(
+                    &session.opts,
+                    fsm_copy(&mut oneu),
+                    fsm_concat(
+                        &session.opts,
+                        fsm_kleene_plus(&session.opts, fsm_identity()),
                         fsm_lower(fsm_compose(
-                            fsm_copy(&mut oneu),
-                            fsm_kleene_star(fsm_cross_product(fsm_identity(), fsm_symbol("@TMP@"))),
+                            &session.opts,
+                            fsm_lower(fsm_compose(
+                                &session.opts,
+                                fsm_copy(&mut oneu),
+                                fsm_kleene_star(
+                                    &session.opts,
+                                    fsm_cross_product(
+                                        &session.opts,
+                                        fsm_identity(),
+                                        fsm_symbol("@TMP@"),
+                                    ),
+                                ),
+                            )),
+                            fsm_kleene_star(
+                                &session.opts,
+                                fsm_cross_product(
+                                    &session.opts,
+                                    fsm_symbol("@TMP@"),
+                                    fsm_identity(),
+                                ),
+                            ),
                         )),
-                        fsm_kleene_star(fsm_cross_product(fsm_symbol("@TMP@"), fsm_identity())),
-                    )),
+                    ),
                 ),
-            ));
-            let result_l = fsm_minimize(fsm_minus(
-                fsm_copy(&mut onel),
-                fsm_concat(
-                    fsm_kleene_plus(fsm_identity()),
-                    fsm_lower(fsm_compose(
+            );
+            let result_l = fsm_minimize(
+                &session.opts,
+                fsm_minus(
+                    &session.opts,
+                    fsm_copy(&mut onel),
+                    fsm_concat(
+                        &session.opts,
+                        fsm_kleene_plus(&session.opts, fsm_identity()),
                         fsm_lower(fsm_compose(
-                            fsm_copy(&mut onel),
-                            fsm_kleene_star(fsm_cross_product(fsm_identity(), fsm_symbol("@TMP@"))),
+                            &session.opts,
+                            fsm_lower(fsm_compose(
+                                &session.opts,
+                                fsm_copy(&mut onel),
+                                fsm_kleene_star(
+                                    &session.opts,
+                                    fsm_cross_product(
+                                        &session.opts,
+                                        fsm_identity(),
+                                        fsm_symbol("@TMP@"),
+                                    ),
+                                ),
+                            )),
+                            fsm_kleene_star(
+                                &session.opts,
+                                fsm_cross_product(
+                                    &session.opts,
+                                    fsm_symbol("@TMP@"),
+                                    fsm_identity(),
+                                ),
+                            ),
                         )),
-                        fsm_kleene_star(fsm_cross_product(fsm_symbol("@TMP@"), fsm_identity())),
-                    )),
+                    ),
                 ),
-            ));
+            );
             fsm_destroy(oneu);
             fsm_destroy(onel);
             let mut ah = apply_init(&result_u);
@@ -465,10 +528,17 @@ pub fn iface_print_shortest_string_size(session: &mut Session) {
         let mut one = session.stack_entry_fsm(top, |f| fsm_copy(f));
         /* [L .o. [?:a]*].l; */
         if session.stack_entry_fsm(top, |f| f.arity) == 1 {
-            let result = fsm_minimize(fsm_lower(fsm_compose(
-                one,
-                fsm_kleene_star(fsm_cross_product(fsm_identity(), fsm_symbol("a"))),
-            )));
+            let result = fsm_minimize(
+                &session.opts,
+                fsm_lower(fsm_compose(
+                    &session.opts,
+                    one,
+                    fsm_kleene_star(
+                        &session.opts,
+                        fsm_cross_product(&session.opts, fsm_identity(), fsm_symbol("a")),
+                    ),
+                )),
+            );
             print!(
                 "Shortest acyclic path length: {}\n",
                 shortest_acyclic_length(&result)
@@ -477,14 +547,28 @@ pub fn iface_print_shortest_string_size(session: &mut Session) {
         } else {
             let onel = fsm_lower(fsm_copy(&mut one));
             let oneu = fsm_upper(one);
-            let result_u = fsm_minimize(fsm_lower(fsm_compose(
-                oneu,
-                fsm_kleene_star(fsm_cross_product(fsm_identity(), fsm_symbol("a"))),
-            )));
-            let result_l = fsm_minimize(fsm_lower(fsm_compose(
-                onel,
-                fsm_kleene_star(fsm_cross_product(fsm_identity(), fsm_symbol("a"))),
-            )));
+            let result_u = fsm_minimize(
+                &session.opts,
+                fsm_lower(fsm_compose(
+                    &session.opts,
+                    oneu,
+                    fsm_kleene_star(
+                        &session.opts,
+                        fsm_cross_product(&session.opts, fsm_identity(), fsm_symbol("a")),
+                    ),
+                )),
+            );
+            let result_l = fsm_minimize(
+                &session.opts,
+                fsm_lower(fsm_compose(
+                    &session.opts,
+                    onel,
+                    fsm_kleene_star(
+                        &session.opts,
+                        fsm_cross_product(&session.opts, fsm_identity(), fsm_symbol("a")),
+                    ),
+                )),
+            );
             print!(
                 "Shortest acyclic upper path length: {}\n",
                 shortest_acyclic_length(&result_u)
@@ -503,13 +587,13 @@ pub fn iface_print_shortest_string_size(session: &mut Session) {
 // [spec:foma:sem:foma.iface-upper-words-fn]
 pub fn iface_upper_words(session: &mut Session, limit: i32) {
     let limit = if limit == -1 {
-        G_LIST_LIMIT.with(|v| v.get())
+        session.opts.list_limit
     } else {
         limit
     };
     if iface_stack_check(session, 1) != 0 {
         let ah = session.stack_get_ah().unwrap();
-        session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
+        session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
         let mut i = limit;
         while i > 0 {
             let result = session.stack_entry_ah(ah, |h| apply_upper_words(h));
@@ -554,7 +638,7 @@ pub fn iface_words_file(session: &mut Session, filename: &str, r#type: i32) {
             }
         };
         let ah = session.stack_get_ah().unwrap();
-        session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
+        session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
         loop {
             let result = session.stack_entry_ah(ah, |h| applyer(h));
             match result {
@@ -575,13 +659,13 @@ pub fn iface_words_file(session: &mut Session, filename: &str, r#type: i32) {
 // [spec:foma:sem:foma.iface-words-fn]
 pub fn iface_words(session: &mut Session, limit: i32) {
     let limit = if limit == -1 {
-        G_LIST_LIMIT.with(|v| v.get())
+        session.opts.list_limit
     } else {
         limit
     };
     if iface_stack_check(session, 1) != 0 {
         let ah = session.stack_get_ah().unwrap();
-        session.stack_entry_ah(ah, |h| iface_apply_set_params(h));
+        session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
         let mut i = limit;
         while i > 0 {
             let result = session.stack_entry_ah(ah, |h| apply_words(h));
@@ -599,17 +683,17 @@ pub fn iface_words(session: &mut Session, limit: i32) {
 // [spec:foma:sem:iface.iface-pairs-call-fn]
 pub fn iface_pairs_call(session: &mut Session, limit: i32, random: i32) {
     let limit = if limit == -1 {
-        G_LIST_LIMIT.with(|v| v.get())
+        session.opts.list_limit
     } else {
         limit
     };
     if iface_stack_check(session, 1) != 0 {
         let ah = session.stack_get_ah().unwrap();
-        session.stack_entry_ah(ah, |h| {
-            apply_set_show_flags(h, G_SHOW_FLAGS.with(|v| v.get()))
+        session.stack_entry_ah_with_opts(ah, |opts, h| {
+            apply_set_show_flags(h, opts.show_flags as i32)
         });
-        session.stack_entry_ah(ah, |h| {
-            apply_set_obey_flags(h, G_OBEY_FLAGS.with(|v| v.get()))
+        session.stack_entry_ah_with_opts(ah, |opts, h| {
+            apply_set_obey_flags(h, opts.obey_flags as i32)
         });
         session.stack_entry_ah(ah, |h| apply_set_space_symbol(h, "\u{1}"));
         session.stack_entry_ah(ah, |h| apply_set_epsilon(h, "\u{2}"));
@@ -653,7 +737,7 @@ pub fn iface_random_pairs(session: &mut Session, limit: i32) {
     // g_list_limit inside iface_pairs_call instead of g_list_random_limit like the
     // other random commands. Resolve -1 to g_list_random_limit here first.
     let limit = if limit == -1 {
-        G_LIST_RANDOM_LIMIT.with(|v| v.get())
+        session.opts.list_random_limit
     } else {
         limit
     };
@@ -688,11 +772,11 @@ pub fn iface_pairs_file(session: &mut Session, filename: &str) {
             }
         };
         let ah = session.stack_get_ah().unwrap();
-        session.stack_entry_ah(ah, |h| {
-            apply_set_show_flags(h, G_SHOW_FLAGS.with(|v| v.get()))
+        session.stack_entry_ah_with_opts(ah, |opts, h| {
+            apply_set_show_flags(h, opts.show_flags as i32)
         });
-        session.stack_entry_ah(ah, |h| {
-            apply_set_obey_flags(h, G_OBEY_FLAGS.with(|v| v.get()))
+        session.stack_entry_ah_with_opts(ah, |opts, h| {
+            apply_set_obey_flags(h, opts.obey_flags as i32)
         });
         session.stack_entry_ah(ah, |h| apply_set_space_symbol(h, "\u{1}"));
         session.stack_entry_ah(ah, |h| apply_set_epsilon(h, "\u{2}"));

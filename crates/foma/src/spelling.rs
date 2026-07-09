@@ -13,6 +13,8 @@ use crate::int_stack::{
     int_stack_clear, int_stack_isempty, int_stack_pop, int_stack_push, ptr_stack_isempty,
     ptr_stack_pop, ptr_stack_push,
 };
+#[cfg(test)]
+use crate::options::FomaOptions;
 use crate::sigma::{sigma_find, sigma_max, sigma_string};
 use crate::stringhash::{sh_add_string, sh_find_string, sh_get_value, sh_init};
 use crate::structures::map_firstlines;
@@ -36,7 +38,6 @@ struct Sccinfo {
     lowlink: i32,
     on_t_stack: i32,
 }
-
 
 /* (net + off) line-table field accessors. `off` is an index into the net's
 sentinel-terminated line table (a `struct fsm_state *` in C). */
@@ -1187,7 +1188,8 @@ mod tests {
     /* Minimized net from a regex, arcs sorted so each state's lines are
     contiguous (apply_med requires it). */
     fn parse_sorted(rx: &str) -> Box<Fsm> {
-        let mut net = fsm_parse_regex(rx, None, None).expect("regex should compile");
+        let opts = &FomaOptions::default();
+        let mut net = fsm_parse_regex(opts, rx, None, None).expect("regex should compile");
         fsm_sort_arcs(&mut net, 1);
         net
     }

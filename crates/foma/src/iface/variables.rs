@@ -11,20 +11,15 @@ use super::*;
 // site so this file carries the iface.c extern-declaration annotation.
 pub use crate::io::foma_net_print;
 
-const FVAR_BOOL: i32 = 1;
-
-const FVAR_INT: i32 = 2;
-
-const FVAR_STRING: i32 = 3;
-
-/// DEVIATION from C: `struct g_v`'s `void *ptr` points at either an `int` global
-/// (FVAR_BOOL / FVAR_INT) or a `char *` global (FVAR_STRING). Safe Rust cannot
-/// hold a stable raw pointer into a thread_local, so the target is modelled as an
-/// enum over the two real global kinds; the `type` field still distinguishes
-/// FVAR_BOOL from FVAR_INT (both `int`), exactly as in C.
-pub enum GvPtr {
-    Int(&'static std::thread::LocalKey<Cell<i32>>),
-    Str(&'static std::thread::LocalKey<RefCell<String>>),
+/// DEVIATION from C: `struct g_v`'s `void *ptr` pointed at either an `int`
+/// global (FVAR_BOOL / FVAR_INT) or a `char *` global (FVAR_STRING). The
+/// options live in `Session.opts` now, so each table entry carries a field
+/// projection into `FomaOptions` instead of a pointer; C's FVAR_BOOL/FVAR_INT
+/// distinction (both `int` there) is carried by the Bool/Int variants.
+pub enum GvField {
+    Bool(fn(&mut FomaOptions) -> &mut bool),
+    Int(fn(&mut FomaOptions) -> &mut i32),
+    Str(fn(&mut FomaOptions) -> &mut String),
 }
 
 // [spec:foma:def:iface.g-v]
@@ -33,9 +28,8 @@ pub enum GvPtr {
 // (iface_set_variable/iface_show_variable/iface_show_variables) are in the second
 // half of iface.c; the table is built by `global_vars()` below.
 pub struct Gv {
-    pub ptr: GvPtr,
+    pub field: GvField,
     pub name: &'static str,
-    pub r#type: i32,
 }
 
 /// C: the file-static `struct g_v global_vars[]` table (NULL-terminated). Built
@@ -44,99 +38,80 @@ pub struct Gv {
 pub(crate) fn global_vars() -> Vec<Gv> {
     vec![
         Gv {
-            ptr: GvPtr::Int(&G_FLAG_IS_EPSILON),
+            field: GvField::Bool(|o| &mut o.flag_is_epsilon),
             name: "flag-is-epsilon",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Int(&G_MINIMAL),
+            field: GvField::Bool(|o| &mut o.minimal),
             name: "minimal",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Int(&G_NAME_NETS),
+            field: GvField::Bool(|o| &mut o.name_nets),
             name: "name-nets",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Int(&G_OBEY_FLAGS),
+            field: GvField::Bool(|o| &mut o.obey_flags),
             name: "obey-flags",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Int(&G_PRINT_PAIRS),
+            field: GvField::Bool(|o| &mut o.print_pairs),
             name: "print-pairs",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Int(&G_PRINT_SIGMA),
+            field: GvField::Bool(|o| &mut o.print_sigma),
             name: "print-sigma",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Int(&G_PRINT_SPACE),
+            field: GvField::Bool(|o| &mut o.print_space),
             name: "print-space",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Int(&G_QUIT_ON_FAIL),
+            field: GvField::Bool(|o| &mut o.quit_on_fail),
             name: "quit-on-fail",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Int(&G_RECURSIVE_DEFINE),
+            field: GvField::Bool(|o| &mut o.recursive_define),
             name: "recursive-define",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Int(&G_QUOTE_SPECIAL),
+            field: GvField::Bool(|o| &mut o.quote_special),
             name: "quote-special",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Int(&G_SHOW_FLAGS),
+            field: GvField::Bool(|o| &mut o.show_flags),
             name: "show-flags",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Int(&G_SORT_ARCS),
+            field: GvField::Bool(|o| &mut o.sort_arcs),
             name: "sort-arcs",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Int(&G_VERBOSE),
+            field: GvField::Bool(|o| &mut o.verbose),
             name: "verbose",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Int(&G_MINIMIZE_HOPCROFT),
+            field: GvField::Bool(|o| &mut o.minimize_hopcroft),
             name: "hopcroft-min",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Int(&G_COMPOSE_TRISTATE),
+            field: GvField::Bool(|o| &mut o.compose_tristate),
             name: "compose-tristate",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Int(&G_MED_LIMIT),
+            field: GvField::Int(|o| &mut o.med_limit),
             name: "med-limit",
-            r#type: FVAR_INT,
         },
         Gv {
-            ptr: GvPtr::Int(&G_MED_CUTOFF),
+            field: GvField::Int(|o| &mut o.med_cutoff),
             name: "med-cutoff",
-            r#type: FVAR_INT,
         },
         Gv {
-            ptr: GvPtr::Int(&G_LEXC_ALIGN),
+            field: GvField::Bool(|o| &mut o.lexc_align),
             name: "lexc-align",
-            r#type: FVAR_BOOL,
         },
         Gv {
-            ptr: GvPtr::Str(&G_ATT_EPSILON),
+            field: GvField::Str(|o| &mut o.att_epsilon),
             name: "att-epsilon",
-            r#type: FVAR_STRING,
         },
     ]
 }
@@ -206,33 +181,17 @@ fn c_strtol_base10(value: &str) -> (i64, bool, bool) {
 // [spec:foma:sem:iface.iface-show-variables-fn]
 // [spec:foma:def:foma.iface-show-variables-fn]
 // [spec:foma:sem:foma.iface-show-variables-fn]
-pub fn iface_show_variables() {
+pub fn iface_show_variables(session: &mut Session) {
     for gv in global_vars() {
         // "%-17.17s" — left-justified, padded/truncated to exactly 17 chars.
-        if gv.r#type == FVAR_BOOL {
-            let v = match &gv.ptr {
-                GvPtr::Int(c) => c.with(|x| x.get()),
-                GvPtr::Str(_) => 0,
-            };
-            print!(
+        match gv.field {
+            GvField::Bool(f) => print!(
                 "{:<17.17}: {}\n",
                 gv.name,
-                if v == 1 { "ON" } else { "OFF" }
-            );
-        }
-        if gv.r#type == FVAR_INT {
-            let v = match &gv.ptr {
-                GvPtr::Int(c) => c.with(|x| x.get()),
-                GvPtr::Str(_) => 0,
-            };
-            print!("{:<17.17}: {}\n", gv.name, v);
-        }
-        if gv.r#type == FVAR_STRING {
-            let v = match &gv.ptr {
-                GvPtr::Str(rc) => rc.with(|s| s.borrow().clone()),
-                GvPtr::Int(_) => String::new(),
-            };
-            print!("{:<17.17}: {}\n", gv.name, v);
+                if *f(&mut session.opts) { "ON" } else { "OFF" }
+            ),
+            GvField::Int(f) => print!("{:<17.17}: {}\n", gv.name, *f(&mut session.opts)),
+            GvField::Str(f) => print!("{:<17.17}: {}\n", gv.name, f(&mut session.opts)),
         }
     }
 }
@@ -241,31 +200,21 @@ pub fn iface_show_variables() {
 // [spec:foma:sem:iface.iface-show-variable-fn+2]
 // [spec:foma:def:foma.iface-show-variable-fn]
 // [spec:foma:sem:foma.iface-show-variable-fn+2]
-pub fn iface_show_variable(name: &str) {
+pub fn iface_show_variable(session: &mut Session, name: &str) {
     for gv in global_vars() {
         if namecmp(name, gv.name) == 0 {
             // Wave 4 fix: the C printed ON/OFF from `*(int*)ptr == 1` for EVERY
             // type (INT variables only showed ON at value 1; STRING reinterpreted
             // the char* bytes as int). Print by declared type instead: BOOL as
             // ON/OFF, INT as its value, STRING as its string.
-            if gv.r#type == FVAR_INT {
-                let v = match &gv.ptr {
-                    GvPtr::Int(c) => c.with(|x| x.get()),
-                    GvPtr::Str(_) => 0,
-                };
-                print!("{} = {}\n", gv.name, v);
-            } else if gv.r#type == FVAR_STRING {
-                let v = match &gv.ptr {
-                    GvPtr::Str(rc) => rc.with(|s| s.borrow().clone()),
-                    GvPtr::Int(_) => String::new(),
-                };
-                print!("{} = {}\n", gv.name, v);
-            } else {
-                let v = match &gv.ptr {
-                    GvPtr::Int(c) => c.with(|x| x.get()),
-                    GvPtr::Str(_) => 0,
-                };
-                print!("{} = {}\n", gv.name, if v == 1 { "ON" } else { "OFF" });
+            match gv.field {
+                GvField::Int(f) => print!("{} = {}\n", gv.name, *f(&mut session.opts)),
+                GvField::Str(f) => print!("{} = {}\n", gv.name, f(&mut session.opts)),
+                GvField::Bool(f) => print!(
+                    "{} = {}\n",
+                    gv.name,
+                    if *f(&mut session.opts) { "ON" } else { "OFF" }
+                ),
             }
             return;
         }
@@ -277,56 +226,45 @@ pub fn iface_show_variable(name: &str) {
 // [spec:foma:sem:iface.iface-set-variable-fn+1]
 // [spec:foma:def:foma.iface-set-variable-fn]
 // [spec:foma:sem:foma.iface-set-variable-fn+1]
-pub fn iface_set_variable(name: &str, value: &str) {
+pub fn iface_set_variable(session: &mut Session, name: &str, value: &str) {
     for gv in global_vars() {
         if namecmp(name, gv.name) == 0 {
-            if gv.r#type == FVAR_BOOL {
-                let j: i32;
-                if value == "ON" || value == "1" {
-                    j = 1;
-                } else if value == "OFF" || value == "0" {
-                    j = 0;
-                } else {
-                    print!("Invalid value '{}' for variable '{}'\n", value, gv.name);
-                    return;
-                }
-                if let GvPtr::Int(c) = &gv.ptr {
-                    c.with(|x| x.set(j));
-                }
-                let cur = match &gv.ptr {
-                    GvPtr::Int(c) => c.with(|x| x.get()),
-                    GvPtr::Str(_) => 0,
-                };
-                print!(
-                    "variable {} = {}\n",
-                    gv.name,
-                    if cur == 1 { "ON" } else { "OFF" }
-                );
-                return;
-            }
-            if gv.r#type == FVAR_STRING {
-                // *ptr = strdup(value): C leaks the old string; here it is replaced.
-                if let GvPtr::Str(rc) = &gv.ptr {
-                    rc.with(|s| *s.borrow_mut() = value.to_string());
-                }
-                print!("variable {} = {}\n", gv.name, value);
-                return;
-            }
-            if gv.r#type == FVAR_INT {
-                let (result, no_digits, range) = c_strtol_base10(value);
-                // j = (int)strtol(...) — truncation to int.
-                let j = result as i32;
-                if range || no_digits || j < 0 {
-                    print!("invalid value {} for variable {}\n", value, gv.name);
-                    return;
-                } else {
-                    print!("variable {} = {}\n", gv.name, j);
-                    if let GvPtr::Int(c) = &gv.ptr {
-                        c.with(|x| x.set(j));
+            match gv.field {
+                GvField::Bool(f) => {
+                    let j: bool;
+                    if value == "ON" || value == "1" {
+                        j = true;
+                    } else if value == "OFF" || value == "0" {
+                        j = false;
+                    } else {
+                        print!("Invalid value '{}' for variable '{}'\n", value, gv.name);
+                        return;
                     }
-                    return;
+                    *f(&mut session.opts) = j;
+                    print!(
+                        "variable {} = {}\n",
+                        gv.name,
+                        if *f(&mut session.opts) { "ON" } else { "OFF" }
+                    );
+                }
+                GvField::Str(f) => {
+                    // *ptr = strdup(value): C leaks the old string; replaced here.
+                    *f(&mut session.opts) = value.to_string();
+                    print!("variable {} = {}\n", gv.name, value);
+                }
+                GvField::Int(f) => {
+                    let (result, no_digits, range) = c_strtol_base10(value);
+                    // j = (int)strtol(...) — truncation to int.
+                    let j = result as i32;
+                    if range || no_digits || j < 0 {
+                        print!("invalid value {} for variable {}\n", value, gv.name);
+                    } else {
+                        print!("variable {} = {}\n", gv.name, j);
+                        *f(&mut session.opts) = j;
+                    }
                 }
             }
+            return;
         }
     }
     print!("*There is no global variable '{}'.\n", name);

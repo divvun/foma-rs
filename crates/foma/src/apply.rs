@@ -33,13 +33,14 @@
 use crate::dynarray::{rand, srand};
 use crate::flags::{flag_check, flag_get_name, flag_get_type, flag_get_value};
 use crate::mem::round_up_to_power_of_two;
+#[cfg(test)]
+use crate::options::FomaOptions;
 use crate::sigma::sigma_max;
 use crate::types::{
-    APPLY_BINSEARCH_THRESHOLD, APPLY_INDEX_INPUT, ApplyHandle, ApplyStateIndex,
-    DEFAULT_STACK_SIZE, DOWN, ENUMERATE, EPSILON, FAIL, FLAG_CLEAR,
-    FLAG_DISALLOW, FLAG_EQUAL, FLAG_NEGATIVE, FLAG_POSITIVE, FLAG_REQUIRE, FLAG_UNIFY, FlagList,
-    FlagLookup, Fsm, IDENTITY, LOWER, RANDOM, SUCCEED, Searchstack, SigmaTrie, SigmaTrieArrays,
-    SigmatchArray, Sigs, UNKNOWN, UP, UPPER,
+    APPLY_BINSEARCH_THRESHOLD, APPLY_INDEX_INPUT, ApplyHandle, ApplyStateIndex, DEFAULT_STACK_SIZE,
+    DOWN, ENUMERATE, EPSILON, FAIL, FLAG_CLEAR, FLAG_DISALLOW, FLAG_EQUAL, FLAG_NEGATIVE,
+    FLAG_POSITIVE, FLAG_REQUIRE, FLAG_UNIFY, FlagList, FlagLookup, Fsm, IDENTITY, LOWER, RANDOM,
+    SUCCEED, Searchstack, SigmaTrie, SigmaTrieArrays, SigmatchArray, Sigs, UNKNOWN, UP, UPPER,
 };
 use crate::utf8::{utf8iscombining, utf8skip};
 
@@ -1356,12 +1357,20 @@ pub fn apply_append(h: &mut ApplyHandle, cptr: i32, sym: i32) -> i32 {
     let mut astring: String = if a_suppressed {
         String::new()
     } else {
-        h.sigs[symin as usize].symbol.as_deref().unwrap_or("").to_string()
+        h.sigs[symin as usize]
+            .symbol
+            .as_deref()
+            .unwrap_or("")
+            .to_string()
     };
     let mut bstring: String = if b_suppressed {
         String::new()
     } else {
-        h.sigs[symout as usize].symbol.as_deref().unwrap_or("").to_string()
+        h.sigs[symout as usize]
+            .symbol
+            .as_deref()
+            .unwrap_or("")
+            .to_string()
     };
     // Pointer-equality of the two display strings (see module notes): both
     // suppressed, or neither suppressed and the same sigs slot.
@@ -1385,9 +1394,21 @@ pub fn apply_append(h: &mut ApplyHandle, cptr: i32, sym: i32) -> i32 {
             }
         } else {
             /* Print one side only; an EPSILON side contributes nothing */
-            let a = if symin == EPSILON { "" } else { astring.as_str() };
-            let b = if symout == EPSILON { "" } else { bstring.as_str() };
-            let pstring = if (h.mode & (UPPER | LOWER)) == UPPER { a } else { b };
+            let a = if symin == EPSILON {
+                ""
+            } else {
+                astring.as_str()
+            };
+            let b = if symout == EPSILON {
+                ""
+            } else {
+                bstring.as_str()
+            };
+            let pstring = if (h.mode & (UPPER | LOWER)) == UPPER {
+                a
+            } else {
+                b
+            };
             h.outstring.push_str(pstring);
         }
     } else if h.print_pairs != 0 && symin != symout {
@@ -1420,7 +1441,11 @@ pub fn apply_append(h: &mut ApplyHandle, cptr: i32, sym: i32) -> i32 {
     } else if sym == EPSILON {
         return 0;
     } else {
-        let pstring = if (h.mode & DOWN) == DOWN { &bstring } else { &astring };
+        let pstring = if (h.mode & DOWN) == DOWN {
+            &bstring
+        } else {
+            &astring
+        };
         h.outstring.push_str(pstring);
     }
 
@@ -1429,7 +1454,8 @@ pub fn apply_append(h: &mut ApplyHandle, cptr: i32, sym: i32) -> i32 {
         // A multi-byte space symbol survives: the return advances by the real
         // number of bytes pushed (C's `len++` clobbered all but its first byte).
         // [spec:foma:sem:apply.apply-append-fn+1]
-        h.outstring.push_str(h.space_symbol.as_deref().unwrap_or(""));
+        h.outstring
+            .push_str(h.space_symbol.as_deref().unwrap_or(""));
         len = (h.outstring.len() - start) as i32;
     }
     len
@@ -1979,7 +2005,8 @@ mod tests {
 
     /* Build a fresh, minimized net from a regex (the Wave-2 pipeline). */
     fn parse(rx: &str) -> Box<Fsm> {
-        fsm_parse_regex(rx, None, None).expect("regex should compile")
+        let opts = &FomaOptions::default();
+        fsm_parse_regex(opts, rx, None, None).expect("regex should compile")
     }
 
     /* Full result-set enumeration via the iterator protocol: first call passes

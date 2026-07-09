@@ -26,7 +26,7 @@ use foma::define::{
 };
 use foma::iface::*;
 use foma::io::file_to_mem;
-use foma::mem::G_VERBOSE;
+use foma::options::FomaOptions;
 use foma::regex::fsm_parse_regex;
 use foma::session::Session;
 use foma::structures::fsm_copy;
@@ -446,7 +446,7 @@ fn main() {
                     k += 1;
                 }
                 'q' => {
-                    G_VERBOSE.with(|v| v.set(0));
+                    session.opts.verbose = false;
                     k += 1;
                 }
                 'r' => {
@@ -469,7 +469,7 @@ fn main() {
         idx += 1;
     }
 
-    if PIPE_MODE.with(|p| p.get()) == 0 && G_VERBOSE.with(|v| v.get()) != 0 {
+    if PIPE_MODE.with(|p| p.get()) == 0 && session.opts.verbose {
         print!("{}", DISCLAIMER);
     }
     // C: rl_basic_word_break_characters = " >";
@@ -491,7 +491,7 @@ fn main() {
                 String::new()
             }
         };
-        if PIPE_MODE.with(|p| p.get()) != 0 || G_VERBOSE.with(|v| v.get()) == 0 {
+        if PIPE_MODE.with(|p| p.get()) != 0 || !session.opts.verbose {
             prompt = String::new();
         }
 
@@ -680,14 +680,15 @@ fn find_regex_terminator(s: &str) -> Option<usize> {
 }
 
 /* interface.l <REGEX>(;) action: parse the accumulated body; on success push
-(RE) or define (DE) fsm_topsort(fsm_minimize(current_parse)). */
+(RE) or define (DE) fsm_topsort(fsm_minimize(&session.opts, current_parse)). */
 fn compile_regex(session: &mut Session, pmode: i32, defname: &str, body: &str) {
-    let verbose = G_VERBOSE.with(|v| v.get()) != 0;
+    let verbose = session.opts.verbose;
     G_DEFINES.with(|dn| {
         G_DEFINES_F.with(|df| {
             let mut dnb = dn.borrow_mut();
             let mut dfb = df.borrow_mut();
-            let parsed = fsm_parse_regex(body, dnb.as_deref_mut(), dfb.as_deref_mut());
+            let parsed =
+                fsm_parse_regex(&session.opts, body, dnb.as_deref_mut(), dfb.as_deref_mut());
             match parsed {
                 None => {
                     // DEVIATION from C: C prints "invalid regex detected" only when
@@ -735,7 +736,7 @@ fn define_top_of_stack(session: &mut Session, name: &str) {
     }
     let net = session.stack_pop();
     let name2 = name.trim_end_matches(';');
-    let verbose = G_VERBOSE.with(|v| v.get()) != 0;
+    let verbose = session.opts.verbose;
     G_DEFINES.with(|dn| {
         let mut dnb = dn.borrow_mut();
         let olddef = add_defined(dnb.as_deref_mut().unwrap(), net, name2);
@@ -757,12 +758,12 @@ with each argument name rewritten to @ARGUMENTNN@.
 DEVIATION from C: C stores the name as "NAME(" (with the paren); this port stores
 the bare NAME so that regex.rs's function_apply (which looks up the nfst-xre
 FunctionCall name, paren stripped) resolves it. */
-fn define_function(name: &str, args: &[String], body: &str) {
+fn define_function(opts: &FomaOptions, name: &str, args: &[String], body: &str) {
     let numargs = args.len() as i32;
     let funcdef = substitute_func_args(body, args);
     G_DEFINES_F.with(|df| {
         let mut dfb = df.borrow_mut();
-        add_defined_function(dfb.as_deref_mut().unwrap(), name, &funcdef, numargs);
+        add_defined_function(opts, dfb.as_deref_mut().unwrap(), name, &funcdef, numargs);
     });
 }
 
@@ -1016,18 +1017,18 @@ fn dispatch(session: &mut Session, line: &str) -> bool {
 
     // set / show
     if w0 == "set" && ws.len() >= 3 {
-        iface_set_variable(w1, ws[2]);
+        iface_set_variable(session, w1, ws[2]);
         return true;
     }
     if w0 == "show" && ws.len() >= 2 {
         if pfx(w1, "variables", 3) {
             if ws.len() == 2 {
-                iface_show_variables();
+                iface_show_variables(session);
             } else {
-                iface_show_variable(ws[2]);
+                iface_show_variable(session, ws[2]);
             }
         } else {
-            iface_show_variable(w1);
+            iface_show_variable(session, w1);
         }
         return true;
     }
@@ -1188,7 +1189,7 @@ fn handle_define(session: &mut Session, rest: &str) -> bool {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        define_function(name, &args, body.trim());
+        define_function(&session.opts, name, &args, body.trim());
         return true;
     }
     let name = &rest[..name_end];
@@ -1280,9 +1281,9 @@ fn read_subcommand(session: &mut Session, t: &str, w1: &str) -> Option<bool> {
     }
     if w1 == "lexc" {
         /* interface.l RLEXC action: file_to_mem then
-        fsm_lexc_parse_string(buf, 1), result pushed via stack_add */
+        fsm_lexc_parse_string(&session.opts, buf, 1), result pushed via stack_add */
         let fname = read_file_arg(t, 2);
-        if let Some(net) = foma::lexcread::fsm_lexc_parse_file(&fname, 1) {
+        if let Some(net) = foma::lexcread::fsm_lexc_parse_file(&session.opts, &fname) {
             session.stack_add(net);
         }
         return Some(true);

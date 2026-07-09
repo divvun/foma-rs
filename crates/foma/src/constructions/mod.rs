@@ -29,8 +29,8 @@ pub(crate) use crate::flags::flag_check;
 pub(crate) use crate::int_stack::{
     int_stack_clear, int_stack_isempty, int_stack_pop, int_stack_push,
 };
-pub(crate) use crate::mem::{G_COMPOSE_TRISTATE, G_FLAG_IS_EPSILON};
 pub(crate) use crate::minimize::fsm_minimize;
+pub(crate) use crate::options::FomaOptions;
 pub(crate) use crate::rewrite::fsm_clear_contexts;
 pub(crate) use crate::sigma::{
     sigma_add, sigma_add_special, sigma_cleanup, sigma_find, sigma_find_number, sigma_max,
