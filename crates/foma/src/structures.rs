@@ -30,19 +30,16 @@ use crate::sigma::{
 };
 use crate::topsort::fsm_topsort;
 use crate::types::{
-    BUILD_VERSION, DefinedQuantifiers, EPSILON, Fsm, FsmOptions, FsmState, IDENTITY, MAJOR_VERSION,
+    BUILD_VERSION, DefinedQuantifiers, EPSILON, Fsm, FsmState, IDENTITY, MAJOR_VERSION,
     MINOR_VERSION, NO, OP_IGNORE_ALL, STATUS_VERSION, Sigma, StateArray, UNKNOWN, YES,
 };
 
 thread_local! {
     // C: static struct defined_quantifiers *quantifiers;
     static QUANTIFIERS: RefCell<Option<Box<DefinedQuantifiers>>> = const { RefCell::new(None) };
-    // C: struct _fsm_options fsm_options; — non-static zero-initialized
-    // global (extern'd via foma.h); no spec id of its own (the type carries
-    // foma.fsm-options in types.rs)
-    pub static FSM_OPTIONS: RefCell<FsmOptions> =
-        const { RefCell::new(FsmOptions { skip_word_boundary_marker: false }) };
 }
+// C: struct _fsm_options fsm_options; — the non-static zero-initialized global
+// (extern'd via foma.h) is a FomaOptions field now (skip_word_boundary_marker).
 
 // [spec:foma:def:structures.fsm-get-library-version-string-fn]
 // [spec:foma:sem:structures.fsm-get-library-version-string-fn]
@@ -62,11 +59,11 @@ pub fn fsm_get_library_version_string() -> String {
 // [spec:foma:sem:structures.fsm-set-option-fn]
 // [spec:foma:def:fomalib.fsm-set-option-fn]
 // [spec:foma:sem:fomalib.fsm-set-option-fn]
-pub fn fsm_set_option(option: u64, value: &bool) -> bool {
+pub fn fsm_set_option(opts: &mut FomaOptions, option: u64, value: &bool) -> bool {
     /* C: switch (option) — value is a void * dereferenced as _Bool * for
     the matching option (never NULL-checked; &bool here) */
     if option == crate::types::FSM_OPTIONS::FSMO_SKIP_WORD_BOUNDARY_MARKER as u64 {
-        FSM_OPTIONS.with(|o| o.borrow_mut().skip_word_boundary_marker = *value);
+        opts.skip_word_boundary_marker = *value;
         return true;
     }
     false
@@ -79,9 +76,9 @@ pub fn fsm_set_option(option: u64, value: &bool) -> bool {
 // DEVIATION from C (returns a void * aliasing the live global option field;
 // safe Rust returns the current value instead — None ↔ NULL for unknown
 // options)
-pub fn fsm_get_option(option: u64) -> Option<bool> {
+pub fn fsm_get_option(opts: &FomaOptions, option: u64) -> Option<bool> {
     if option == crate::types::FSM_OPTIONS::FSMO_SKIP_WORD_BOUNDARY_MARKER as u64 {
-        return Some(FSM_OPTIONS.with(|o| o.borrow().skip_word_boundary_marker));
+        return Some(opts.skip_word_boundary_marker);
     }
     None
 }
@@ -1463,6 +1460,7 @@ pub fn fsm_logical_precedence(opts: &FomaOptions, string1: &str, string2: &str) 
                 fsm_concat(
                     opts,
                     fsm_union(
+                        opts,
                         fsm_symbol(string1),
                         fsm_concat(
                             opts,
@@ -1479,7 +1477,7 @@ pub fn fsm_logical_precedence(opts: &FomaOptions, string1: &str, string2: &str) 
     /*    1,3   fsm_kleene_star(fsm_term_negation(fsm_symbol(string2))) */
     /*        2 = fsm_symbol(string1) */
     /*        5 = fsm_universal() */
-    /* 4 =    fsm_union(fsm_symbol(string1),fsm_concat(fsm_symbol(string2),fsm_concat(union_quantifiers(),fsm_symbol(string1)))) */
+    /* 4 =    fsm_union(opts, fsm_symbol(string1),fsm_concat(fsm_symbol(string2),fsm_concat(union_quantifiers(),fsm_symbol(string1)))) */
 }
 
 /** Logical equivalence, i.e. where two variables span the same substring */
@@ -1497,6 +1495,7 @@ pub fn fsm_logical_eq(opts: &FomaOptions, string1: &str, string2: &str) -> Box<F
             fsm_ignore(
                 opts,
                 fsm_union(
+                    opts,
                     fsm_concat(opts, fsm_symbol(string1), fsm_symbol(string2)),
                     fsm_concat(opts, fsm_symbol(string2), fsm_symbol(string1)),
                 ),
@@ -1511,6 +1510,7 @@ pub fn fsm_logical_eq(opts: &FomaOptions, string1: &str, string2: &str) -> Box<F
                     fsm_ignore(
                         opts,
                         fsm_union(
+                            opts,
                             fsm_concat(opts, fsm_symbol(string1), fsm_symbol(string2)),
                             fsm_concat(opts, fsm_symbol(string2), fsm_symbol(string1)),
                         ),
@@ -1585,17 +1585,18 @@ mod tests {
     fn set_and_get_option() {
         let skip = crate::types::FSM_OPTIONS::FSMO_SKIP_WORD_BOUNDARY_MARKER as u64;
         let unknown = crate::types::FSM_OPTIONS::FSMO_NUM_OPTIONS as u64;
+        let mut opts = FomaOptions::default();
 
         // set known option -> true, then get reflects the stored value
-        assert!(fsm_set_option(skip, &true));
-        assert_eq!(fsm_get_option(skip), Some(true));
-        assert!(fsm_set_option(skip, &false));
-        assert_eq!(fsm_get_option(skip), Some(false));
+        assert!(fsm_set_option(&mut opts, skip, &true));
+        assert_eq!(fsm_get_option(&opts, skip), Some(true));
+        assert!(fsm_set_option(&mut opts, skip, &false));
+        assert_eq!(fsm_get_option(&opts, skip), Some(false));
 
         // any other option: set does nothing and returns false; get is None
-        assert!(!fsm_set_option(unknown, &true));
-        assert_eq!(fsm_get_option(unknown), None);
-        assert_eq!(fsm_get_option(9999), None);
+        assert!(!fsm_set_option(&mut opts, unknown, &true));
+        assert_eq!(fsm_get_option(&opts, unknown), None);
+        assert_eq!(fsm_get_option(&opts, 9999), None);
     }
 
     // [spec:foma:sem:structures.linesortcompin-fn/test]

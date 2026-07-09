@@ -634,13 +634,6 @@ pub struct ApplyHandle {
 /* foma.h types                                                        */
 /* ------------------------------------------------------------------ */
 
-/// Runtime options (C: struct _fsm_options, global `fsm_options`)
-// [spec:foma:def:foma.fsm-options]
-#[derive(Debug, Clone)]
-pub struct FsmOptions {
-    pub skip_word_boundary_marker: bool,
-}
-
 /// User stack entry (doubly-linked list with a sentinel)
 // [spec:foma:def:foma.stack-entry]
 #[derive(Debug, Clone)]

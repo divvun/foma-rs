@@ -129,6 +129,7 @@ pub fn flag_eliminate(opts: &FomaOptions, net: Box<Fsm>, name: Option<&str>) -> 
                     fail_flags = Some(fsm_minimize(
                         opts,
                         fsm_union(
+                            opts,
                             fail_flags.take().unwrap(),
                             flag_create_symbol(
                                 ffl.r#type,
@@ -143,6 +144,7 @@ pub fn flag_eliminate(opts: &FomaOptions, net: Box<Fsm>, name: Option<&str>) -> 
                     succeed_flags = Some(fsm_minimize(
                         opts,
                         fsm_union(
+                            opts,
                             succeed_flags.take().unwrap(),
                             flag_create_symbol(
                                 ffl.r#type,

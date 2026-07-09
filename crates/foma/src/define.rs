@@ -1,22 +1,14 @@
 //! foma/define.c — literal Wave-2 (bug-for-bug) port per
 //! docs/port/rust-conventions.md. Sem rules: docs/spec/port/foma/define.md.
 
-use std::cell::RefCell;
-
 use crate::constructions::fsm_count;
 use crate::options::FomaOptions;
 use crate::structures::fsm_destroy;
 use crate::types::{DefinedFunctions, DefinedNetworks, FSM_NAME_LEN, Fsm};
 
-/* Global variables */
-// C: non-static globals defined at the top of define.c and `extern`'d by
-// iface.c/foma.c/stack.c. They carry no spec ids of their own (the annotated
-// C sites are the functions below). Initialized by foma.c's main via
-// defined_networks_init()/defined_functions_init() (w2-cli concern).
-thread_local! {
-    pub static G_DEFINES: RefCell<Option<Box<DefinedNetworks>>> = const { RefCell::new(None) };
-    pub static G_DEFINES_F: RefCell<Option<Box<DefinedFunctions>>> = const { RefCell::new(None) };
-}
+// C: the non-static `g_defines` / `g_defines_f` registry globals defined at
+// the top of define.c (extern'd by iface.c/foma.c) live on `Session` now
+// (`session.defines` / `session.defines_f`, init'd by `Session::new`).
 
 /* Find a defined symbol from the symbol table */
 /* Return the corresponding FSM                */

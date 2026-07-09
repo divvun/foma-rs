@@ -67,6 +67,10 @@ pub struct FomaOptions {
     /// C `char *g_att_epsilon = "@0@"` — CLI "att-epsilon": the epsilon symbol
     /// used when reading/writing AT&T format.
     pub att_epsilon: String,
+    /// C: `struct _fsm_options fsm_options` (foma.h), the library option set
+    /// behind fsm_set_option/fsm_get_option — one field, folded in here.
+    // [spec:foma:def:foma.fsm-options]
+    pub skip_word_boundary_marker: bool,
 }
 
 impl Default for FomaOptions {
@@ -93,6 +97,7 @@ impl Default for FomaOptions {
             med_cutoff: 15,
             lexc_align: false,
             att_epsilon: String::from("@0@"),
+            skip_word_boundary_marker: false,
         }
     }
 }

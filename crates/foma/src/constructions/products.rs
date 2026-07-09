@@ -24,7 +24,7 @@ pub fn fsm_intersect(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<
         return fsm_empty_set();
     }
 
-    fsm_merge_sigma(&mut net1, &mut net2);
+    fsm_merge_sigma(opts, &mut net1, &mut net2);
 
     fsm_update_flags(&mut net1, YES, NO, UNK, YES, UNK, UNK);
 
@@ -261,7 +261,7 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
         }
     }
 
-    fsm_merge_sigma(&mut net1, &mut net2);
+    fsm_merge_sigma(opts, &mut net1, &mut net2);
 
     let mut is_flag: Vec<bool> = Vec::new();
     if g_flag_is_epsilon {
@@ -642,7 +642,7 @@ pub fn fsm_cross_product(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> 
     let mut net1 = fsm_minimize(opts, net1);
     let mut net2 = fsm_minimize(opts, net2);
 
-    fsm_merge_sigma(&mut net1, &mut net2);
+    fsm_merge_sigma(opts, &mut net1, &mut net2);
 
     fsm_count(&mut net1);
     fsm_count(&mut net2);

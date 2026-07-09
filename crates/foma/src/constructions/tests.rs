@@ -432,9 +432,10 @@ fn copy_mergesigma_deep_copies_number_and_symbol_dropping_presence() {
 // [spec:foma:sem:fomalib.fsm-merge-sigma-fn/test]
 #[test]
 fn fsm_merge_sigma_disjoint_alphabets_shared_dense_numbering() {
+    let opts = &FomaOptions::default();
     let mut n1 = re("a");
     let mut n2 = re("b");
-    fsm_merge_sigma(&mut n1, &mut n2);
+    fsm_merge_sigma(opts, &mut n1, &mut n2);
     // Both nets end with one shared, densely renumbered sigma.
     assert_eq!(
         sigma_pairs(&n1),
@@ -453,11 +454,12 @@ fn fsm_merge_sigma_disjoint_alphabets_shared_dense_numbering() {
 // [spec:foma:sem:fomalib.fsm-merge-sigma-fn/test]
 #[test]
 fn fsm_merge_sigma_expands_identity_over_other_nets_symbols() {
+    let opts = &FomaOptions::default();
     // ? (IDENTITY) merged with {a}: the @:@ arc is expanded with an
     // explicit a:a arc so ? cannot silently match the new symbol a.
     let mut id = fsm_identity();
     let mut na = re("a");
-    fsm_merge_sigma(&mut id, &mut na);
+    fsm_merge_sigma(opts, &mut id, &mut na);
     assert_eq!(sigma_nums(&id), vec![2, 3]);
     assert_eq!(sigma_nums(&na), vec![2, 3]);
     assert_eq!(
@@ -584,7 +586,8 @@ fn fsm_minus_lets_b_go_dead_and_accepts_remainder() {
 // [spec:foma:sem:fomalib.fsm-union-fn/test]
 #[test]
 fn fsm_union_epsilon_start_construction() {
-    let u = fsm_union(re("a"), re("b"));
+    let opts = &FomaOptions::default();
+    let u = fsm_union(opts, re("a"), re("b"));
     assert_eq!(words(&u), ws(&["a", "b"]));
     // Two epsilon start arcs from a fresh state 0, then both operands shifted.
     assert_eq!(
@@ -1088,9 +1091,10 @@ fn fsm_shuffle_interleaves_both_languages() {
 // [spec:foma:sem:fomalib.fsm-equivalent-fn/test]
 #[test]
 fn fsm_equivalent_tests_path_equivalence() {
-    assert_eq!(fsm_equivalent(re("a|b"), re("b|a")), 1);
-    assert_eq!(fsm_equivalent(re("a b"), re("a b")), 1);
-    assert_eq!(fsm_equivalent(re("a"), re("b")), 0);
+    let opts = &FomaOptions::default();
+    assert_eq!(fsm_equivalent(opts, re("a|b"), re("b|a")), 1);
+    assert_eq!(fsm_equivalent(opts, re("a b"), re("a b")), 1);
+    assert_eq!(fsm_equivalent(opts, re("a"), re("b")), 0);
 }
 
 /* ---- contains family ---------------------------------------------- */
@@ -1394,9 +1398,10 @@ fn fsm_bimachine_is_a_noop_returning_input() {
 // [spec:foma:sem:fomalib.fsm-left-rewr-fn/test]
 #[test]
 fn fsm_left_rewr_with_universal_context_rewrites_everywhere() {
+    let opts = &FomaOptions::default();
     // net = ?* (all states final -> left context always matched), so
     // a -> b applies at every position; every other symbol maps to itself.
-    let r = fsm_left_rewr(fsm_universal(), re("a:b"));
+    let r = fsm_left_rewr(opts, fsm_universal(), re("a:b"));
     assert_eq!(down(&r, "a"), ws(&["b"]));
     assert_eq!(down(&r, "aba"), ws(&["bbb"]));
     assert_eq!(down(&r, "bb"), ws(&["bb"]));

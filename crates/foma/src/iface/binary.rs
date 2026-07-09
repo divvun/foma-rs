@@ -1,6 +1,7 @@
 //! foma/iface.c Wave-4 split: multi-net commands (compose/concat/union/
 //! intersect/crossproduct/ignore/shuffle/substitute). See iface/mod.rs.
 use super::*;
+use crate::define::defined_networks_init;
 
 // [spec:foma:def:iface.iface-compose-fn]
 // [spec:foma:sem:iface.iface-compose-fn]
@@ -124,37 +125,35 @@ pub fn iface_substitute_defined(session: &mut Session, original: &str, substitut
         dequote_string(&mut substitute);
         let original = String::from_utf8_lossy(&original).into_owned();
         let substitute = String::from_utf8_lossy(&substitute).into_owned();
-        G_DEFINES.with(|g| {
-            let mut g = g.borrow_mut();
-            // find_defined(g_defines, substitute): NULL g_defines ↔ not found.
-            let subnet = match g.as_deref_mut() {
-                Some(defs) => find_defined(defs, &substitute),
-                None => None,
-            };
-            match subnet {
-                None => {
-                    print!("No defined network '{}'.\n", substitute);
-                }
-                Some(subnet) => {
-                    let top = session.stack_find_top().unwrap();
-                    if session.stack_entry_fsm(top, |f| {
-                        fsm_symbol_occurs(f, &original, M_UPPER + M_LOWER)
-                    }) == 0
-                    {
-                        print!("Symbol '{}' does not occur.\n", original);
-                    } else {
-                        let newnet = session.stack_entry_fsm_with_opts(top, |opts, f| {
-                            fsm_substitute_label(opts, f, &original, subnet)
-                        });
-                        // C: stack_pop() — the popped net is NOT fsm_destroy'd (latent
-                        // leak); here the returned Box is dropped (freed) instead.
-                        let _ = session.stack_pop();
-                        print!("Substituted network '{}' for '{}'.\n", substitute, original);
-                        session.stack_add(fsm_topsort(fsm_minimize(&session.opts, newnet)));
-                    }
+        // Take the registry out of the session for the duration: the found
+        // subnet stays mutably borrowed from it across the stack calls below
+        // (fsm_substitute_label merges sigmas into the registry's live net, as
+        // in C, so a copy would observably diverge).
+        let mut defines = std::mem::replace(&mut session.defines, defined_networks_init());
+        match find_defined(&mut defines, &substitute) {
+            None => {
+                print!("No defined network '{}'.\n", substitute);
+            }
+            Some(subnet) => {
+                let top = session.stack_find_top().unwrap();
+                if session
+                    .stack_entry_fsm(top, |f| fsm_symbol_occurs(f, &original, M_UPPER + M_LOWER))
+                    == 0
+                {
+                    print!("Symbol '{}' does not occur.\n", original);
+                } else {
+                    let newnet = session.stack_entry_fsm_with_opts(top, |opts, f| {
+                        fsm_substitute_label(opts, f, &original, subnet)
+                    });
+                    // C: stack_pop() — the popped net is NOT fsm_destroy'd (latent
+                    // leak); here the returned Box is dropped (freed) instead.
+                    let _ = session.stack_pop();
+                    print!("Substituted network '{}' for '{}'.\n", substitute, original);
+                    session.stack_add(fsm_topsort(fsm_minimize(&session.opts, newnet)));
                 }
             }
-        });
+        }
+        session.defines = defines;
     }
 }
 
@@ -185,11 +184,11 @@ pub fn iface_shuffle(session: &mut Session) {
 pub fn iface_union(session: &mut Session) {
     if iface_stack_check(session, 2) != 0 {
         while session.stack_size() > 1 {
-            // C: fsm_union(stack_pop(), stack_pop()) — pops in one expression (C
+            // C: fsm_union(&session.opts, stack_pop(), stack_pop()) — pops in one expression (C
             // order unspecified); union is commutative. Minimized, NOT topsorted.
             let a = session.stack_pop().unwrap();
             let b = session.stack_pop().unwrap();
-            session.stack_add(fsm_minimize(&session.opts, fsm_union(a, b)));
+            session.stack_add(fsm_minimize(&session.opts, fsm_union(&session.opts, a, b)));
         }
     }
 }

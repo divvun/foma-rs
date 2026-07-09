@@ -952,6 +952,21 @@ children (
                 id w8-defines
                 title "Tier 3: G_DEFINES/G_DEFINES_F (define registry) → Session. Already ~90% threaded (fsm_parse_regex takes a defines param); replace the ~21 iface/lexc thread_local reads with Session.defines. Fold in FSM_OPTIONS."
                 priority 2
+                log (
+                    {
+                        at 2026-07-09T15:03:16.781201Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan_start)"
+                    }
+
+                    {
+                        at 2026-07-09T15:14:45.001187Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "Done: G_DEFINES/G_DEFINES_F thread_locals deleted; Session owns defines/defines_f (Box'd dummy-head registries, init'd by Session::new — C main's defined_*_init). fsm_lexc_parse_string/file take defines: Option<&mut DefinedNetworks> (the C g_defines \"olddefines\" dance became a plain parameter). iface_load/save_defined + iface_print_defined take the session; iface_substitute_defined temporarily mem::replace-takes the registry out of the session because the found subnet stays mutably borrowed across the stack calls (fsm_substitute_label merges sigmas into the registry's live net, as C does — a copy would observably diverge). Pre-init NULL-registry branches (\"No defined symbols./No defined networks.\") are unrepresentable now and removed: an empty registry prints nothing / still creates the (empty) save file, matching C's post-init behaviour. FSM_OPTIONS also folded: FsmOptions struct deleted from types.rs, skip_word_boundary_marker is a FomaOptions field (annotation moved), fsm_set/get_option take the option set, fsm_merge_sigma (its one library reader) gained the opts param (+ fsm_union/fsm_equivalent/fsm_left_rewr in its caller closure). Remaining thread_locals are out-of-scope algorithm scratch (dynarray rand, int_stack, regex parse state, QUANTIFIERS) and bin arg-state. 556 tests green."
+                    }
+                )
             }
         )
     }

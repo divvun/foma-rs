@@ -34,7 +34,7 @@ pub fn fsm_optionality(opts: &FomaOptions, net: Box<Fsm>) -> Box<Fsm> {
 // [spec:foma:sem:constructions.fsm-kleene-closure-fn]
 pub fn fsm_kleene_closure(opts: &FomaOptions, net: Box<Fsm>, operation: i32) -> Box<Fsm> {
     if operation == OPTIONALITY {
-        return fsm_union(net, fsm_empty_string());
+        return fsm_union(opts, net, fsm_empty_string());
     }
 
     let mut net = fsm_minimize(opts, net);

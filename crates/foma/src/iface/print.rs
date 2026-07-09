@@ -1014,20 +1014,14 @@ pub fn iface_print_dot(session: &mut Session, filename: Option<&str>) {
 pub fn iface_print_net(session: &mut Session, netname: Option<&str>, filename: Option<&str>) {
     match netname {
         Some(netname) => {
-            // net = find_defined(g_defines, netname); NULL g_defines ↔ not found.
-            let found = G_DEFINES.with(|g| {
-                let mut g = g.borrow_mut();
-                match g.as_deref_mut() {
-                    Some(defs) => match find_defined(defs, netname) {
-                        Some(net) => {
-                            print_net(net, filename);
-                            true
-                        }
-                        None => false,
-                    },
-                    None => false,
+            // net = find_defined(g_defines, netname)
+            let found = match find_defined(&mut session.defines, netname) {
+                Some(net) => {
+                    print_net(net, filename);
+                    true
                 }
-            });
+                None => false,
+            };
             if !found {
                 if session.opts.verbose {
                     eprint!("No defined network {}.\n", netname);
@@ -1106,35 +1100,28 @@ pub fn iface_print_cmatrix(session: &mut Session) {
 // [spec:foma:sem:iface.iface-print-defined-fn+1]
 // [spec:foma:def:foma.iface-print-defined-fn]
 // [spec:foma:sem:foma.iface-print-defined-fn+1]
-pub fn iface_print_defined() {
-    G_DEFINES.with(|g| {
-        let g = g.borrow();
-        if g.is_none() {
-            print!("No defined symbols.\n");
+pub fn iface_print_defined(session: &mut Session) {
+    // C printed "No defined symbols.\n" only for a NULL g_defines (possible
+    // only before main's init, never for a merely-empty registry); the session
+    // registry always exists, so that branch is gone.
+    let mut d = Some(&*session.defines);
+    while let Some(node) = d {
+        if let Some(name) = node.name.as_deref() {
+            print!("{}\t", name);
+            print_stats(node.net.as_deref().unwrap());
         }
-        // Falls through to the loop even when NULL (a no-op over an empty list).
-        let mut d = g.as_deref();
-        while let Some(node) = d {
-            if let Some(name) = node.name.as_deref() {
-                print!("{}\t", name);
-                print_stats(node.net.as_deref().unwrap());
-            }
-            d = node.next.as_deref();
+        d = node.next.as_deref();
+    }
+    let mut d = Some(&*session.defines_f);
+    while let Some(node) = d {
+        if let Some(name) = node.name.as_deref() {
+            // Wave 4 fix: dropped the stray unmatched ')' from the C format
+            // "%s@%i)\t" — now "%s@%i\t" (name@numargs then TAB).
+            print!("{}@{}\t", name, node.numargs);
+            print!("{}\n", node.regex.as_deref().unwrap_or(""));
         }
-    });
-    G_DEFINES_F.with(|g| {
-        let g = g.borrow();
-        let mut d = g.as_deref();
-        while let Some(node) = d {
-            if let Some(name) = node.name.as_deref() {
-                // Wave 4 fix: dropped the stray unmatched ')' from the C format
-                // "%s@%i)\t" — now "%s@%i\t" (name@numargs then TAB).
-                print!("{}@{}\t", name, node.numargs);
-                print!("{}\n", node.regex.as_deref().unwrap_or(""));
-            }
-            d = node.next.as_deref();
-        }
-    });
+        d = node.next.as_deref();
+    }
 }
 
 // [spec:foma:def:iface.iface-print-sigma-fn]

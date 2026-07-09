@@ -13,7 +13,7 @@ pub fn fsm_concat(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm
     let mut net1 = net1;
     let mut net2 = net2;
 
-    fsm_merge_sigma(&mut net1, &mut net2);
+    fsm_merge_sigma(opts, &mut net1, &mut net2);
 
     fsm_count(&mut net1);
     fsm_count(&mut net2);
@@ -126,11 +126,11 @@ pub fn fsm_concat(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm
 // [spec:foma:sem:constructions.fsm-union-fn]
 // [spec:foma:def:fomalib.fsm-union-fn]
 // [spec:foma:sem:fomalib.fsm-union-fn]
-pub fn fsm_union(net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
+pub fn fsm_union(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm> {
     let mut net1 = net1;
     let mut net2 = net2;
 
-    fsm_merge_sigma(&mut net1, &mut net2);
+    fsm_merge_sigma(opts, &mut net1, &mut net2);
 
     fsm_count(&mut net1);
     fsm_count(&mut net2);
@@ -469,7 +469,7 @@ pub fn fsm_minus(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm>
     let mut net1 = fsm_minimize(opts, net1);
     let mut net2 = fsm_minimize(opts, net2);
 
-    fsm_merge_sigma(&mut net1, &mut net2);
+    fsm_merge_sigma(opts, &mut net1, &mut net2);
 
     fsm_count(&mut net1);
     fsm_count(&mut net2);

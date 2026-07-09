@@ -98,4 +98,5 @@ assertions (
     {id w7-apply-runtime, kind @complete, author "brendan@necessary.nu", at 2026-07-07T19:36:46.227718Z}
     {id w8-stack, kind @complete, author "brendan@necessary.nu", at 2026-07-08T17:54:26.850046Z}
     {id w8-options, kind @doing, author "brendan@necessary.nu", at 2026-07-09T14:38:21.504551Z}
+    {id w8-defines, kind @doing, author "brendan@necessary.nu", at 2026-07-09T15:03:16.781201Z}
 )

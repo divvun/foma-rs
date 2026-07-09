@@ -16,7 +16,7 @@ pub fn iface_test_equivalent(session: &mut Session) {
         fsm_count(&mut two);
         // Latent leak in C: the two copies are never fsm_destroy'd; here they are
         // consumed (freed) by fsm_equivalent — no-op observable difference.
-        iface_print_bool(fsm_equivalent(one, two));
+        iface_print_bool(fsm_equivalent(&session.opts, one, two));
     }
 }
 

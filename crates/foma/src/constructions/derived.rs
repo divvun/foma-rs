@@ -278,7 +278,7 @@ pub fn fsm_substitute_label(
     original: &str,
     substitute: &mut Fsm,
 ) -> Box<Fsm> {
-    fsm_merge_sigma(net, substitute);
+    fsm_merge_sigma(opts, net, substitute);
     let mut addstate1 = net.statecount;
     let addstate2 = substitute.statecount;
 
@@ -608,7 +608,7 @@ pub fn fsm_shuffle(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
     let mut net1 = fsm_minimize(opts, net1);
     let mut net2 = fsm_minimize(opts, net2);
 
-    fsm_merge_sigma(&mut net1, &mut net2);
+    fsm_merge_sigma(opts, &mut net1, &mut net2);
 
     fsm_count(&mut net1);
     fsm_count(&mut net2);
@@ -723,12 +723,12 @@ pub fn fsm_shuffle(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
 // [spec:foma:sem:constructions.fsm-equivalent-fn]
 // [spec:foma:def:fomalib.fsm-equivalent-fn]
 // [spec:foma:sem:fomalib.fsm-equivalent-fn]
-pub fn fsm_equivalent(net1: Box<Fsm>, net2: Box<Fsm>) -> i32 {
+pub fn fsm_equivalent(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> i32 {
     /* Test path equivalence of two FSMs by traversing both in parallel */
     let mut net1 = net1;
     let mut net2 = net2;
 
-    fsm_merge_sigma(&mut net1, &mut net2);
+    fsm_merge_sigma(opts, &mut net1, &mut net2);
 
     fsm_count(&mut net1);
     fsm_count(&mut net2);
@@ -877,6 +877,7 @@ pub fn fsm_contains_one(opts: &FomaOptions, net: Box<Fsm>) -> Box<Fsm> {
         fsm_contains(
             opts,
             fsm_union(
+                opts,
                 fsm_intersect(
                     opts,
                     fsm_concat(
@@ -910,6 +911,7 @@ pub fn fsm_contains_opt_one(opts: &FomaOptions, net: Box<Fsm>) -> Box<Fsm> {
     /* $.A | ~$A */
     let mut net = net;
     let ret = fsm_union(
+        opts,
         fsm_contains_one(opts, fsm_copy(&mut net)),
         fsm_complement(opts, fsm_contains(opts, fsm_copy(&mut net))),
     );
@@ -1000,6 +1002,7 @@ pub fn fsm_priority_union_upper(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fs
     /* A .P. B = A | [~[A.u] .o. B] */
     let mut net1 = net1;
     let ret = fsm_union(
+        opts,
         fsm_copy(&mut net1),
         fsm_compose(
             opts,
@@ -1019,6 +1022,7 @@ pub fn fsm_priority_union_lower(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fs
     /* A .p. B = A | B .o. ~[A.l] */
     let mut net1 = net1;
     let ret = fsm_union(
+        opts,
         fsm_copy(&mut net1),
         fsm_compose(
             opts,
@@ -1157,7 +1161,7 @@ pub fn fsm_ignore(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>, operation:
         fsm_destroy(net2);
         return net1;
     }
-    fsm_merge_sigma(&mut net1, &mut net2);
+    fsm_merge_sigma(opts, &mut net1, &mut net2);
 
     fsm_count(&mut net1);
     fsm_count(&mut net2);
@@ -1176,6 +1180,7 @@ pub fn fsm_ignore(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>, operation:
                 fsm_complement(
                     opts,
                     fsm_union(
+                        opts,
                         fsm_concat(opts, fsm_symbol("@i<@"), fsm_universal()),
                         fsm_concat(opts, fsm_universal(), fsm_symbol("@i<@")),
                     ),
@@ -1626,7 +1631,7 @@ pub fn fsm_equal_substrings(
         opts,
         fsm_complement(
             opts,
-            fsm_contains(opts, fsm_union(fsm_copy(&mut lb), fsm_copy(&mut rb))),
+            fsm_contains(opts, fsm_union(opts, fsm_copy(&mut lb), fsm_copy(&mut rb))),
         ),
     );
 
@@ -1648,9 +1653,10 @@ pub fn fsm_equal_substrings(
                     opts,
                     fsm_complement(
                         opts,
-                        fsm_contains(opts, fsm_union(fsm_copy(left), fsm_copy(right))),
+                        fsm_contains(opts, fsm_union(opts, fsm_copy(left), fsm_copy(right))),
                     ),
                     fsm_union(
+                        opts,
                         fsm_concat(
                             opts,
                             fsm_copy(left),
@@ -1666,7 +1672,7 @@ pub fn fsm_equal_substrings(
             ),
             fsm_complement(
                 opts,
-                fsm_contains(opts, fsm_union(fsm_copy(left), fsm_copy(right))),
+                fsm_contains(opts, fsm_union(opts, fsm_copy(left), fsm_copy(right))),
             ),
         ),
     );
@@ -1719,8 +1725,10 @@ pub fn fsm_equal_substrings(
     let remove_brackets = fsm_kleene_star(
         opts,
         fsm_union(
+            opts,
             fsm_cross_product(opts, fsm_copy(&mut lb), fsm_empty_string()),
             fsm_union(
+                opts,
                 fsm_cross_product(opts, fsm_copy(&mut rb), fsm_empty_string()),
                 fsm_copy(&mut nobr),
             ),
@@ -1777,6 +1785,7 @@ pub fn fsm_equal_substrings(
     let mut cleanup = fsm_minimize(
         opts,
         fsm_union(
+            opts,
             fsm_concat(
                 opts,
                 fsm_kleene_star(opts, fsm_copy(&mut nolb)),
@@ -1833,7 +1842,7 @@ pub fn fsm_equal_substrings(
                 fsm_kleene_star(opts, fsm_copy(&mut nolb)),
             );
 
-            r#move = fsm_union(r#move, this_move);
+            r#move = fsm_union(opts, r#move, this_move);
             syms += 1;
         }
         sig = s.next.as_deref();
@@ -1858,7 +1867,7 @@ pub fn fsm_equal_substrings(
     /* Result = L .o. [Leq | Lbypass] */
     let mut result = fsm_minimize(
         opts,
-        fsm_compose(opts, net, fsm_union(fsm_lower(leq), lbypass)),
+        fsm_compose(opts, net, fsm_union(opts, fsm_lower(leq), lbypass)),
     );
     /* C: sigma_remove's returned new head is discarded (harmless unless
     the removed node were the head); the owned list is reassigned here */
@@ -1898,10 +1907,10 @@ pub fn fsm_bimachine(net: Box<Fsm>) -> Box<Fsm> {
 // [spec:foma:sem:constructions.fsm-left-rewr-fn]
 // [spec:foma:def:fomalib.fsm-left-rewr-fn]
 // [spec:foma:sem:fomalib.fsm-left-rewr-fn]
-pub fn fsm_left_rewr(net: Box<Fsm>, rewr: Box<Fsm>) -> Box<Fsm> {
+pub fn fsm_left_rewr(opts: &FomaOptions, net: Box<Fsm>, rewr: Box<Fsm>) -> Box<Fsm> {
     let mut net = net;
     let mut rewr = rewr;
-    fsm_merge_sigma(&mut net, &mut rewr);
+    fsm_merge_sigma(opts, &mut net, &mut rewr);
     let relabelin = rewr.states[0].r#in as i32;
     let relabelout = rewr.states[0].out as i32;
 
@@ -2159,6 +2168,7 @@ pub fn fsm_context_restrict(
         union_p = fsm_minimize(
             opts,
             fsm_union(
+                opts,
                 fsm_minimize(
                     opts,
                     fsm_concat(

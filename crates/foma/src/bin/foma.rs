@@ -20,13 +20,9 @@ use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
 use std::process;
 
-use foma::define::{
-    G_DEFINES, G_DEFINES_F, add_defined, add_defined_function, defined_functions_init,
-    defined_networks_init, find_defined, remove_defined,
-};
+use foma::define::{add_defined, add_defined_function, find_defined, remove_defined};
 use foma::iface::*;
 use foma::io::file_to_mem;
-use foma::options::FomaOptions;
 use foma::regex::fsm_parse_regex;
 use foma::session::Session;
 use foma::structures::fsm_copy;
@@ -397,9 +393,6 @@ fn main() {
     // apply_init reseeds that LCG with time(NULL) before any random enumeration,
     // so runtime randomness is preserved; only startup net auto-naming (before
     // the first apply) uses the default seed.
-    G_DEFINES.with(|d| *d.borrow_mut() = Some(defined_networks_init()));
-    G_DEFINES_F.with(|d| *d.borrow_mut() = Some(defined_functions_init()));
-
     // getopt(argc, argv, "e:f:hl:pqrsv"), acted on in command-line order.
     let mut idx = 1;
     while idx < args.len() {
@@ -683,50 +676,46 @@ fn find_regex_terminator(s: &str) -> Option<usize> {
 (RE) or define (DE) fsm_topsort(fsm_minimize(&session.opts, current_parse)). */
 fn compile_regex(session: &mut Session, pmode: i32, defname: &str, body: &str) {
     let verbose = session.opts.verbose;
-    G_DEFINES.with(|dn| {
-        G_DEFINES_F.with(|df| {
-            let mut dnb = dn.borrow_mut();
-            let mut dfb = df.borrow_mut();
-            let parsed =
-                fsm_parse_regex(&session.opts, body, dnb.as_deref_mut(), dfb.as_deref_mut());
-            match parsed {
-                None => {
-                    // DEVIATION from C: C prints "invalid regex detected" only when
-                    // the parse succeeds but minimize returns NULL; on a syntax
-                    // error the nfst-xre parser has already printed a diagnostic.
-                    // We cannot tell the two apart, so we stay silent here to avoid
-                    // double-reporting a syntax error.
-                }
-                Some(net) => {
-                    let tempnet = fsm_topsort(net);
-                    if pmode == RE {
-                        session.stack_add(tempnet); // prints stats itself when verbose
+    let parsed = fsm_parse_regex(
+        &session.opts,
+        body,
+        Some(&mut session.defines),
+        Some(&mut session.defines_f),
+    );
+    match parsed {
+        None => {
+            // DEVIATION from C: C prints "invalid regex detected" only when
+            // the parse succeeds but minimize returns NULL; on a syntax
+            // error the nfst-xre parser has already printed a diagnostic.
+            // We cannot tell the two apart, so we stay silent here to avoid
+            // double-reporting a syntax error.
+        }
+        Some(net) => {
+            let tempnet = fsm_topsort(net);
+            if pmode == RE {
+                session.stack_add(tempnet); // prints stats itself when verbose
+            } else {
+                let olddef = add_defined(&mut session.defines, Some(tempnet), defname);
+                if verbose {
+                    if olddef == -1 {
+                        println!(
+                            "Network name '{}' should consist of at most {} characters.",
+                            defname, FSM_NAME_LEN
+                        );
                     } else {
-                        let olddef =
-                            add_defined(dnb.as_deref_mut().unwrap(), Some(tempnet), defname);
-                        if verbose {
-                            if olddef == -1 {
-                                println!(
-                                    "Network name '{}' should consist of at most {} characters.",
-                                    defname, FSM_NAME_LEN
-                                );
-                            } else {
-                                if olddef == 1 {
-                                    print!("redefined {}: ", defname);
-                                } else {
-                                    print!("defined {}: ", defname);
-                                }
-                                if let Some(n) = find_defined(dnb.as_deref_mut().unwrap(), defname)
-                                {
-                                    print_stats(n);
-                                }
-                            }
+                        if olddef == 1 {
+                            print!("redefined {}: ", defname);
+                        } else {
+                            print!("defined {}: ", defname);
+                        }
+                        if let Some(n) = find_defined(&mut session.defines, defname) {
+                            print_stats(n);
                         }
                     }
                 }
             }
-        });
-    });
+        }
+    }
 }
 
 /* interface.l <DEFI> "define NAME" (no regex body): name the top-of-stack net. */
@@ -737,20 +726,17 @@ fn define_top_of_stack(session: &mut Session, name: &str) {
     let net = session.stack_pop();
     let name2 = name.trim_end_matches(';');
     let verbose = session.opts.verbose;
-    G_DEFINES.with(|dn| {
-        let mut dnb = dn.borrow_mut();
-        let olddef = add_defined(dnb.as_deref_mut().unwrap(), net, name2);
-        if verbose {
-            if olddef != 0 {
-                print!("redefined {}: ", name2);
-            } else {
-                print!("defined {}: ", name2);
-            }
-            if let Some(n) = find_defined(dnb.as_deref_mut().unwrap(), name2) {
-                print_stats(n);
-            }
+    let olddef = add_defined(&mut session.defines, net, name2);
+    if verbose {
+        if olddef != 0 {
+            print!("redefined {}: ", name2);
+        } else {
+            print!("defined {}: ", name2);
         }
-    });
+        if let Some(n) = find_defined(&mut session.defines, name2) {
+            print_stats(n);
+        }
+    }
 }
 
 /* interface.l <DEFI>/FUNC_* "define NAME(args) body": store the function body
@@ -758,13 +744,16 @@ with each argument name rewritten to @ARGUMENTNN@.
 DEVIATION from C: C stores the name as "NAME(" (with the paren); this port stores
 the bare NAME so that regex.rs's function_apply (which looks up the nfst-xre
 FunctionCall name, paren stripped) resolves it. */
-fn define_function(opts: &FomaOptions, name: &str, args: &[String], body: &str) {
+fn define_function(session: &mut Session, name: &str, args: &[String], body: &str) {
     let numargs = args.len() as i32;
     let funcdef = substitute_func_args(body, args);
-    G_DEFINES_F.with(|df| {
-        let mut dfb = df.borrow_mut();
-        add_defined_function(opts, dfb.as_deref_mut().unwrap(), name, &funcdef, numargs);
-    });
+    add_defined_function(
+        &session.opts,
+        &mut session.defines_f,
+        name,
+        &funcdef,
+        numargs,
+    );
 }
 
 fn substitute_func_args(body: &str, args: &[String]) -> String {
@@ -1035,12 +1024,12 @@ fn dispatch(session: &mut Session, line: &str) -> bool {
 
     // load / save
     if w0 == "loadd" {
-        iface_load_defined(&arg_after(t, 1));
+        iface_load_defined(session, &arg_after(t, 1));
         return true;
     }
     if w0 == "load" {
         if w1 == "defined" {
-            iface_load_defined(&arg_after(t, 2));
+            iface_load_defined(session, &arg_after(t, 2));
         } else if w1 == "stack" {
             iface_load_stack(session, &arg_after(t, 2));
         } else {
@@ -1049,7 +1038,7 @@ fn dispatch(session: &mut Session, line: &str) -> bool {
         return true;
     }
     if w0 == "saved" {
-        iface_save_defined(&strip_redir(&arg_after(t, 1)));
+        iface_save_defined(session, &strip_redir(&arg_after(t, 1)));
         return true;
     }
     if w0 == "ss" {
@@ -1058,7 +1047,7 @@ fn dispatch(session: &mut Session, line: &str) -> bool {
     }
     if w0 == "save" {
         if w1 == "defined" {
-            iface_save_defined(&strip_redir(&arg_after(t, 2)));
+            iface_save_defined(session, &strip_redir(&arg_after(t, 2)));
             return true;
         }
         if w1 == "stack" {
@@ -1080,10 +1069,7 @@ fn dispatch(session: &mut Session, line: &str) -> bool {
     if pfx(w0, "undefine", 3) && ws.len() >= 2 {
         let name = arg_after(t, 1);
         let name = name.trim_end_matches(';');
-        G_DEFINES.with(|dn| {
-            let mut dnb = dn.borrow_mut();
-            remove_defined(dnb.as_deref_mut().unwrap(), Some(name));
-        });
+        remove_defined(&mut session.defines, Some(name));
         return true;
     }
 
@@ -1189,7 +1175,7 @@ fn handle_define(session: &mut Session, rest: &str) -> bool {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        define_function(&session.opts, name, &args, body.trim());
+        define_function(session, name, &args, body.trim());
         return true;
     }
     let name = &rest[..name_end];
@@ -1283,7 +1269,9 @@ fn read_subcommand(session: &mut Session, t: &str, w1: &str) -> Option<bool> {
         /* interface.l RLEXC action: file_to_mem then
         fsm_lexc_parse_string(&session.opts, buf, 1), result pushed via stack_add */
         let fname = read_file_arg(t, 2);
-        if let Some(net) = foma::lexcread::fsm_lexc_parse_file(&session.opts, &fname) {
+        if let Some(net) =
+            foma::lexcread::fsm_lexc_parse_file(&session.opts, Some(&mut session.defines), &fname)
+        {
             session.stack_add(net);
         }
         return Some(true);
@@ -1372,7 +1360,7 @@ fn try_print_family(session: &mut Session, t: &str, ws: &[&str]) -> Option<bool>
         return Some(true);
     }
     if pfx(s0, "defined", 3) {
-        iface_print_defined();
+        iface_print_defined(session);
         return Some(true);
     }
     if s0 == "dot" {
@@ -1631,16 +1619,14 @@ fn try_zero_arg(session: &mut Session, w0: &str, w1: &str) -> Option<bool> {
 
 // interface.l PUSH action wrapped as a helper (find_defined + copy + stack_add).
 fn iface_push(session: &mut Session, name: &str) {
-    G_DEFINES.with(|dn| {
-        let mut dnb = dn.borrow_mut();
-        match find_defined(dnb.as_deref_mut().unwrap(), name) {
-            None => println!("'{}' is not a defined symbol.", name),
-            Some(net) => {
-                let copy = fsm_copy(net);
-                session.stack_add(copy);
-            }
+    let copy = match find_defined(&mut session.defines, name) {
+        None => {
+            println!("'{}' is not a defined symbol.", name);
+            return;
         }
-    });
+        Some(net) => fsm_copy(net),
+    };
+    session.stack_add(copy);
 }
 
 // ───────────────────────── small helpers ─────────────────────────

@@ -7,10 +7,9 @@
 //! former `MAIN_STACK` / `ARENA` thread_locals, so independent sessions can
 //! coexist on one thread (embeddable) with nothing hidden shared between them.
 //!
-//! The define registry follows in a later tier as a further `Session` field.
-
+use crate::define::{defined_functions_init, defined_networks_init};
 use crate::options::FomaOptions;
-use crate::types::StackEntry;
+use crate::types::{DefinedFunctions, DefinedNetworks, StackEntry};
 
 /// The mutable state of one interactive foma session.
 pub struct Session {
@@ -22,6 +21,11 @@ pub struct Session {
     pub(crate) stack_arena: Vec<StackEntry>,
     /// The session's option set (C: the `g_*` globals; CLI `set variable`).
     pub opts: FomaOptions,
+    /// The defined-networks registry (C: `struct defined_networks *g_defines`,
+    /// init'd by main). Always the dummy-head list `define.rs` operates on.
+    pub defines: Box<DefinedNetworks>,
+    /// The defined-functions registry (C: `g_defines_f`), same lifecycle.
+    pub defines_f: Box<DefinedFunctions>,
 }
 
 impl Session {
@@ -32,6 +36,8 @@ impl Session {
             stack_head: None,
             stack_arena: Vec::new(),
             opts: FomaOptions::default(),
+            defines: defined_networks_init(),
+            defines_f: defined_functions_init(),
         };
         session.stack_init();
         session

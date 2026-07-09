@@ -2,7 +2,7 @@
 //! resolves to the iface module (re-exports every submodule's surface),
 //! so every `/test` facet keeps a stable home here.
 use super::*;
-use crate::define::{add_defined, defined_networks_init};
+use crate::define::add_defined;
 use crate::options::FomaOptions;
 use crate::regex::fsm_parse_regex;
 use crate::session::Session;
@@ -25,7 +25,8 @@ fn push_topsorted(session: &mut Session, re: &str) {
 /// Pop the top net and test recognizer-language equality against `re`.
 fn top_is(session: &mut Session, re: &str) -> bool {
     let expected = fsm_parse_regex(&session.opts, re, None, None).unwrap();
-    fsm_equivalent(session.stack_pop().unwrap(), expected) == 1
+    let popped = session.stack_pop().unwrap();
+    fsm_equivalent(&session.opts, popped, expected) == 1
 }
 
 /// Does `net` accept `w` on the input (down) side?
@@ -664,15 +665,11 @@ fn print_net_named_and_top_paths() {
     // netname None + empty stack: refusal.
     iface_print_net(&mut session, None, None);
     assert_eq!(session.stack_size(), 0);
-    // netname Some with g_defines None (default): "No defined network".
+    // netname Some with an empty registry: "No defined network".
     iface_print_net(&mut session, Some("Foo"), None);
-    // Populate g_defines with Foo, then print it by name.
-    G_DEFINES.with(|g| *g.borrow_mut() = Some(defined_networks_init()));
+    // Populate the registry with Foo, then print it by name.
     let def = fsm_parse_regex(&session.opts, "x y", None, None).unwrap();
-    G_DEFINES.with(|g| {
-        let mut g = g.borrow_mut();
-        add_defined(g.as_deref_mut().unwrap(), Some(def), "Foo");
-    });
+    add_defined(&mut session.defines, Some(def), "Foo");
     iface_print_net(&mut session, Some("Foo"), None); // found → prints
     // netname None + populated stack: prints the top net.
     push(&mut session, "a b");
@@ -715,22 +712,18 @@ fn print_cmatrix_att_unwritable_path_does_not_crash() {
     assert_eq!(session.stack_size(), 1); // net not consumed, no panic
 }
 
-// print defined: g_defines None prints "No defined symbols."; a populated
-// list prints each entry. Neither touches the stack. Wave 4 fix: the function
-// header format dropped the stray ')' ("%s@%i\t").
+// print defined: an empty registry prints nothing; a populated list prints
+// each entry. Neither touches the stack. Wave 4 fix: the function header
+// format dropped the stray ')' ("%s@%i\t").
 // [spec:foma:sem:iface.iface-print-defined-fn+1/test]
 // [spec:foma:sem:foma.iface-print-defined-fn+1/test]
 #[test]
 fn print_defined_handles_empty_and_populated() {
-    let session = Session::new();
-    iface_print_defined(); // g_defines None: "No defined symbols."
-    G_DEFINES.with(|g| *g.borrow_mut() = Some(defined_networks_init()));
+    let mut session = Session::new();
+    iface_print_defined(&mut session); // empty registry: nothing printed
     let def = fsm_parse_regex(&session.opts, "x y", None, None).unwrap();
-    G_DEFINES.with(|g| {
-        let mut g = g.borrow_mut();
-        add_defined(g.as_deref_mut().unwrap(), Some(def), "Foo");
-    });
-    iface_print_defined(); // prints "Foo\t<stats>"
+    add_defined(&mut session.defines, Some(def), "Foo");
+    iface_print_defined(&mut session); // prints "Foo\t<stats>"
     assert_eq!(session.stack_size(), 0);
 }
 
@@ -743,37 +736,26 @@ fn print_defined_handles_empty_and_populated() {
 // [spec:foma:sem:foma.iface-load-defined-fn/test]
 #[test]
 fn load_defined_restores_saved_definitions() {
-    let opts = &FomaOptions::default();
+    let mut session = Session::new();
     let path = std::env::temp_dir().join("foma_s1_defined.gz");
     let p = path.to_str().unwrap();
-    // Missing file: load reports "File error" (g_defines initialized so the
-    // helper is actually invoked) and leaves the table empty.
-    G_DEFINES.with(|g| *g.borrow_mut() = Some(defined_networks_init()));
-    iface_load_defined("/no/such/foma/defined");
-    let missing = G_DEFINES.with(|g| {
-        let mut g = g.borrow_mut();
-        find_defined(g.as_deref_mut().unwrap(), "Foo").is_some()
-    });
-    assert!(!missing);
+    // Missing file: load reports "File error" and leaves the table empty.
+    iface_load_defined(&mut session, "/no/such/foma/defined");
+    assert!(find_defined(&mut session.defines, "Foo").is_none());
 
     // Define Foo = [x y] and write the file via the io primitive.
-    let def = fsm_parse_regex(opts, "x y", None, None).unwrap();
-    G_DEFINES.with(|g| {
-        let mut g = g.borrow_mut();
-        add_defined(g.as_deref_mut().unwrap(), Some(def), "Foo");
-        save_defined(g.as_deref_mut().unwrap(), p);
-    });
-    // Reset g_defines and load the file back.
-    G_DEFINES.with(|g| *g.borrow_mut() = Some(defined_networks_init()));
-    iface_load_defined(p);
+    let def = fsm_parse_regex(&session.opts, "x y", None, None).unwrap();
+    add_defined(&mut session.defines, Some(def), "Foo");
+    save_defined(&mut session.defines, p);
+    // Load the file back into a fresh session's registry.
+    let mut session = Session::new();
+    iface_load_defined(&mut session, p);
     // Foo is restored and equals [x y].
-    let restored = G_DEFINES.with(|g| {
-        let mut g = g.borrow_mut();
-        find_defined(g.as_deref_mut().unwrap(), "Foo").map(|f| fsm_copy(f))
-    });
+    let restored = find_defined(&mut session.defines, "Foo").map(|f| fsm_copy(f));
     let restored = restored.expect("Foo should be restored");
+    let opts = &session.opts.clone();
     let expected = fsm_parse_regex(opts, "x y", None, None).unwrap();
-    assert_eq!(fsm_equivalent(restored, expected), 1);
+    assert_eq!(fsm_equivalent(&session.opts, restored, expected), 1);
 }
 
 // load stack: reads every net from a multi-net binary file and pushes them
@@ -1001,12 +983,8 @@ fn substitute_symbol_and_defined() {
     assert!(top_is(&mut session, "x b"));
 
     // substitute defined: X = [p] replaces the arc labelled `a`.
-    G_DEFINES.with(|g| *g.borrow_mut() = Some(defined_networks_init()));
     let def = fsm_parse_regex(&session.opts, "p", None, None).unwrap();
-    G_DEFINES.with(|g| {
-        let mut g = g.borrow_mut();
-        add_defined(g.as_deref_mut().unwrap(), Some(def), "X");
-    });
+    add_defined(&mut session.defines, Some(def), "X");
     push(&mut session, "a b");
     iface_substitute_defined(&mut session, "a", "Nope"); // no such defined net → unchanged
     assert_eq!(session.stack_size(), 1);
@@ -1129,30 +1107,28 @@ fn rotate_swaps_ends_turn_reverses() {
 // [spec:foma:sem:foma.iface-save-stack-fn/test]
 #[test]
 fn save_defined_and_save_stack_roundtrip() {
-    let opts = &FomaOptions::default();
+    let mut session = Session::new();
     let dir = std::env::temp_dir();
     let dp = dir.join("foma_s2_saved.gz");
     let d = dp.to_str().unwrap();
-    // g_defines None (default): "No defined networks." and nothing written.
+    // Empty registry: the file is still created (an empty definitions gz) —
+    // C's "No defined networks." guarded only the pre-init NULL registry.
     let _ = std::fs::remove_file(d);
-    iface_save_defined(d);
-    assert!(!std::path::Path::new(d).exists());
-    // Populate, save, reset, load back.
-    G_DEFINES.with(|g| *g.borrow_mut() = Some(defined_networks_init()));
-    let def = fsm_parse_regex(opts, "x y", None, None).unwrap();
-    G_DEFINES.with(|g| {
-        let mut g = g.borrow_mut();
-        add_defined(g.as_deref_mut().unwrap(), Some(def), "Foo");
-    });
-    iface_save_defined(d);
-    G_DEFINES.with(|g| *g.borrow_mut() = Some(defined_networks_init()));
-    iface_load_defined(d);
-    let restored = G_DEFINES.with(|g| {
-        let mut g = g.borrow_mut();
-        find_defined(g.as_deref_mut().unwrap(), "Foo").map(|f| fsm_copy(f))
-    });
-    let expected = fsm_parse_regex(opts, "x y", None, None).unwrap();
-    assert_eq!(fsm_equivalent(restored.expect("Foo restored"), expected), 1);
+    iface_save_defined(&mut session, d);
+    assert!(std::path::Path::new(d).exists());
+    // Populate, save, load back into a fresh session.
+    let _ = std::fs::remove_file(d);
+    let def = fsm_parse_regex(&session.opts, "x y", None, None).unwrap();
+    add_defined(&mut session.defines, Some(def), "Foo");
+    iface_save_defined(&mut session, d);
+    let mut session = Session::new();
+    iface_load_defined(&mut session, d);
+    let restored = find_defined(&mut session.defines, "Foo").map(|f| fsm_copy(f));
+    let expected = fsm_parse_regex(&session.opts, "x y", None, None).unwrap();
+    assert_eq!(
+        fsm_equivalent(&session.opts, restored.expect("Foo restored"), expected),
+        1
+    );
 
     // save stack: writes bottom→top (a, b, c); load pushes in file order.
     let sp = dir.join("foma_s2_savestack.gz");
@@ -1441,7 +1417,7 @@ fn test_family_pins_predicate_and_preserves_stack() {
     assert_eq!(session.stack_size(), 2);
     let one = session.stack_entry_fsm(session.stack_find_top().unwrap(), |f| fsm_copy(f));
     let two = session.stack_entry_fsm(session.stack_find_second().unwrap(), |f| fsm_copy(f));
-    assert_eq!(fsm_equivalent(one, two), 1);
+    assert_eq!(fsm_equivalent(&session.opts, one, two), 1);
     session = Session::new();
     push(&mut session, "a");
     push(&mut session, "b");
@@ -1618,13 +1594,13 @@ fn write_att_and_prolog_roundtrip() {
     assert_eq!(session.stack_size(), 1); // net not consumed
     let back = read_att(&session.opts, att).unwrap();
     let expected = fsm_parse_regex(&session.opts, "a b", None, None).unwrap();
-    assert_eq!(fsm_equivalent(back, expected), 1);
+    assert_eq!(fsm_equivalent(&session.opts, back, expected), 1);
 
     iface_write_prolog(&mut session, Some(pl));
     assert_eq!(session.stack_size(), 1);
     let back = fsm_read_prolog(pl).unwrap();
     let expected = fsm_parse_regex(&session.opts, "a b", None, None).unwrap();
-    assert_eq!(fsm_equivalent(back, expected), 1);
+    assert_eq!(fsm_equivalent(&session.opts, back, expected), 1);
 }
 
 // sigptr (static): the three reserved arc labels map to 0/?/@; a matched

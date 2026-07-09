@@ -6,14 +6,10 @@ use super::*;
 // [spec:foma:sem:iface.iface-load-defined-fn]
 // [spec:foma:def:foma.iface-load-defined-fn]
 // [spec:foma:sem:foma.iface-load-defined-fn]
-pub fn iface_load_defined(filename: &str) {
-    G_DEFINES.with(|g| {
-        let mut g = g.borrow_mut();
-        // C: load_defined(g_defines, filename); g_defines is the init'd dummy head.
-        if let Some(d) = g.as_deref_mut() {
-            load_defined(d, filename);
-        }
-    });
+pub fn iface_load_defined(session: &mut Session, filename: &str) {
+    // C: load_defined(g_defines, filename); the registry is the session's
+    // init'd dummy head.
+    load_defined(&mut session.defines, filename);
 }
 
 // [spec:foma:def:iface.iface-read-att-fn]
@@ -94,21 +90,11 @@ pub fn iface_read_text(session: &mut Session, filename: &str) -> i32 {
 // [spec:foma:sem:iface.iface-save-defined-fn]
 // [spec:foma:def:foma.iface-save-defined-fn]
 // [spec:foma:sem:foma.iface-save-defined-fn]
-pub fn iface_save_defined(filename: &str) {
-    G_DEFINES.with(|g| {
-        let mut g = g.borrow_mut();
-        // save_defined(g_defines, filename): the C helper prints "No defined
-        // networks.\n" to stderr when g_defines is NULL; a &mut can't be NULL, so
-        // (per io.rs save_defined) that check lives at this call site.
-        match g.as_deref_mut() {
-            None => {
-                eprint!("No defined networks.\n");
-            }
-            Some(d) => {
-                save_defined(d, filename);
-            }
-        }
-    });
+pub fn iface_save_defined(session: &mut Session, filename: &str) {
+    // save_defined(g_defines, filename). C printed "No defined networks.\n"
+    // when g_defines was NULL (possible only before main's init); the session
+    // registry always exists, so that branch is gone.
+    save_defined(&mut session.defines, filename);
 }
 
 // [spec:foma:def:iface.iface-write-att-fn]

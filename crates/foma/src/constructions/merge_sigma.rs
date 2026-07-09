@@ -85,7 +85,7 @@ pub fn copy_mergesigma(mergesigma: Option<&Mergesigma>) -> Option<Box<Sigma>> {
 // [spec:foma:sem:constructions.fsm-merge-sigma-fn]
 // [spec:foma:def:fomalib.fsm-merge-sigma-fn]
 // [spec:foma:sem:fomalib.fsm-merge-sigma-fn]
-pub fn fsm_merge_sigma(net1: &mut Fsm, net2: &mut Fsm) {
+pub fn fsm_merge_sigma(opts: &FomaOptions, net1: &mut Fsm, net2: &mut Fsm) {
     let mut end_1 = 0;
     let mut end_2 = 0;
     let mut equal = 1;
@@ -93,7 +93,7 @@ pub fn fsm_merge_sigma(net1: &mut Fsm, net2: &mut Fsm) {
     let mut unknown_2 = 0;
     let mut net_unk = 0;
 
-    if !FSM_OPTIONS.with(|o| o.borrow().skip_word_boundary_marker) {
+    if !opts.skip_word_boundary_marker {
         let i = sigma_find(".#.", net1.sigma.as_deref());
         let j = sigma_find(".#.", net2.sigma.as_deref());
         if i != -1 && j == -1 {

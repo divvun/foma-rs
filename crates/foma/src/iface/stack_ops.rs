@@ -65,13 +65,8 @@ pub fn iface_print_name(session: &mut Session) {
 // [spec:foma:def:foma.iface-quit-fn]
 // [spec:foma:sem:foma.iface-quit-fn]
 pub fn iface_quit(session: &mut Session) {
-    G_DEFINES.with(|g| {
-        let mut g = g.borrow_mut();
-        // remove_defined(g_defines, NULL) — NULL name destroys every defined net.
-        if let Some(d) = g.as_deref_mut() {
-            remove_defined(d, None);
-        }
-    });
+    // remove_defined(g_defines, NULL) — NULL name destroys every defined net.
+    remove_defined(&mut session.defines, None);
     while session.stack_isempty() == 0 {
         let net = session.stack_pop().unwrap();
         fsm_destroy(net);

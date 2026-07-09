@@ -295,7 +295,7 @@ fn build_binary(
         BinaryOp::Compose => Some(fsm_compose(opts, l, r)),
         BinaryOp::LenientCompose => Some(fsm_lenient_compose(opts, l, r)),
         BinaryOp::CrossProduct => Some(fsm_cross_product(opts, l, r)),
-        BinaryOp::Union => Some(fsm_union(l, r)),
+        BinaryOp::Union => Some(fsm_union(opts, l, r)),
         BinaryOp::Intersect => Some(fsm_intersect(opts, l, r)),
         BinaryOp::Subtract => Some(fsm_minus(opts, l, r)),
         BinaryOp::UpperPriorityUnion => Some(fsm_priority_union_upper(opts, l, r)),
@@ -936,10 +936,10 @@ mod tests {
         let opts = &FomaOptions::default();
         let net = super::fsm_parse_regex(opts, "a b ; x y z ;", None, None).unwrap();
         let expected = super::fsm_parse_regex(opts, "x y z", None, None).unwrap();
-        assert_eq!(fsm_equivalent(net, expected), 1);
+        assert_eq!(fsm_equivalent(opts, net, expected), 1);
         let net = super::fsm_parse_regex(opts, "a ; b", None, None).unwrap();
         let expected = super::fsm_parse_regex(opts, "b", None, None).unwrap();
-        assert_eq!(fsm_equivalent(net, expected), 1);
+        assert_eq!(fsm_equivalent(opts, net, expected), 1);
     }
 
     // regex.l NONRESERVED: a symbol naming a defined net is substituted with
@@ -959,7 +959,7 @@ mod tests {
         assert_eq!(counted(net), (3, 2, 1));
         let net = super::fsm_parse_regex(opts, "Foo", Some(&mut nets), None).unwrap();
         let expected = super::fsm_parse_regex(opts, "x y", None, None).unwrap();
-        assert_eq!(fsm_equivalent(net, expected), 1);
+        assert_eq!(fsm_equivalent(opts, net, expected), 1);
         // Without the table: "Foo" is one literal (multichar) symbol.
         let net = super::fsm_parse_regex(opts, "Foo", None, None).unwrap();
         assert_eq!(counted(net), (2, 1, 1));
@@ -981,7 +981,7 @@ mod tests {
         assert_eq!(counted(net), (3, 2, 1));
         let net = super::fsm_parse_regex(opts, "F(a)", Some(&mut nets), Some(&mut funcs)).unwrap();
         let expected = super::fsm_parse_regex(opts, "a a", None, None).unwrap();
-        assert_eq!(fsm_equivalent(net, expected), 1);
+        assert_eq!(fsm_equivalent(opts, net, expected), 1);
         // Undefined functions fail.
         assert!(super::fsm_parse_regex(opts, "G(a)", Some(&mut nets), Some(&mut funcs)).is_none());
     }

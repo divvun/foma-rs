@@ -28,7 +28,7 @@ pub(crate) use crate::constructions::{
     fsm_shuffle, fsm_substitute_label, fsm_substitute_symbol, fsm_symbol, fsm_symbol_occurs,
     fsm_union,
 };
-pub(crate) use crate::define::{G_DEFINES, G_DEFINES_F, find_defined, remove_defined};
+pub(crate) use crate::define::{find_defined, remove_defined};
 pub(crate) use crate::determinize::fsm_determinize;
 pub(crate) use crate::extract::{fsm_lower, fsm_upper};
 pub(crate) use crate::flags::{flag_eliminate, flag_twosided};

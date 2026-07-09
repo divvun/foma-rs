@@ -16,7 +16,7 @@
 //! pattern), so the whole compile threads one borrow.
 
 use crate::constructions::{add_fsm_arc, fsm_update_flags};
-use crate::define::{G_DEFINES, add_defined};
+use crate::define::add_defined;
 use crate::determinize::fsm_determinize;
 use crate::io::file_to_mem;
 use crate::minimize::fsm_minimize;
@@ -1637,16 +1637,16 @@ const TARGET_LEXICON: i32 = 1;
 
 // [spec:foma:def:fomalib.fsm-lexc-parse-string-fn]
 // [spec:foma:sem:fomalib.fsm-lexc-parse-string-fn]
-pub fn fsm_lexc_parse_string(opts: &FomaOptions, string: &str) -> Option<Box<Fsm>> {
+pub fn fsm_lexc_parse_string(
+    opts: &FomaOptions,
+    mut defines: Option<&mut DefinedNetworks>,
+    string: &str,
+) -> Option<Box<Fsm>> {
     use std::io::Write;
     /* C took an (ignored) `verbose` int parameter; the warnings keyed off the
-    global g_verbose instead. Both collapse into `opts.verbose` here. */
-
-    /* olddefines = g_defines. The C never repoints g_defines, so the save is a
-    no-op and any Definitions-section nets persist in g_defines after the call;
-    reproduced by taking the box out (so nested fsm_parse_regex sees the same
-    registry via the passed parameter, not the thread_local) and restoring it. */
-    let mut olddefines: Option<Box<DefinedNetworks>> = G_DEFINES.with(|d| d.borrow_mut().take());
+    global g_verbose instead. Both collapse into `opts.verbose` here. C read the
+    `g_defines` registry global ("olddefines"); it is the `defines` parameter
+    now — Definitions-section nets are added to it and persist after the call. */
 
     /* lexentries = -1; lexclineno = 1; lexc_init(). Wave 4: the compiler state
     is a local LexcCompiler (was a thread_local), created and threaded per call
@@ -1669,7 +1669,6 @@ pub fn fsm_lexc_parse_string(opts: &FomaOptions, string: &str) -> Option<Box<Fsm
             reject here to stay faithful (see report). */
             if !f.noflags.is_empty() {
                 eprintln!("***lexc: NOFLAGS section is not supported by foma");
-                G_DEFINES.with(|d| *d.borrow_mut() = olddefines.take());
                 return None;
             }
 
@@ -1683,9 +1682,9 @@ pub fn fsm_lexc_parse_string(opts: &FomaOptions, string: &str) -> Option<Box<Fsm
                         tempstr); } */
             for d in &f.definitions {
                 let body = nfst_xre::pretty_print(&d.value.body);
-                if let Some(net) = fsm_parse_regex(opts, &body, olddefines.as_deref_mut(), None) {
+                if let Some(net) = fsm_parse_regex(opts, &body, defines.as_deref_mut(), None) {
                     let net = fsm_topsort(net);
-                    if let Some(defs) = olddefines.as_deref_mut() {
+                    if let Some(defs) = defines.as_deref_mut() {
                         add_defined(defs, Some(net), &d.value.name);
                     }
                 }
@@ -1722,7 +1721,7 @@ pub fn fsm_lexc_parse_string(opts: &FomaOptions, string: &str) -> Option<Box<Fsm
                             lexc_set_network(current_parse); } */
                             let r = nfst_xre::pretty_print(xre);
                             if let Some(net) =
-                                fsm_parse_regex(opts, &r, olddefines.as_deref_mut(), None)
+                                fsm_parse_regex(opts, &r, defines.as_deref_mut(), None)
                             {
                                 lexc_set_network(&mut lx, net);
                             }
@@ -1763,16 +1762,17 @@ pub fn fsm_lexc_parse_string(opts: &FomaOptions, string: &str) -> Option<Box<Fsm
         println!("{}", lexentries);
     }
 
-    /* g_defines = olddefines */
-    G_DEFINES.with(|d| *d.borrow_mut() = olddefines.take());
-
     /* return lexc_to_fsm() */
     Some(lexc_to_fsm(&mut lx))
 }
 
 // [spec:foma:def:fomalib.fsm-lexc-parse-file-fn]
 // [spec:foma:sem:fomalib.fsm-lexc-parse-file-fn]
-pub fn fsm_lexc_parse_file(opts: &FomaOptions, filename: &str) -> Option<Box<Fsm>> {
+pub fn fsm_lexc_parse_file(
+    opts: &FomaOptions,
+    defines: Option<&mut DefinedNetworks>,
+    filename: &str,
+) -> Option<Box<Fsm>> {
     /* mystring = file_to_mem(filename); return fsm_lexc_parse_string(mystring,
     verbose). The C never frees mystring (documented leak); here the buffer is a
     Vec that drops at scope end — an observable no-op. */
@@ -1790,7 +1790,7 @@ pub fn fsm_lexc_parse_file(opts: &FomaOptions, filename: &str) -> Option<Box<Fsm
         .position(|&b| b == 0)
         .unwrap_or(mystring.len());
     let text = String::from_utf8_lossy(&mystring[..end]);
-    fsm_lexc_parse_string(opts, &text)
+    fsm_lexc_parse_string(opts, defines, &text)
 }
 
 #[cfg(test)]
@@ -1805,7 +1805,7 @@ mod tests {
     /// Compile a lexc source string (verbose off is irrelevant — g_verbose is a
     /// separate global; the parse string ignores its own `verbose` arg).
     fn compile(src: &str) -> Box<Fsm> {
-        fsm_lexc_parse_string(&FomaOptions::default(), src).expect("compile produced a net")
+        fsm_lexc_parse_string(&FomaOptions::default(), None, src).expect("compile produced a net")
     }
 
     fn lower_all(net: &Fsm) -> Vec<String> {
@@ -1956,13 +1956,17 @@ mod tests {
     }
 
     // Definitions section + use inside a `< regex >` entry. As in the REPL,
-    // g_defines is an initialized (dummy-head) registry before parsing.
+    // the registry is an initialized (dummy-head) list before parsing.
     // [spec:foma:sem:fomalib.fsm-lexc-parse-string-fn/test]
     #[test]
     fn e2e_definitions_section() {
-        crate::define::G_DEFINES
-            .with(|d| *d.borrow_mut() = Some(crate::define::defined_networks_init()));
-        let net = compile("Definitions\nV = a | e | i | o | u ;\nLEXICON Root\n< V V > # ;\n");
+        let mut defs = crate::define::defined_networks_init();
+        let net = fsm_lexc_parse_string(
+            &FomaOptions::default(),
+            Some(&mut defs),
+            "Definitions\nV = a | e | i | o | u ;\nLEXICON Root\n< V V > # ;\n",
+        )
+        .expect("compile produced a net");
         assert_eq!(words_all(&net).len(), 25);
     }
 
@@ -2011,13 +2015,14 @@ mod tests {
         let dir = std::env::temp_dir();
         let path = dir.join(format!("foma_lexc_test_{}.lexc", std::process::id()));
         std::fs::write(&path, "LEXICON Root\ncat # ;\n").unwrap();
-        let net = fsm_lexc_parse_file(&FomaOptions::default(), path.to_str().unwrap())
+        let net = fsm_lexc_parse_file(&FomaOptions::default(), None, path.to_str().unwrap())
             .expect("file parsed");
         assert_eq!(lower_all(&net), vec!["cat"]);
         std::fs::remove_file(&path).ok();
 
         assert!(
-            fsm_lexc_parse_file(&FomaOptions::default(), "/no/such/foma/lexc/file.xyz").is_none()
+            fsm_lexc_parse_file(&FomaOptions::default(), None, "/no/such/foma/lexc/file.xyz")
+                .is_none()
         );
     }
 

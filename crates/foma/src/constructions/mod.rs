@@ -37,7 +37,7 @@ pub(crate) use crate::sigma::{
     sigma_remove, sigma_size, sigma_sort, sigma_substitute,
 };
 pub(crate) use crate::structures::{
-    FSM_OPTIONS, find_arccount, fsm_copy, fsm_create, fsm_destroy, fsm_empty_set, fsm_empty_string,
+    find_arccount, fsm_copy, fsm_create, fsm_destroy, fsm_empty_set, fsm_empty_string,
     fsm_identity, fsm_isempty, fsm_sigma_destroy, fsm_sigma_pairs_net,
 };
 pub(crate) use crate::topsort::fsm_topsort;
