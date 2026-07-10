@@ -256,7 +256,8 @@ pub fn foma_write_prolog(net: &mut Fsm, filename: Option<&str>) -> i32 {
     for k in 3..=maxsigma {
         if used_symbols[k as usize] == 0 {
             /* C derefs sigma_string unconditionally (NULL for a numbering gap) */
-            let mut instring = sigma_string(k, &net.sigma).unwrap();
+            let mut instring =
+                sigma_string(k, &net.sigma).expect("symbol number resolves in the net sigma");
             if instring == "0" {
                 instring = "%0";
             }
@@ -284,7 +285,7 @@ pub fn foma_write_prolog(net: &mut Fsm, filename: Option<&str>) -> i32 {
         } else if in_ == 2 {
             "?"
         } else {
-            sigma_string(in_, &net.sigma).unwrap()
+            sigma_string(in_, &net.sigma).expect("symbol number resolves in the net sigma")
         };
         let mut outstring: &str = if out_ == 0 {
             "0"
@@ -293,7 +294,7 @@ pub fn foma_write_prolog(net: &mut Fsm, filename: Option<&str>) -> i32 {
         } else if out_ == 2 {
             "?"
         } else {
-            sigma_string(out_, &net.sigma).unwrap()
+            sigma_string(out_, &net.sigma).expect("symbol number resolves in the net sigma")
         };
         if instring == "0" && in_ != 0 {
             instring = "%0";
@@ -546,8 +547,8 @@ pub fn fsm_read_prolog(filename: &str) -> Option<Box<Fsm>> {
     }
     /* fclose (drop reader) */
     if has_net == 1 {
-        fsm_construct_set_initial(outh.as_deref_mut().unwrap(), 0);
-        let mut outnet = fsm_construct_done(outh.take().unwrap());
+        fsm_construct_set_initial(outh.as_deref_mut().expect("outh built when has_net==1"), 0);
+        let mut outnet = fsm_construct_done(outh.take().expect("outh built when has_net==1"));
         /* C: fsm_topsort(outnet) with the return value ignored (relies on
         in-place update). DEVIATION from C: fsm_topsort consumes/returns the
         Box, so we rebind — observably identical, topsort returns the net. */
@@ -646,11 +647,10 @@ pub fn fsm_read_spaced_text_file(filename: &str) -> Option<Box<Fsm>> {
             continue;
         }
         let t2 = spacedtext_get_next_line(&mut text, &mut cursor);
-        let t2_empty = match t2 {
-            None => true,
-            Some(idx) => cstrlen(&text, idx) == 0,
-        };
-        if t2_empty {
+        // Some(idx) with a non-empty line drives the two-tape branch; None or an
+        // empty line drives the single-tape branch.
+        let t2 = t2.filter(|&idx| cstrlen(&text, idx) != 0);
+        if t2.is_none() {
             let mut l1 = t1;
             loop {
                 let insym_i = match spacedtext_get_next_token(&mut text, &mut l1) {
@@ -668,7 +668,7 @@ pub fn fsm_read_spaced_text_file(filename: &str) -> Option<Box<Fsm>> {
             }
             fsm_trie_end_word(&mut th);
         } else {
-            let t2 = t2.unwrap();
+            let t2 = t2.expect("t2 is Some in the two-tape branch");
             let mut l1 = t1;
             let mut l2 = t2;
             loop {
@@ -787,7 +787,7 @@ pub fn fsm_read_binary_file_multiple(
 ) -> Option<Box<Fsm>> {
     /* iobh = (struct io_buf_handle *) fsrh (must be non-NULL) */
     let result = {
-        let handle = fsrh.as_mut().unwrap();
+        let handle = fsrh.as_mut().expect("fsrh handle must be present");
         io_net_read(&mut handle.iobh)
     };
     match result {
@@ -925,15 +925,15 @@ pub fn save_defined(def: &mut DefinedNetworks, filename: &str) -> i32 {
     let mut outfile = GzEncoder::new(file, Compression::default());
     let mut d = Some(&mut *def);
     while let Some(node) = d {
-        if node.net.is_none() {
+        let name = node.name.as_deref().unwrap_or("").to_string();
+        let Some(net) = node.net.as_mut() else {
             print!("Skipping definition without network.\n");
             d = node.next.as_deref_mut();
             continue;
-        }
+        };
         /* strncpy(d->net->name, d->name, FSM_NAME_LEN) */
-        let name = node.name.as_deref().unwrap_or("");
-        node.net.as_mut().unwrap().name = truncate_name(name);
-        foma_net_print(node.net.as_deref().unwrap(), &mut outfile);
+        net.name = truncate_name(&name);
+        foma_net_print(net, &mut outfile);
         d = node.next.as_deref_mut();
     }
     /* gzclose(outfile) */
@@ -1233,7 +1233,10 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Option<(Box<Fsm>, String)> {
             let val: i32 = buf.trim().parse().unwrap_or(0);
             /* DEVIATION from C (no bounds check on cm; a matrix overrun writes
             OOB — Rust panics on the index instead) */
-            net.medlookup.as_mut().unwrap().confusion_matrix[cm] = val;
+            net.medlookup
+                .as_mut()
+                .expect("cmatrix_init set up medlookup above")
+                .confusion_matrix[cm] = val;
             cm += 1;
         }
     }
@@ -1250,7 +1253,7 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Option<(Box<Fsm>, String)> {
 pub(crate) fn io_gets(iobh: &mut IoBufHandle, target: &mut String) -> i32 {
     /* NULL-derefs in C when io_buf == NULL; io_gets is only ever called after a
     successful load */
-    let buf = iobh.io_buf.as_ref().unwrap();
+    let buf = iobh.io_buf.as_ref().expect("io_buf loaded before io_gets");
     let base = iobh.io_buf_ptr;
     let mut i = 0usize;
     let mut bytes: Vec<u8> = Vec::new();
@@ -1581,12 +1584,12 @@ pub fn file_to_mem(name: &str) -> Result<Vec<u8>, FomaError> {
     if let Some(bom) = check_BOM(&content) {
         print!(
             "{} BOM mark is detected in file '{}'.\n",
-            bom.name.unwrap(),
+            bom.name.expect("a matched BOM entry has a name"),
             name
         );
         return Err(FomaError::Format(format!(
             "{} BOM in file '{name}'",
-            bom.name.unwrap()
+            bom.name.expect("a matched BOM entry has a name")
         )));
     }
     /* fclose (drop infile); buffer[numbytes] = '\0' */

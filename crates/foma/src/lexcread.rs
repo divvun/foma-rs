@@ -291,8 +291,8 @@ fn lexc_add_sigma_hash(lx: &mut LexcCompiler, symbol: &str, number: i32) {
     }
     /* for (h = head; h->next != NULL; h = h->next) {} — walk to the tail */
     let mut tail_next = &mut lx.hashtable[ptr].next;
-    while tail_next.is_some() {
-        tail_next = &mut tail_next.as_mut().unwrap().next;
+    while let Some(node) = tail_next {
+        tail_next = &mut node.next;
     }
     *tail_next = Some(Box::new(LexcHashtable {
         symbol: Some(symbol.to_string()),
@@ -405,14 +405,23 @@ fn lexc_update_unknowns(lx: &mut LexcCompiler, sigma_number: i32) {
 fn lexc_add_network(lx: &mut LexcCompiler) {
     let mut unknown_symbols = 0;
     let mut first_new_sigma = 0;
-    let sourcestate = lx.lexstates_arena[lx.clexicon.unwrap()].state;
-    let deststate = lx.lexstates_arena[lx.ctarget.unwrap()].state;
+    let sourcestate = lx.lexstates_arena[lx
+        .clexicon
+        .expect("current lexicon set during a lexicon parse")]
+    .state;
+    let deststate = lx.lexstates_arena[lx
+        .ctarget
+        .expect("current target set during an entry parse")]
+    .state;
 
     /* net = current_regex_network; taken out so the &mut lx calls below do not
     conflict with reading net->states / net->sigma. Put back at the end (C
     never frees it and leaves current_regex_network pointing at the mutated
     net). */
-    let mut net = lx.current_regex_network.take().unwrap();
+    let mut net = lx
+        .current_regex_network
+        .take()
+        .expect("regex network present for this entry");
 
     /* sigreplace = calloc(sigma_max(net->sigma)+1, sizeof(int)) */
     let mut sigreplace: Vec<i32> = vec![0; (sigma_max(&net.sigma) + 1) as usize];
@@ -906,7 +915,11 @@ fn lexc_string_to_tokens(lx: &mut LexcCompiler, string: &str, intarr: &mut Vec<i
         if let Some(m) = first_mc_prefix(lx, rest) {
             vset(intarr, pos, lx.mc_arena[m].sigma_number as i32);
             pos += 1;
-            let mclen = lx.mc_arena[m].symbol.as_deref().unwrap().len();
+            let mclen = lx.mc_arena[m]
+                .symbol
+                .as_deref()
+                .expect("multichar arena entry has a symbol")
+                .len();
             rest = &rest[mclen..];
             continue;
         }
@@ -938,7 +951,12 @@ fn intern_symbol(lx: &mut LexcCompiler, sym: &str) -> i32 {
 fn first_mc_prefix(lx: &LexcCompiler, rest: &str) -> Option<usize> {
     let mut m = lx.mc;
     while let Some(i) = m {
-        if rest.starts_with(lx.mc_arena[i].symbol.as_deref().unwrap()) {
+        if rest.starts_with(
+            lx.mc_arena[i]
+                .symbol
+                .as_deref()
+                .expect("multichar arena entry has a symbol"),
+        ) {
             return Some(i);
         }
         m = lx.mc_arena[i].next;
@@ -963,7 +981,14 @@ fn lexc_add_mc(lx: &mut LexcCompiler, raw: &str) {
         /* for (mcs = mc; mcs != NULL && utf8strlen(mcs->symbol) > len; ...) */
         let mut mcs = lx.mc;
         while let Some(m) = mcs {
-            if !(lx.mc_arena[m].symbol.as_deref().unwrap().chars().count() > len) {
+            if !(lx.mc_arena[m]
+                .symbol
+                .as_deref()
+                .expect("multichar arena entry has a symbol")
+                .chars()
+                .count()
+                > len)
+            {
                 break;
             }
             mcprev = Some(m);
@@ -1052,8 +1077,14 @@ fn lexc_add_word(lx: &mut LexcCompiler) {
     }
 
     /* find source, dest */
-    let mut sourcestate = lx.lexstates_arena[lx.clexicon.unwrap()].state;
-    let deststate = lx.lexstates_arena[lx.ctarget.unwrap()].state;
+    let mut sourcestate = lx.lexstates_arena[lx
+        .clexicon
+        .expect("current lexicon set during a lexicon parse")]
+    .state;
+    let deststate = lx.lexstates_arena[lx
+        .ctarget
+        .expect("current target set during an entry parse")]
+    .state;
 
     let mut li = 0usize;
     while lx.cwordin[li] != -1 {
@@ -1182,7 +1213,9 @@ fn lexc_number_states(lx: &mut LexcCompiler) {
                 let state = lx.statelist_arena[sidx].state;
                 lx.state_arena[state].number = 0;
                 if lx.opts.verbose {
-                    let lidx = lx.state_arena[state].lexstate.unwrap();
+                    let lidx = lx.state_arena[state]
+                        .lexstate
+                        .expect("state carries a lexstate here");
                     let name = lx.lexstates_arena[lidx].name.as_deref().unwrap_or("");
                     eprint!("*Warning: no Root lexicon, using '{}' as Root.\n", name);
                 }
@@ -1252,8 +1285,12 @@ fn lexc_eq_paths(lx: &LexcCompiler, mut one: usize, mut two: usize) -> i32 {
     while lx.state_arena[one].lexstate.is_none() && lx.state_arena[two].lexstate.is_none() {
         /* dereferences trans without a NULL check (unwrap → panic on None,
         the nearest safe behavior to C's crash) */
-        let ot = lx.state_arena[one].trans.unwrap();
-        let tt = lx.state_arena[two].trans.unwrap();
+        let ot = lx.state_arena[one]
+            .trans
+            .expect("non-lexstate node carries a trans");
+        let tt = lx.state_arena[two]
+            .trans
+            .expect("non-lexstate node carries a trans");
         if lx.trans_arena[ot].r#in != lx.trans_arena[tt].r#in
             || lx.trans_arena[ot].out != lx.trans_arena[tt].out
         {
@@ -1374,7 +1411,9 @@ fn lexc_merge_states(lx: &mut LexcCompiler) {
                                 let mut purge = hstate;
                                 while lx.state_arena[purge].lexstate.is_none() {
                                     lx.state_arena[purge].mergeable = 2;
-                                    let t = lx.state_arena[purge].trans.unwrap();
+                                    let t = lx.state_arena[purge]
+                                        .trans
+                                        .expect("non-lexstate node carries a trans");
                                     purge = lx.trans_arena[t].target;
                                 }
                             }
