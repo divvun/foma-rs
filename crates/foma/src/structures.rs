@@ -1515,23 +1515,6 @@ pub fn fsm_logical_eq(
     )
 }
 
-/* Dead prototypes: declared in fomalib.h but never defined in any C source.
-Calling them in C is a link error. DEVIATION from C (Rust has no
-declaration-without-definition; these panic to preserve the never-callable
-contract). */
-
-// [spec:foma:def:fomalib.fsm-find-ambiguous-fn]
-// [spec:foma:sem:fomalib.fsm-find-ambiguous-fn]
-pub fn fsm_find_ambiguous(_net: Box<Fsm>) -> Box<Fsm> {
-    panic!("fsm_find_ambiguous: dead prototype in C foma (declared, never defined; link error)");
-}
-
-// [spec:foma:def:fomalib.fsm-mark-ambiguous-fn]
-// [spec:foma:sem:fomalib.fsm-mark-ambiguous-fn]
-pub fn fsm_mark_ambiguous(_net: Box<Fsm>) -> Box<Fsm> {
-    panic!("fsm_mark_ambiguous: dead prototype in C foma (declared, never defined; link error)");
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2213,19 +2196,5 @@ mod tests {
         fsm_count(&mut net);
         assert!(net.statecount >= 1);
         assert!(!net.states.is_empty());
-    }
-
-    // [spec:foma:sem:fomalib.fsm-find-ambiguous-fn/test]
-    #[test]
-    #[should_panic]
-    fn find_ambiguous_dead_prototype_panics() {
-        let _ = fsm_find_ambiguous(fsm_empty_set());
-    }
-
-    // [spec:foma:sem:fomalib.fsm-mark-ambiguous-fn/test]
-    #[test]
-    #[should_panic]
-    fn mark_ambiguous_dead_prototype_panics() {
-        let _ = fsm_mark_ambiguous(fsm_empty_set());
     }
 }

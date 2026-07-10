@@ -1603,16 +1603,6 @@ pub fn file_to_mem(name: &str) -> Result<Vec<u8>, FomaError> {
     Ok(content)
 }
 
-/* Dead prototype: declared in fomalib.h but never defined in any C source.
-Calling it in C is a link error. DEVIATION from C (panics to preserve the
-never-callable contract). */
-
-// [spec:foma:def:fomalib.save-stack-att-fn]
-// [spec:foma:sem:fomalib.save-stack-att-fn]
-pub fn save_stack_att() -> i32 {
-    panic!("save_stack_att: dead prototype in C foma (declared, never defined; link error)");
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2447,13 +2437,6 @@ mod tests {
         /* missing/empty file → 0 */
         let mut hm = io_init();
         assert_eq!(io_gz_file_to_mem(&mut hm, "/no/such/file/zzz"), 0);
-    }
-
-    // [spec:foma:sem:fomalib.save-stack-att-fn/test]
-    #[test]
-    #[should_panic(expected = "dead prototype")]
-    fn save_stack_att_is_dead_prototype() {
-        save_stack_att();
     }
 
     // [spec:foma:sem:io.io-net-read-fn+3/test]

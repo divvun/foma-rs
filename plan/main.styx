@@ -1036,6 +1036,13 @@ children (
                         kind @decision
                         text "Converted 20 i32-as-bool predicates to `-> bool`: fsm_isempty/isuniversal/issequential/isidentity/isfunctional/isunambiguous, fsm_equivalent, Session::stack_isempty, apply_stack_isempty, apply_at_last_arc/binarysearch/follow_next_arc, flag_check, iface_stack_check, fsm_read_is_final/is_initial, ishexstr — plus iface_print_bool(value: bool) which formats `if v {1} else {0}` to keep CLI output byte-identical (\"1 (1 = TRUE, 0 = FALSE)\"). fsm_read_is_final's `& 2` bitmask (returned 2, not 1) became `!= 0`, fixing a latent non-0/1 return. Bodies with if/else-bool collapsed to the bare condition (isuniversal, isempty, stack_isempty, apply_stack_isempty, flag_check S11); accumulators (issequential `sequential`, fsm_equivalent `equivalent`, isidentity `failed`) became bool locals. ~104 inline call sites (`!= 0`→truthy, `== 0`→`!`) rewritten via a balanced-paren scanner; ~102 test assert_eq!/assert_ne! against 0/1/2 collapsed to assert!/assert!(!...). REJECTED (value codes, left i32): sigma_find/sigma_find_number (-1=not-found), stack_rotate/stack_turn (-1/0/1 status), add_defined (-1/0/1), int_stack overflow paths, and every fn whose value is printed/stored/crosses the wire. Struct fields (ApplyHandle.binsearch/has_flags/obey_flags, FsmState.final_state, Fsm.is_deterministic) stay i32/i8 — data-model, out of scope. 556 tests green, 0 net-new clippy warnings (369→369), CLI transcripts byte-exact. NOTE: prior subagent hit its session limit mid-edit leaving a structures.rs syntax error; reverted and redid the tier on the main loop."
                     }
+
+                    {
+                        at 2026-07-10T16:56:03.908435Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan_complete)"
+                    }
                 )
             }
 
@@ -1044,6 +1051,14 @@ children (
                 title "Tier 3: silent library — Result + tracing. io save_defined/load_defined/foma_net_print/foma_write_prolog/fsm_write_binary_file/io_net_read → Result<_, FomaError>; user-facing success/error text moves up to iface/bins (byte-exact transcripts preserved); library diagnostics (lexc warnings, flag_eliminate skips, add_defined_function redefined, compose flag warning, apply flag messages) become tracing events (tracing dep in lib; bins install a stderr tracing-subscriber formatted to keep CLI output identical). High-risk unwraps on valid inputs (sigma_remove*, lexc trans, med confusion case) → graceful."
                 priority 2
                 deps (w9-bools)
+                log (
+                    {
+                        at 2026-07-10T16:59:08.584263Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan_start)"
+                    }
+                )
             }
 
             {
@@ -1051,6 +1066,12 @@ children (
                 title "Tier 4: ergonomics. ApplyHandle FlagList assoc-list → HashMap (hot apply path); Iterator impls over FsmReadHandle arcs/states/finals/initials and Sigma traversal (mirroring the proven ApplyIter pattern); internal while-let sigma walks migrate where it simplifies."
                 priority 3
                 deps (w9-results)
+            }
+
+            {
+                id w9-harden
+                title "Tier: robustness — no bare unwrap/panic/unsafe. Delete the 3 dead-prototype panics (save_stack_att, fsm_find/mark_ambiguous); convert every non-test bare .unwrap() (~500) to .expect(\"invariant\") for structural invariants or Result<_, FomaError> for input-reachable errors. unsafe already 0."
+                priority 2
             }
         )
     }
