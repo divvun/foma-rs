@@ -1072,6 +1072,14 @@ children (
                 id w9-harden
                 title "Tier: robustness — no bare unwrap/panic/unsafe. Delete the 3 dead-prototype panics (save_stack_att, fsm_find/mark_ambiguous); convert every non-test bare .unwrap() (~500) to .expect(\"invariant\") for structural invariants or Result<_, FomaError> for input-reachable errors. unsafe already 0."
                 priority 2
+                log (
+                    {
+                        at 2026-07-10T21:55:55.442955Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Done (nplan_complete)"
+                    }
+                )
             }
 
             {
