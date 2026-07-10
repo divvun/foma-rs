@@ -39,8 +39,8 @@ use crate::sigma::sigma_max;
 use crate::types::{
     APPLY_BINSEARCH_THRESHOLD, APPLY_INDEX_INPUT, ApplyHandle, ApplyStateIndex, DEFAULT_STACK_SIZE,
     DOWN, ENUMERATE, EPSILON, FAIL, FLAG_CLEAR, FLAG_DISALLOW, FLAG_EQUAL, FLAG_NEGATIVE,
-    FLAG_POSITIVE, FLAG_REQUIRE, FLAG_UNIFY, FlagList, FlagLookup, Fsm, IDENTITY, LOWER, RANDOM,
-    SUCCEED, Searchstack, SigmaTrie, SigmaTrieArrays, SigmatchArray, Sigs, UNKNOWN, UP, UPPER,
+    FLAG_POSITIVE, FLAG_REQUIRE, FLAG_UNIFY, FlagLookup, Fsm, IDENTITY, LOWER, RANDOM, SUCCEED,
+    Searchstack, SigmaTrie, SigmaTrieArrays, SigmatchArray, Sigs, UNKNOWN, UP, UPPER,
 };
 use crate::utf8::{utf8iscombining, utf8skip};
 
@@ -95,20 +95,6 @@ fn new_searchstack_frame() -> Searchstack {
         flagname: None,
         flagvalue: None,
         flagneg: 0,
-    }
-}
-
-/* Walk the flag_list to a node matching `name` (mutable). */
-fn flag_find_mut<'a>(
-    mut cur: &'a mut Option<Box<FlagList>>,
-    name: &str,
-) -> Option<&'a mut FlagList> {
-    loop {
-        match cur {
-            None => return None,
-            Some(n) if n.name.as_deref() == Some(name) => return cur.as_deref_mut(),
-            Some(n) => cur = &mut n.next,
-        }
     }
 }
 
@@ -229,7 +215,7 @@ pub(crate) fn apply_stack_pop(h: &mut ApplyHandle) {
 
     if let (true, Some(name)) = (h.has_flags != 0, ss.flagname.as_deref()) {
         /* Restore flag */
-        match flag_find_mut(&mut h.flag_list, name) {
+        match h.flag_state.get_mut(name) {
             Some(flist) => {
                 flist.value = ss.flagvalue.clone();
                 flist.neg = ss.flagneg as i16;
@@ -516,7 +502,7 @@ pub fn apply_init(net: &Fsm) -> Box<ApplyHandle> {
         index_in: Vec::new(),
         index_out: Vec::new(),
         iptr: None,
-        flag_list: None,
+        flag_state: std::collections::HashMap::new(),
         flag_lookup: Vec::new(),
         searchstack: Vec::new(),
         lcg,
@@ -526,7 +512,7 @@ pub fn apply_init(net: &Fsm) -> Box<ApplyHandle> {
     h.iterate_old = 0;
     h.iterator = 0;
     h.instring = String::new();
-    h.flag_list = None;
+    h.flag_state = std::collections::HashMap::new();
     h.flag_lookup = Vec::new();
     h.obey_flags = 1;
     h.show_flags = 0;
@@ -1652,7 +1638,7 @@ pub fn apply_create_sigarray(h: &mut ApplyHandle, net: &Fsm) {
         (maxsigma + 1) as usize
     ];
     h.has_flags = 0;
-    h.flag_list = None;
+    h.flag_state = std::collections::HashMap::new();
 
     // Root level of the trie arena (256 cells) + bookkeeping node.
     h.sigma_trie = vec![
@@ -1802,43 +1788,18 @@ pub fn apply_create_sigmatch(h: &mut ApplyHandle) {
 // [spec:foma:def:apply.apply-add-flag-fn]
 // [spec:foma:sem:apply.apply-add-flag-fn]
 pub fn apply_add_flag(h: &mut ApplyHandle, name: Option<String>) {
-    if h.flag_list.is_none() {
-        h.flag_list = Some(Box::new(FlagList {
-            name,
-            value: None,
-            neg: 0,
-            next: None,
-        }));
-        return;
-    }
-    // Walk to the tail; if a node's name matches, return unchanged.
-    let nm = name.as_deref();
-    let mut cur = h.flag_list.as_deref_mut();
-    while let Some(node) = cur {
-        if node.name.as_deref() == nm {
-            return;
-        }
-        if node.next.is_none() {
-            node.next = Some(Box::new(FlagList {
-                name,
-                value: None,
-                neg: 0,
-                next: None,
-            }));
-            return;
-        }
-        cur = node.next.as_deref_mut();
-    }
+    // Register the feature once; a second add for the same name is a no-op
+    // (the C list dedups by walking to the tail). A malformed flag with no
+    // name (flag_get_name → None) is keyed by "" and never looked up.
+    h.flag_state.entry(name.unwrap_or_default()).or_default();
 }
 
 // [spec:foma:def:apply.apply-clear-flags-fn]
 // [spec:foma:sem:apply.apply-clear-flags-fn]
 pub fn apply_clear_flags(h: &mut ApplyHandle) {
-    let mut cur = h.flag_list.as_deref_mut();
-    while let Some(node) = cur {
-        node.value = None;
-        node.neg = 0;
-        cur = node.next.as_deref_mut();
+    for flist in h.flag_state.values_mut() {
+        flist.value = None;
+        flist.neg = 0;
     }
 }
 
@@ -1855,14 +1816,13 @@ pub fn apply_check_flag(
     let name = name.unwrap_or("");
     // Save current value/neg into oldflagvalue/oldflagneg.
     {
-        let flist = flag_find_mut(&mut h.flag_list, name);
-        let flist = flist.expect("flag not registered"); // DEVIATION from C (NULL deref; unreachable)
+        let flist = h.flag_state.get(name).expect("flag not registered"); // DEVIATION from C (NULL deref; unreachable)
         h.oldflagvalue = flist.value.clone();
         h.oldflagneg = flist.neg as i32;
     }
 
     if r#type == FLAG_UNIFY {
-        let flist = flag_find_mut(&mut h.flag_list, name).expect("flag not registered");
+        let flist = h.flag_state.get_mut(name).expect("flag not registered");
         if flist.value.is_none() {
             flist.value = value.map(|s| s.to_string());
             return SUCCEED;
@@ -1877,14 +1837,14 @@ pub fn apply_check_flag(
     }
 
     if r#type == FLAG_CLEAR {
-        let flist = flag_find_mut(&mut h.flag_list, name).expect("flag not registered");
+        let flist = h.flag_state.get_mut(name).expect("flag not registered");
         flist.value = None;
         flist.neg = 0;
         return SUCCEED;
     }
 
     if r#type == FLAG_DISALLOW {
-        let flist = flag_find_mut(&mut h.flag_list, name).expect("flag not registered");
+        let flist = h.flag_state.get_mut(name).expect("flag not registered");
         if flist.value.is_none() {
             return SUCCEED;
         }
@@ -1904,21 +1864,21 @@ pub fn apply_check_flag(
     }
 
     if r#type == FLAG_NEGATIVE {
-        let flist = flag_find_mut(&mut h.flag_list, name).expect("flag not registered");
+        let flist = h.flag_state.get_mut(name).expect("flag not registered");
         flist.value = value.map(|s| s.to_string());
         flist.neg = 1;
         return SUCCEED;
     }
 
     if r#type == FLAG_POSITIVE {
-        let flist = flag_find_mut(&mut h.flag_list, name).expect("flag not registered");
+        let flist = h.flag_state.get_mut(name).expect("flag not registered");
         flist.value = value.map(|s| s.to_string());
         flist.neg = 0;
         return SUCCEED;
     }
 
     if r#type == FLAG_REQUIRE {
-        let flist = flag_find_mut(&mut h.flag_list, name).expect("flag not registered");
+        let flist = h.flag_state.get_mut(name).expect("flag not registered");
         if value.is_none() {
             if flist.value.is_none() {
                 return FAIL;
@@ -1943,13 +1903,13 @@ pub fn apply_check_flag(
     if r#type == FLAG_EQUAL {
         // value names another feature; find flist2.
         let (f2_present, f2_value, f2_neg) = {
-            let f2 = flag_find_immut(&h.flag_list, value.unwrap_or(""));
+            let f2 = h.flag_state.get(value.unwrap_or(""));
             match f2 {
                 Some(n) => (true, n.value.clone(), n.neg),
                 None => (false, None, 0),
             }
         };
-        let flist = flag_find_immut(&h.flag_list, name).expect("flag not registered");
+        let flist = h.flag_state.get(name).expect("flag not registered");
         let f1_value = flist.value.clone();
         let f1_neg = flist.neg;
 
@@ -1978,18 +1938,6 @@ pub fn apply_check_flag(
         value.unwrap_or("")
     );
     FAIL
-}
-
-/* Immutable flag_list lookup (for FLAG_EQUAL). */
-fn flag_find_immut<'a>(list: &'a Option<Box<FlagList>>, name: &str) -> Option<&'a FlagList> {
-    let mut cur = list.as_deref();
-    while let Some(node) = cur {
-        if node.name.as_deref() == Some(name) {
-            return Some(node);
-        }
-        cur = node.next.as_deref();
-    }
-    None
 }
 
 #[cfg(test)]
@@ -2557,17 +2505,8 @@ mod tests {
     fn add_flag_dedups_and_appends() {
         let net = parse(r#"[a "@U.F.1@"]"#);
         let mut h = apply_init(&net);
-        let count = |h: &ApplyHandle, name: &str| -> usize {
-            let mut n = 0;
-            let mut cur = h.flag_list.as_deref();
-            while let Some(node) = cur {
-                if node.name.as_deref() == Some(name) {
-                    n += 1;
-                }
-                cur = node.next.as_deref();
-            }
-            n
-        };
+        let count =
+            |h: &ApplyHandle, name: &str| -> usize { h.flag_state.contains_key(name) as usize };
         // "F" already registered by create_sigarray; adding again is a no-op.
         assert_eq!(count(&h, "F"), 1);
         apply_add_flag(&mut h, Some("F".to_string()));

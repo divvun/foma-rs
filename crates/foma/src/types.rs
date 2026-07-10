@@ -528,12 +528,15 @@ pub struct ApplyStateIndex {
 
 /// (declared inside struct apply_handle in C)
 // [spec:foma:def:fomalibconf.apply-handle.flag-list]
-#[derive(Debug, Clone)]
-pub struct FlagList {
-    pub name: Option<String>,
+// DEVIATION from C (struct flag_list is a name-keyed linked list walked with
+// `next`; the port stores the same per-feature (value, neg) state in a
+// HashMap<String, FlagState> keyed by feature name — O(1) lookup, no node
+// plumbing. Feature order never affects apply output, so the map is
+// observably equivalent to the list.)
+#[derive(Debug, Clone, Default)]
+pub struct FlagState {
     pub value: Option<String>,
     pub neg: i16,
-    pub next: Option<Box<FlagList>>,
 }
 
 /// (declared inside struct apply_handle in C)
@@ -622,7 +625,8 @@ pub struct ApplyHandle {
     // DEVIATION from C (aliases a node inside index_in/index_out chains; owned copy here)
     pub iptr: Option<Box<ApplyStateIndex>>,
 
-    pub flag_list: Option<Box<FlagList>>,
+    /// Per-feature flag state, keyed by feature name (C: struct flag_list *).
+    pub flag_state: std::collections::HashMap<String, FlagState>,
     /// C: malloc'd array indexed by sigma number
     pub flag_lookup: Vec<FlagLookup>,
 

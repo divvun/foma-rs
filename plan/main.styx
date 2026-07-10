@@ -1073,6 +1073,14 @@ children (
                 title "Tier 4: ergonomics. ApplyHandle FlagList assoc-list → HashMap (hot apply path); Iterator impls over FsmReadHandle arcs/states/finals/initials and Sigma traversal (mirroring the proven ApplyIter pattern); internal while-let sigma walks migrate where it simplifies."
                 priority 3
                 deps (w9-results)
+                log (
+                    {
+                        at 2026-07-10T22:18:45.370349Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan_start)"
+                    }
+                )
             }
 
             {
