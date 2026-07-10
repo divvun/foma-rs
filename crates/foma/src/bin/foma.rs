@@ -605,7 +605,9 @@ fn start_regex(session: &mut Session, pmode: i32, defname: String, initial: &str
 fn regex_append_and_scan(session: &mut Session, text: &str, prepend_nl: bool) -> bool {
     let scan = PENDING_REGEX.with(|p| {
         let mut b = p.borrow_mut();
-        let pr = b.as_mut().unwrap();
+        let pr = b
+            .as_mut()
+            .expect("pending regex active when append_and_scan runs");
         if prepend_nl {
             pr.accum.push('\n');
         }

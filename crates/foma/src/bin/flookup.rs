@@ -439,7 +439,9 @@ fn main() {
             CHAIN_TAIL.set(Some(idx));
             CHAIN_HEAD.set(Some(idx));
         } else if direction == DIR_DOWN || APPLY_ALTERNATES.get() == 1 {
-            let t = CHAIN_TAIL.get().unwrap();
+            let t = CHAIN_TAIL
+                .get()
+                .expect("chain tail set once the chain is non-empty");
             CHAIN.with_borrow_mut(|c| {
                 c[t].next = Some(idx);
                 c[idx].prev = Some(t);
@@ -448,7 +450,9 @@ fn main() {
         } else {
             // Default up direction: prepend at head — an up-mode cascade runs
             // nets in reverse file order (inverting a top-to-bottom composition).
-            let h = CHAIN_HEAD.get().unwrap();
+            let h = CHAIN_HEAD
+                .get()
+                .expect("chain head set once the chain is non-empty");
             CHAIN.with_borrow_mut(|c| {
                 c[idx].next = Some(h);
                 c[h].prev = Some(idx);
@@ -470,7 +474,11 @@ fn main() {
         let mut buf = vec![0u8; UDP_MAX];
         loop {
             let (numbytes, clientaddr) = {
-                let res = LISTEN_SD.with_borrow(|s| s.as_ref().unwrap().recv_from(&mut buf));
+                let res = LISTEN_SD.with_borrow(|s| {
+                    s.as_ref()
+                        .expect("listen socket bound in server mode")
+                        .recv_from(&mut buf)
+                });
                 match res {
                     Ok(v) => v,
                     Err(_) => {
@@ -498,8 +506,11 @@ fn main() {
             }
             let reply = SERVERSTRING.with_borrow(|s| s.clone());
             if !reply.is_empty() {
-                let sent = LISTEN_SD
-                    .with_borrow(|s| s.as_ref().unwrap().send_to(reply.as_bytes(), clientaddr));
+                let sent = LISTEN_SD.with_borrow(|s| {
+                    s.as_ref()
+                        .expect("listen socket bound in server mode")
+                        .send_to(reply.as_bytes(), clientaddr)
+                });
                 if sent.is_err() {
                     perror("sendto() failed");
                     out_flush();
@@ -571,7 +582,14 @@ fn get_next_line() -> bool {
 /* Invoke the applyer function pointer against chain node `p`'s handle. */
 fn apply_at(p: usize, word: Option<&str>) -> Option<String> {
     let f = APPLYER.get();
-    CHAIN.with_borrow_mut(|c| f(c[p].ah.as_deref_mut().unwrap(), word))
+    CHAIN.with_borrow_mut(|c| {
+        f(
+            c[p].ah
+                .as_deref_mut()
+                .expect("chain node carries an apply handle"),
+            word,
+        )
+    })
 }
 
 // [spec:foma:def:flookup.handle-line-fn]
@@ -582,7 +600,7 @@ fn handle_line(s: &str) {
         let mut chain_pos = CHAIN_HEAD.get();
         let tempstr = s.to_string();
         loop {
-            let p = chain_pos.unwrap();
+            let p = chain_pos.expect("chain has at least one node (numnets>=1)");
             let result = apply_at(p, Some(&tempstr));
             if let Some(r) = result {
                 RESULTS.set(RESULTS.get() + 1);
@@ -608,11 +626,11 @@ fn handle_line(s: &str) {
         let mut chain_pos = CHAIN_HEAD.get();
         let mut tempstr = s.to_string();
         loop {
-            let p = chain_pos.unwrap();
+            let p = chain_pos.expect("chain has at least one node (numnets>=1)");
             let mut result = apply_at(p, Some(&tempstr));
             let is_tail = chain_pos == CHAIN_TAIL.get();
             if result.is_some() && !is_tail {
-                tempstr = result.take().unwrap();
+                tempstr = result.take().expect("result is Some in this branch");
                 chain_pos = CHAIN.with_borrow(|c| c[p].next);
                 continue;
             }
@@ -647,7 +665,8 @@ fn handle_line(s: &str) {
             if chain_pos.is_none() {
                 break;
             }
-            chain_pos = CHAIN.with_borrow(|c| c[chain_pos.unwrap()].next);
+            chain_pos =
+                CHAIN.with_borrow(|c| c[chain_pos.expect("chain_pos checked non-None above")].next);
         }
     }
 }
