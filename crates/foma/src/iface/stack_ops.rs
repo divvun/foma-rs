@@ -25,8 +25,7 @@ pub fn iface_load_stack(session: &mut Session, filename: &str) {
 pub fn iface_pop(session: &mut Session) {
     if session.stack_size() < 1 {
         print!("Stack is empty.\n");
-    } else {
-        let net = session.stack_pop().unwrap();
+    } else if let Some(net) = session.stack_pop() {
         fsm_destroy(net);
     }
 }
@@ -37,7 +36,9 @@ pub fn iface_pop(session: &mut Session) {
 // [spec:foma:sem:foma.iface-name-net-fn+1]
 pub fn iface_name_net(session: &mut Session, name: &str) {
     if iface_stack_check(session, 1) {
-        let top = session.stack_find_top().unwrap();
+        let Some(top) = session.stack_find_top() else {
+            return;
+        };
         session.stack_entry_fsm(top, |f| {
             // [spec:foma:sem:iface.iface-name-net-fn+1] store the name in full. C
             // used a fixed char[40] field (strncpy without a NUL terminator for
@@ -54,7 +55,9 @@ pub fn iface_name_net(session: &mut Session, name: &str) {
 // [spec:foma:sem:foma.iface-print-name-fn]
 pub fn iface_print_name(session: &mut Session) {
     if iface_stack_check(session, 1) {
-        let top = session.stack_find_top().unwrap();
+        let Some(top) = session.stack_find_top() else {
+            return;
+        };
         let name = session.stack_entry_fsm(top, |f| f.name.clone());
         print!("{}\n", name);
     }
@@ -68,7 +71,9 @@ pub fn iface_quit(session: &mut Session) {
     // remove_defined(g_defines, NULL) — NULL name destroys every defined net.
     remove_defined(&mut session.defines, None);
     while !session.stack_isempty() {
-        let net = session.stack_pop().unwrap();
+        let Some(net) = session.stack_pop() else {
+            break;
+        };
         fsm_destroy(net);
     }
     std::process::exit(0);
@@ -101,10 +106,12 @@ pub fn iface_save_stack(session: &mut Session, filename: &str) {
         print!("Writing to file {}.\n", filename);
         let mut outfile = GzEncoder::new(file, Compression::default());
         // for (stack_ptr = stack_find_bottom(); stack_ptr->next != NULL; stack_ptr = stack_ptr->next)
-        let mut stack_ptr = session.stack_find_bottom().unwrap();
-        while session.stack_entry_next(stack_ptr).is_some() {
+        let Some(mut stack_ptr) = session.stack_find_bottom() else {
+            return;
+        };
+        while let Some(next) = session.stack_entry_next(stack_ptr) {
             session.stack_entry_fsm(stack_ptr, |f| foma_net_print(f, &mut outfile));
-            stack_ptr = session.stack_entry_next(stack_ptr).unwrap();
+            stack_ptr = next;
         }
         // gzclose(outfile)
         let _ = outfile.finish();

@@ -25,7 +25,9 @@ pub fn iface_apply_med(session: &mut Session, word: &str) {
         return;
     }
     // amedh = stack_get_med_ah() — arena index of the top entry (see module notes)
-    let amedh = session.stack_get_med_ah().unwrap();
+    let Some(amedh) = session.stack_get_med_ah() else {
+        return;
+    };
 
     session.stack_entry_amedh_with_opts(amedh, |opts, h| {
         apply_med_set_heap_max(h, 4194304 + 1);
@@ -110,7 +112,9 @@ pub fn iface_apply_file(
         }
     };
 
-    let ah = session.stack_get_ah().unwrap();
+    let Some(ah) = session.stack_get_ah() else {
+        return 0;
+    };
     session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
 
     let mut reader = BufReader::new(infile);
@@ -174,7 +178,9 @@ pub fn iface_apply_down(session: &mut Session, word: &str) {
     if !iface_stack_check(session, 1) {
         return;
     }
-    let ah = session.stack_get_ah().unwrap();
+    let Some(ah) = session.stack_get_ah() else {
+        return;
+    };
     session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
     let result = session.stack_entry_ah(ah, |h| apply_down(h, Some(word)));
     match result {
@@ -205,7 +211,9 @@ pub fn iface_apply_up(session: &mut Session, word: &str) {
     if !iface_stack_check(session, 1) {
         return;
     }
-    let ah = session.stack_get_ah().unwrap();
+    let Some(ah) = session.stack_get_ah() else {
+        return;
+    };
     session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
     let result = session.stack_entry_ah(ah, |h| apply_up(h, Some(word)));
     match result {
@@ -242,7 +250,9 @@ pub fn iface_lower_words(session: &mut Session, limit: i32) {
         limit
     };
     if iface_stack_check(session, 1) {
-        let ah = session.stack_get_ah().unwrap();
+        let Some(ah) = session.stack_get_ah() else {
+            return;
+        };
         session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
         let mut i = limit;
         while i > 0 {
@@ -300,7 +310,9 @@ pub fn iface_apply_random(
     if iface_stack_check(session, 1) {
         // calloc(limit, sizeof(struct apply_results {char *string; int count;}))
         let mut results: Vec<(Option<String>, i32)> = vec![(None, 0); limit as usize];
-        let ah = session.stack_get_ah().unwrap();
+        let Some(ah) = session.stack_get_ah() else {
+            return;
+        };
         session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
         let mut i = limit;
         while i > 0 {
@@ -338,7 +350,9 @@ pub fn iface_apply_random(
 pub fn iface_print_shortest_string(session: &mut Session) {
     /* L -  ?+  [[L .o. [?:"@TMP@"]*].l .o. "@TMP@":?*].l; */
     if iface_stack_check(session, 1) {
-        let top = session.stack_find_top().unwrap();
+        let Some(top) = session.stack_find_top() else {
+            return;
+        };
         let mut one = session.stack_entry_fsm(top, |f| fsm_copy(f));
         if session.stack_entry_fsm(top, |f| f.arity) == 1 {
             let result = fsm_minimize(
@@ -524,7 +538,9 @@ fn shortest_acyclic_length(net: &crate::types::Fsm) -> i32 {
 // [spec:foma:sem:foma.iface-print-shortest-string-size-fn+1]
 pub fn iface_print_shortest_string_size(session: &mut Session) {
     if iface_stack_check(session, 1) {
-        let top = session.stack_find_top().unwrap();
+        let Some(top) = session.stack_find_top() else {
+            return;
+        };
         let mut one = session.stack_entry_fsm(top, |f| fsm_copy(f));
         /* [L .o. [?:a]*].l; */
         if session.stack_entry_fsm(top, |f| f.arity) == 1 {
@@ -592,7 +608,9 @@ pub fn iface_upper_words(session: &mut Session, limit: i32) {
         limit
     };
     if iface_stack_check(session, 1) {
-        let ah = session.stack_get_ah().unwrap();
+        let Some(ah) = session.stack_get_ah() else {
+            return;
+        };
         session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
         let mut i = limit;
         while i > 0 {
@@ -624,7 +642,9 @@ pub fn iface_words_file(session: &mut Session, filename: &str, r#type: i32) {
         apply_words
     };
     if iface_stack_check(session, 1) {
-        let top = session.stack_find_top().unwrap();
+        let Some(top) = session.stack_find_top() else {
+            return;
+        };
         if session.stack_entry_fsm(top, |f| f.pathcount) == PATHCOUNT_CYCLIC {
             print!("FSM is cyclic: can't write all words to file.\n");
             return;
@@ -637,7 +657,9 @@ pub fn iface_words_file(session: &mut Session, filename: &str, r#type: i32) {
                 return;
             }
         };
-        let ah = session.stack_get_ah().unwrap();
+        let Some(ah) = session.stack_get_ah() else {
+            return;
+        };
         session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
         loop {
             let result = session.stack_entry_ah(ah, |h| applyer(h));
@@ -664,7 +686,9 @@ pub fn iface_words(session: &mut Session, limit: i32) {
         limit
     };
     if iface_stack_check(session, 1) {
-        let ah = session.stack_get_ah().unwrap();
+        let Some(ah) = session.stack_get_ah() else {
+            return;
+        };
         session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
         let mut i = limit;
         while i > 0 {
@@ -688,7 +712,9 @@ pub fn iface_pairs_call(session: &mut Session, limit: i32, random: i32) {
         limit
     };
     if iface_stack_check(session, 1) {
-        let ah = session.stack_get_ah().unwrap();
+        let Some(ah) = session.stack_get_ah() else {
+            return;
+        };
         session.stack_entry_ah_with_opts(ah, |opts, h| {
             apply_set_show_flags(h, opts.show_flags as i32)
         });
@@ -758,7 +784,9 @@ pub fn iface_pairs(session: &mut Session, limit: i32) {
 // [spec:foma:sem:foma.iface-pairs-file-fn]
 pub fn iface_pairs_file(session: &mut Session, filename: &str) {
     if iface_stack_check(session, 1) {
-        let top = session.stack_find_top().unwrap();
+        let Some(top) = session.stack_find_top() else {
+            return;
+        };
         if session.stack_entry_fsm(top, |f| f.pathcount) == PATHCOUNT_CYCLIC {
             print!("FSM is cyclic: can't write all pairs to file.\n");
             return;
@@ -771,7 +799,9 @@ pub fn iface_pairs_file(session: &mut Session, filename: &str) {
                 return;
             }
         };
-        let ah = session.stack_get_ah().unwrap();
+        let Some(ah) = session.stack_get_ah() else {
+            return;
+        };
         session.stack_entry_ah_with_opts(ah, |opts, h| {
             apply_set_show_flags(h, opts.show_flags as i32)
         });

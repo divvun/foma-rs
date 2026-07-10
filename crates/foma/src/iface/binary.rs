@@ -10,8 +10,12 @@ use crate::define::defined_networks_init;
 pub fn iface_compose(session: &mut Session) {
     if iface_stack_check(session, 2) {
         while session.stack_size() > 1 {
-            let one = session.stack_pop().unwrap();
-            let two = session.stack_pop().unwrap();
+            let Some(one) = session.stack_pop() else {
+                break;
+            };
+            let Some(two) = session.stack_pop() else {
+                break;
+            };
             session.stack_add(fsm_topsort(fsm_minimize(
                 &session.opts,
                 fsm_compose(&session.opts, one, two),
@@ -28,8 +32,12 @@ pub fn iface_conc(session: &mut Session) {
     if iface_stack_check(session, 2) {
         while session.stack_size() > 1 {
             // Wave 4 fix: the C left a stray debug printf("dd") here — deleted.
-            let one = session.stack_pop().unwrap();
-            let two = session.stack_pop().unwrap();
+            let Some(one) = session.stack_pop() else {
+                break;
+            };
+            let Some(two) = session.stack_pop() else {
+                break;
+            };
             session.stack_add(fsm_topsort(fsm_minimize(
                 &session.opts,
                 fsm_concat(&session.opts, one, two),
@@ -44,8 +52,12 @@ pub fn iface_conc(session: &mut Session) {
 // [spec:foma:sem:foma.iface-crossproduct-fn]
 pub fn iface_crossproduct(session: &mut Session) {
     if iface_stack_check(session, 2) {
-        let one = session.stack_pop().unwrap();
-        let two = session.stack_pop().unwrap();
+        let Some(one) = session.stack_pop() else {
+            return;
+        };
+        let Some(two) = session.stack_pop() else {
+            return;
+        };
         session.stack_add(fsm_topsort(fsm_minimize(
             &session.opts,
             fsm_cross_product(&session.opts, one, two),
@@ -59,8 +71,12 @@ pub fn iface_crossproduct(session: &mut Session) {
 // [spec:foma:sem:foma.iface-ignore-fn]
 pub fn iface_ignore(session: &mut Session) {
     if iface_stack_check(session, 2) {
-        let one = session.stack_pop().unwrap();
-        let two = session.stack_pop().unwrap();
+        let Some(one) = session.stack_pop() else {
+            return;
+        };
+        let Some(two) = session.stack_pop() else {
+            return;
+        };
         session.stack_add(fsm_topsort(fsm_minimize(
             &session.opts,
             fsm_ignore(&session.opts, one, two, OP_IGNORE_ALL),
@@ -78,8 +94,8 @@ pub fn iface_intersect(session: &mut Session) {
             // C: fsm_intersect(stack_pop(), stack_pop()) — the two pops are one
             // expression (C order unspecified); Rust evaluates arguments
             // left-to-right. Intersection is commutative, so the language matches.
-            let a = session.stack_pop().unwrap();
-            let b = session.stack_pop().unwrap();
+            let Some(a) = session.stack_pop() else { break };
+            let Some(b) = session.stack_pop() else { break };
             session.stack_add(fsm_topsort(fsm_minimize(
                 &session.opts,
                 fsm_intersect(&session.opts, a, b),
@@ -103,7 +119,9 @@ pub fn iface_substitute_symbol(session: &mut Session, original: &str, substitute
         dequote_string(&mut substitute);
         let original = String::from_utf8_lossy(&original).into_owned();
         let substitute = String::from_utf8_lossy(&substitute).into_owned();
-        let popped = session.stack_pop().unwrap();
+        let Some(popped) = session.stack_pop() else {
+            return;
+        };
         session.stack_add(fsm_topsort(fsm_minimize(
             &session.opts,
             fsm_substitute_symbol(popped, &original, &substitute),
@@ -135,7 +153,9 @@ pub fn iface_substitute_defined(session: &mut Session, original: &str, substitut
                 print!("No defined network '{}'.\n", substitute);
             }
             Some(subnet) => {
-                let top = session.stack_find_top().unwrap();
+                let top = session
+                    .stack_find_top()
+                    .expect("nonempty stack: iface_stack_check(1) passed above");
                 if session
                     .stack_entry_fsm(top, |f| fsm_symbol_occurs(f, &original, M_UPPER + M_LOWER))
                     == 0
@@ -167,8 +187,8 @@ pub fn iface_shuffle(session: &mut Session) {
             // C: fsm_shuffle(stack_pop(), stack_pop()) — two pops in one expression
             // (C order unspecified); Rust evaluates left-to-right. Shuffle is
             // commutative, so the resulting language is the same.
-            let a = session.stack_pop().unwrap();
-            let b = session.stack_pop().unwrap();
+            let Some(a) = session.stack_pop() else { break };
+            let Some(b) = session.stack_pop() else { break };
             session.stack_add(fsm_minimize(
                 &session.opts,
                 fsm_shuffle(&session.opts, a, b),
@@ -186,8 +206,8 @@ pub fn iface_union(session: &mut Session) {
         while session.stack_size() > 1 {
             // C: fsm_union(&session.opts, stack_pop(), stack_pop()) — pops in one expression (C
             // order unspecified); union is commutative. Minimized, NOT topsorted.
-            let a = session.stack_pop().unwrap();
-            let b = session.stack_pop().unwrap();
+            let Some(a) = session.stack_pop() else { break };
+            let Some(b) = session.stack_pop() else { break };
             session.stack_add(fsm_minimize(&session.opts, fsm_union(&session.opts, a, b)));
         }
     }

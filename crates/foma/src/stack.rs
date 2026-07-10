@@ -67,8 +67,17 @@ impl Session {
     /// sentinel's NULL `next` here (UB/crash); the port panics instead.
     fn walk_to_top(&self) -> usize {
         let mut stack_ptr = self.main_stack();
-        while self.e_number(self.e_next(stack_ptr).unwrap()) != -1 {
-            stack_ptr = self.e_next(stack_ptr).unwrap();
+        // On a non-empty stack every non-sentinel entry has a `next`; on an empty
+        // stack this reads the sentinel's None `next` and panics (DEVIATION pin).
+        while self
+            .e_next(stack_ptr)
+            .map(|n| self.e_number(n))
+            .expect("walk_to_top on empty stack (sentinel has no next)")
+            != -1
+        {
+            stack_ptr = self
+                .e_next(stack_ptr)
+                .expect("non-sentinel entry always has a next");
         }
         stack_ptr
     }
@@ -213,8 +222,8 @@ impl Session {
     pub fn stack_size(&self) -> i32 {
         let mut i = 0;
         let mut stack_ptr = self.main_stack();
-        while self.e_next(stack_ptr).is_some() {
-            stack_ptr = self.e_next(stack_ptr).unwrap();
+        while let Some(next) = self.e_next(stack_ptr) {
+            stack_ptr = next;
             i += 1;
         }
         i
@@ -250,7 +259,9 @@ impl Session {
         let mut stack_ptr = self.main_stack();
         while self.e_number(stack_ptr) != -1 {
             stack_ptr_previous = Some(stack_ptr);
-            stack_ptr = self.e_next(stack_ptr).unwrap();
+            stack_ptr = self
+                .e_next(stack_ptr)
+                .expect("non-sentinel entry always has a next");
             i += 1;
         }
         // Allocate the fresh sentinel that becomes stack_ptr->next; its number =
@@ -264,7 +275,12 @@ impl Session {
         self.stack_arena[stack_ptr].number = i;
         self.stack_arena[stack_ptr].previous = stack_ptr_previous;
         if self.opts.verbose {
-            print_stats(self.stack_arena[stack_ptr].fsm.as_deref().unwrap());
+            print_stats(
+                self.stack_arena[stack_ptr]
+                    .fsm
+                    .as_deref()
+                    .expect("fsm just set on this entry above"),
+            );
         }
         self.e_number(stack_ptr)
     }
@@ -280,7 +296,12 @@ impl Session {
         };
         if self.stack_arena[se].amedh.is_none() {
             // se->amedh = apply_med_init(se->fsm);
-            let mut amedh = apply_med_init(self.stack_arena[se].fsm.as_deref().unwrap());
+            let mut amedh = apply_med_init(
+                self.stack_arena[se]
+                    .fsm
+                    .as_deref()
+                    .expect("top real entry always carries an fsm"),
+            );
             apply_med_set_align_symbol(&mut amedh, "-");
             self.stack_arena[se].amedh = Some(amedh);
         }
@@ -299,7 +320,12 @@ impl Session {
         };
         if self.stack_arena[se].ah.is_none() {
             // se->ah = apply_init(se->fsm);
-            let ah = apply_init(self.stack_arena[se].fsm.as_deref().unwrap());
+            let ah = apply_init(
+                self.stack_arena[se]
+                    .fsm
+                    .as_deref()
+                    .expect("top real entry always carries an fsm"),
+            );
             self.stack_arena[se].ah = Some(ah);
         }
         // C: return se->ah; here the owning entry index (see module notes).
@@ -322,8 +348,14 @@ impl Session {
         let stack_ptr = self.walk_to_top();
         // (stack_ptr->previous)->next = stack_ptr->next;
         // (stack_ptr->next)->previous = stack_ptr->previous;
-        let prev = self.e_previous(stack_ptr).unwrap();
-        let nxt = self.e_next(stack_ptr).unwrap();
+        // Size >= 2 here (the size == 1 fast path returned above): the top entry
+        // has a real predecessor and its `next` is the sentinel — both present.
+        let prev = self
+            .e_previous(stack_ptr)
+            .expect("top entry of a >=2 stack has a previous");
+        let nxt = self
+            .e_next(stack_ptr)
+            .expect("top entry always has a next (the sentinel)");
         self.set_next(prev, Some(nxt));
         self.set_previous(nxt, Some(prev));
         let fsm = self.take_fsm(stack_ptr);
@@ -373,7 +405,9 @@ impl Session {
         let mut stack_ptr = self.main_stack();
         while self.e_number(stack_ptr) != -1 {
             entries.push(stack_ptr);
-            stack_ptr = self.e_next(stack_ptr).unwrap();
+            stack_ptr = self
+                .e_next(stack_ptr)
+                .expect("non-sentinel entry always has a next");
         }
         let sentinel = stack_ptr;
 
@@ -385,7 +419,9 @@ impl Session {
             self.set_next(pair[0], Some(pair[1]));
             self.set_previous(pair[1], Some(pair[0]));
         }
-        let new_top = *entries.last().unwrap();
+        let new_top = *entries
+            .last()
+            .expect("size >= 2 here, so entries is non-empty");
         self.set_next(new_top, Some(sentinel));
         self.set_previous(sentinel, Some(new_top));
         1

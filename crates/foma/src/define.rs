@@ -67,7 +67,7 @@ pub fn defined_functions_init() -> Box<DefinedFunctions> {
 // [spec:foma:sem:fomalib.remove-defined-fn]
 pub fn remove_defined(def: &mut DefinedNetworks, string: Option<&str>) -> i32 {
     /* Undefine all */
-    if string.is_none() {
+    let Some(string) = string else {
         let mut d: Option<&mut DefinedNetworks> = Some(def);
         while let Some(node) = d {
             if let Some(net) = node.net.take() {
@@ -80,8 +80,7 @@ pub fn remove_defined(def: &mut DefinedNetworks, string: Option<&str>) -> i32 {
             d = node.next.as_deref_mut();
         }
         return 0;
-    }
-    let string = string.unwrap();
+    };
     /* C scans once tracking d and d_prev; here: the same existence scan,
     then the head and non-head cases through fresh borrows */
     let mut exists = 0;
@@ -100,13 +99,12 @@ pub fn remove_defined(def: &mut DefinedNetworks, string: Option<&str>) -> i32 {
     }
     if def.name.as_deref() == Some(string) {
         /* d == def */
-        if def.next.is_some() {
+        if let Some(mut next) = def.next.take() {
             /* fsm_destroy(d->net) — C's fsm_destroy is a no-op on NULL */
             if let Some(net) = def.net.take() {
                 fsm_destroy(net);
             }
             /* free(d->name) — dropped by the overwrite below */
-            let mut next = def.next.take().unwrap();
             def.name = next.name.take();
             def.net = next.net.take();
             let d_next = next.next.take();
@@ -123,13 +121,17 @@ pub fn remove_defined(def: &mut DefinedNetworks, string: Option<&str>) -> i32 {
         }
     } else {
         let mut d_prev = &mut *def;
-        loop {
-            let matched = match d_prev.next.as_deref() {
-                Some(d) => d.name.as_deref() == Some(string),
-                None => break, /* unreachable: existence established above */
-            };
+        // Existence was established above, so the match is always found before
+        // `next` runs out (the `else { break }` is C's unreachable NULL tail).
+        while d_prev.next.is_some() {
+            let matched = d_prev
+                .next
+                .as_deref()
+                .is_some_and(|d| d.name.as_deref() == Some(string));
             if matched {
-                let mut node = d_prev.next.take().unwrap();
+                let Some(mut node) = d_prev.next.take() else {
+                    break;
+                };
                 if let Some(net) = node.net.take() {
                     fsm_destroy(net);
                 }
@@ -137,7 +139,10 @@ pub fn remove_defined(def: &mut DefinedNetworks, string: Option<&str>) -> i32 {
                 d_prev.next = node.next.take();
                 break;
             }
-            d_prev = d_prev.next.as_deref_mut().unwrap();
+            let Some(nextnode) = d_prev.next.as_deref_mut() else {
+                break;
+            };
+            d_prev = nextnode;
         }
     }
     0
@@ -201,8 +206,8 @@ pub fn add_defined_function(
             /* d->next = deff->next; deff->next = d */
             next: deff.next.take(),
         });
-        deff.next = Some(d);
-        deff.next.as_deref_mut().unwrap()
+        /* deff->next = d — insert returns the just-stored node */
+        deff.next.insert(d).as_mut()
     };
     d.name = Some(name.to_string()); /* strdup(name) */
     d.regex = Some(regex.to_string()); /* strdup(regex) */
@@ -251,8 +256,8 @@ pub fn add_defined(def: &mut DefinedNetworks, net: Option<Box<Fsm>>, string: &st
             /* d->next = def->next; def->next = d */
             next: def.next.take(),
         });
-        def.next = Some(d);
-        def.next.as_deref_mut().unwrap()
+        /* def->next = d — insert returns the just-stored node */
+        def.next.insert(d).as_mut()
     };
     d.name = Some(string.to_string()); /* strdup(string) */
     d.net = Some(net);

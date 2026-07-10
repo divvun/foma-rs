@@ -105,7 +105,9 @@ pub fn iface_write_att(session: &mut Session, filename: Option<&str>) -> i32 {
     if !iface_stack_check(session, 1) {
         return 1;
     }
-    let top = session.stack_find_top().unwrap();
+    let Some(top) = session.stack_find_top() else {
+        return 1;
+    };
     let mut outfile: Output = match filename {
         None => Output::Stdout(std::io::stdout()),
         Some(name) => {
@@ -131,7 +133,9 @@ pub fn iface_write_att(session: &mut Session, filename: Option<&str>) -> i32 {
 // [spec:foma:sem:foma.iface-write-prolog-fn]
 pub fn iface_write_prolog(session: &mut Session, filename: Option<&str>) {
     if iface_stack_check(session, 1) {
-        let top = session.stack_find_top().unwrap();
+        let Some(top) = session.stack_find_top() else {
+            return;
+        };
         session.stack_entry_fsm(top, |f| foma_write_prolog(f, filename));
     }
 }
