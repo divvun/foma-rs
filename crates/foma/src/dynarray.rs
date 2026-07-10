@@ -622,8 +622,8 @@ pub fn fsm_construct_add_symbol(handle: &mut FsmConstructHandle, symbol: &str) -
 
     /* Is symbol reserved? */
     let mut i = 0;
-    while FOMA_RESERVED_SYMBOLS[i].symbol.is_some() {
-        if symbol == FOMA_RESERVED_SYMBOLS[i].symbol.unwrap() {
+    while let Some(reserved_sym) = FOMA_RESERVED_SYMBOLS[i].symbol {
+        if symbol == reserved_sym {
             symnum = FOMA_RESERVED_SYMBOLS[i].number;
             reserved = 1;
             if handle.maxsigma < symnum {
@@ -921,10 +921,9 @@ pub fn fsm_read_init(net: Box<Fsm>) -> Box<FsmReadHandle> {
 // [spec:foma:def:fomalib.fsm-read-reset-fn]
 // [spec:foma:sem:fomalib.fsm-read-reset-fn]
 pub fn fsm_read_reset(handle: Option<&mut FsmReadHandle>) {
-    if handle.is_none() {
+    let Some(handle) = handle else {
         return;
-    }
-    let handle = handle.unwrap();
+    };
     handle.arcs_cursor = None;
     handle.initials_cursor = None;
     handle.finals_cursor = None;
@@ -939,9 +938,16 @@ pub fn fsm_get_next_state_arc(handle: &mut FsmReadHandle) -> i32 {
     /* pre-increment: fsm_get_next_state parked the cursor one line before
     the state's first line (wrapping_sub(1); see module docs). Calling
     this with a NULL cursor is a crash in C — unwrap panics. */
-    let cursor = handle.arcs_cursor.unwrap().wrapping_add(1);
+    let cursor = handle
+        .arcs_cursor
+        .expect("arcs_cursor parked by fsm_get_next_state")
+        .wrapping_add(1);
     handle.arcs_cursor = Some(cursor);
-    let states = &handle.net.as_ref().unwrap().states;
+    let states = &handle
+        .net
+        .as_ref()
+        .expect("net present until fsm_read_done")
+        .states;
     if states[cursor].state_no != handle.current_state || states[cursor].target == -1 {
         handle.arcs_cursor = Some(cursor.wrapping_sub(1));
         return 0;
@@ -954,7 +960,11 @@ pub fn fsm_get_next_state_arc(handle: &mut FsmReadHandle) -> i32 {
 // [spec:foma:def:fomalib.fsm-get-next-arc-fn]
 // [spec:foma:sem:fomalib.fsm-get-next-arc-fn]
 pub fn fsm_get_next_arc(handle: &mut FsmReadHandle) -> i32 {
-    let states = &handle.net.as_ref().unwrap().states;
+    let states = &handle
+        .net
+        .as_ref()
+        .expect("net present until fsm_read_done")
+        .states;
     if handle.arcs_cursor.is_none() {
         let mut cursor = handle.arcs_head;
         /* skip sentinel lines (target == -1) */
@@ -965,8 +975,7 @@ pub fn fsm_get_next_arc(handle: &mut FsmReadHandle) -> i32 {
         if states[cursor].state_no == -1 {
             return 0;
         }
-    } else {
-        let mut cursor = handle.arcs_cursor.unwrap();
+    } else if let Some(mut cursor) = handle.arcs_cursor {
         /* sticky terminator: once on the state_no == -1 line, keep
         returning 0 without moving */
         if states[cursor].state_no == -1 {
@@ -991,10 +1000,15 @@ pub fn fsm_get_next_arc(handle: &mut FsmReadHandle) -> i32 {
 // [spec:foma:def:fomalib.fsm-get-arc-source-fn]
 // [spec:foma:sem:fomalib.fsm-get-arc-source-fn]
 pub fn fsm_get_arc_source(handle: &FsmReadHandle) -> i32 {
-    if handle.arcs_cursor.is_none() {
+    let Some(cursor) = handle.arcs_cursor else {
         return -1;
-    }
-    handle.net.as_ref().unwrap().states[handle.arcs_cursor.unwrap()].state_no
+    };
+    handle
+        .net
+        .as_ref()
+        .expect("net present until fsm_read_done")
+        .states[cursor]
+        .state_no
 }
 
 // [spec:foma:def:dynarray.fsm-get-arc-target-fn]
@@ -1002,10 +1016,15 @@ pub fn fsm_get_arc_source(handle: &FsmReadHandle) -> i32 {
 // [spec:foma:def:fomalib.fsm-get-arc-target-fn]
 // [spec:foma:sem:fomalib.fsm-get-arc-target-fn]
 pub fn fsm_get_arc_target(handle: &FsmReadHandle) -> i32 {
-    if handle.arcs_cursor.is_none() {
+    let Some(cursor) = handle.arcs_cursor else {
         return -1;
-    }
-    handle.net.as_ref().unwrap().states[handle.arcs_cursor.unwrap()].target
+    };
+    handle
+        .net
+        .as_ref()
+        .expect("net present until fsm_read_done")
+        .states[cursor]
+        .target
 }
 
 // [spec:foma:def:dynarray.fsm-get-symbol-number-fn]
@@ -1031,10 +1050,15 @@ pub fn fsm_get_symbol_number(handle: &FsmReadHandle, symbol: &str) -> i32 {
 pub fn fsm_get_arc_in(handle: &FsmReadHandle) -> Option<&str> {
     /* C returns a borrowed char* into the handle's sigma list, or NULL
     when the cursor is NULL */
-    if handle.arcs_cursor.is_none() {
+    let Some(cursor) = handle.arcs_cursor else {
         return None;
-    }
-    let index = handle.net.as_ref().unwrap().states[handle.arcs_cursor.unwrap()].r#in;
+    };
+    let index = handle
+        .net
+        .as_ref()
+        .expect("net present until fsm_read_done")
+        .states[cursor]
+        .r#in;
     /* no sentinel check: in == -1 indexes out of bounds in C.
     DEVIATION from C (OOB read; Rust panics) */
     handle.fsm_sigma_list[index as usize].symbol.as_deref()
@@ -1045,11 +1069,16 @@ pub fn fsm_get_arc_in(handle: &FsmReadHandle) -> Option<&str> {
 // [spec:foma:def:fomalib.fsm-get-arc-num-in-fn]
 // [spec:foma:sem:fomalib.fsm-get-arc-num-in-fn]
 pub fn fsm_get_arc_num_in(handle: &FsmReadHandle) -> i32 {
-    if handle.arcs_cursor.is_none() {
+    let Some(cursor) = handle.arcs_cursor else {
         return -1;
-    }
+    };
     /* short→int promotion; a sentinel line's stored -1 returns as-is */
-    handle.net.as_ref().unwrap().states[handle.arcs_cursor.unwrap()].r#in as i32
+    handle
+        .net
+        .as_ref()
+        .expect("net present until fsm_read_done")
+        .states[cursor]
+        .r#in as i32
 }
 
 // [spec:foma:def:dynarray.fsm-get-arc-num-out-fn]
@@ -1057,11 +1086,16 @@ pub fn fsm_get_arc_num_in(handle: &FsmReadHandle) -> i32 {
 // [spec:foma:def:fomalib.fsm-get-arc-num-out-fn]
 // [spec:foma:sem:fomalib.fsm-get-arc-num-out-fn]
 pub fn fsm_get_arc_num_out(handle: &FsmReadHandle) -> i32 {
-    if handle.arcs_cursor.is_none() {
+    let Some(cursor) = handle.arcs_cursor else {
         return -1;
-    }
+    };
     /* short→int promotion; a sentinel line's stored -1 returns as-is */
-    handle.net.as_ref().unwrap().states[handle.arcs_cursor.unwrap()].out as i32
+    handle
+        .net
+        .as_ref()
+        .expect("net present until fsm_read_done")
+        .states[cursor]
+        .out as i32
 }
 
 // [spec:foma:def:dynarray.fsm-get-arc-out-fn]
@@ -1071,10 +1105,15 @@ pub fn fsm_get_arc_num_out(handle: &FsmReadHandle) -> i32 {
 pub fn fsm_get_arc_out(handle: &FsmReadHandle) -> Option<&str> {
     /* C returns a borrowed char* into the handle's sigma list, or NULL
     when the cursor is NULL */
-    if handle.arcs_cursor.is_none() {
+    let Some(cursor) = handle.arcs_cursor else {
         return None;
-    }
-    let index = handle.net.as_ref().unwrap().states[handle.arcs_cursor.unwrap()].out;
+    };
+    let index = handle
+        .net
+        .as_ref()
+        .expect("net present until fsm_read_done")
+        .states[cursor]
+        .out;
     /* no sentinel check: out == -1 indexes out of bounds in C.
     DEVIATION from C (OOB read; Rust panics) */
     handle.fsm_sigma_list[index as usize].symbol.as_deref()
@@ -1085,16 +1124,18 @@ pub fn fsm_get_arc_out(handle: &FsmReadHandle) -> Option<&str> {
 // [spec:foma:def:fomalib.fsm-get-next-initial-fn]
 // [spec:foma:sem:fomalib.fsm-get-next-initial-fn]
 pub fn fsm_get_next_initial(handle: &mut FsmReadHandle) -> i32 {
-    if handle.initials_cursor.is_none() {
-        handle.initials_cursor = Some(0);
-    } else {
-        /* sticky -1 terminator: the end returns -1 without advancing */
-        if handle.initials_head[handle.initials_cursor.unwrap()] == -1 {
-            return -1;
+    let cursor = match handle.initials_cursor {
+        None => 0,
+        Some(cur) => {
+            /* sticky -1 terminator: the end returns -1 without advancing */
+            if handle.initials_head[cur] == -1 {
+                return -1;
+            }
+            cur + 1
         }
-        handle.initials_cursor = Some(handle.initials_cursor.unwrap() + 1);
-    }
-    handle.initials_head[handle.initials_cursor.unwrap()]
+    };
+    handle.initials_cursor = Some(cursor);
+    handle.initials_head[cursor]
 }
 
 // [spec:foma:def:dynarray.fsm-get-next-final-fn]
@@ -1102,16 +1143,18 @@ pub fn fsm_get_next_initial(handle: &mut FsmReadHandle) -> i32 {
 // [spec:foma:def:fomalib.fsm-get-next-final-fn]
 // [spec:foma:sem:fomalib.fsm-get-next-final-fn]
 pub fn fsm_get_next_final(handle: &mut FsmReadHandle) -> i32 {
-    if handle.finals_cursor.is_none() {
-        handle.finals_cursor = Some(0);
-    } else {
-        /* sticky -1 terminator: the end returns -1 without advancing */
-        if handle.finals_head[handle.finals_cursor.unwrap()] == -1 {
-            return -1;
+    let cursor = match handle.finals_cursor {
+        None => 0,
+        Some(cur) => {
+            /* sticky -1 terminator: the end returns -1 without advancing */
+            if handle.finals_head[cur] == -1 {
+                return -1;
+            }
+            cur + 1
         }
-        handle.finals_cursor = Some(handle.finals_cursor.unwrap() + 1);
-    }
-    handle.finals_head[handle.finals_cursor.unwrap()]
+    };
+    handle.finals_cursor = Some(cursor);
+    handle.finals_head[cursor]
 }
 
 // [spec:foma:def:dynarray.fsm-get-num-states-fn]
@@ -1119,7 +1162,11 @@ pub fn fsm_get_next_final(handle: &mut FsmReadHandle) -> i32 {
 // [spec:foma:def:fomalib.fsm-get-num-states-fn]
 // [spec:foma:sem:fomalib.fsm-get-num-states-fn]
 pub fn fsm_get_num_states(handle: &FsmReadHandle) -> i32 {
-    handle.net.as_ref().unwrap().statecount
+    handle
+        .net
+        .as_ref()
+        .expect("net present until fsm_read_done")
+        .statecount
 }
 
 // [spec:foma:def:dynarray.fsm-get-has-unknowns-fn]
@@ -1135,20 +1182,26 @@ pub fn fsm_get_has_unknowns(handle: &FsmReadHandle) -> i32 {
 // [spec:foma:def:fomalib.fsm-get-next-state-fn]
 // [spec:foma:sem:fomalib.fsm-get-next-state-fn]
 pub fn fsm_get_next_state(handle: &mut FsmReadHandle) -> i32 {
-    if handle.states_cursor.is_none() {
-        handle.states_cursor = Some(0);
-    } else {
-        handle.states_cursor = Some(handle.states_cursor.unwrap() + 1);
-    }
+    let cursor = match handle.states_cursor {
+        None => 0,
+        Some(cur) => cur + 1,
+    };
+    handle.states_cursor = Some(cursor);
     /* C: states_cursor - states_head >= fsm_get_num_states(handle) —
     ptrdiff vs int comparison, done in i64 here */
-    if handle.states_cursor.unwrap() as i64 >= fsm_get_num_states(handle) as i64 {
+    if cursor as i64 >= fsm_get_num_states(handle) as i64 {
         return -1;
     }
     /* the state's first line; a NULL entry (state number gap) is a crash
-    in C — unwrap panics */
-    let first = handle.states_head[handle.states_cursor.unwrap()].unwrap();
-    let stateno = handle.net.as_ref().unwrap().states[first].state_no;
+    in C — expect panics (DEVIATION pin) */
+    let first =
+        handle.states_head[cursor].expect("no state-number gap in a read handle's states_head");
+    let stateno = handle
+        .net
+        .as_ref()
+        .expect("net present until fsm_read_done")
+        .states[first]
+        .state_no;
     /* park arcs_cursor one line before the state's first line so that
     fsm_get_next_state_arc's pre-increment lands on it (C decrements the
     pointer below the array base for first == 0 — UB; wrapping index here) */
@@ -1168,7 +1221,7 @@ pub fn fsm_read_done(handle: Box<FsmReadHandle>) -> Box<Fsm> {
     DEVIATION from C (C leaves the caller's net pointer untouched; the
     Rust handle owns the net, so it is returned to the caller) */
     let mut handle = handle;
-    handle.net.take().unwrap()
+    handle.net.take().expect("net present until fsm_read_done")
 }
 
 #[cfg(test)]
