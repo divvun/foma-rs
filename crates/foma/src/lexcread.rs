@@ -1217,7 +1217,7 @@ fn lexc_number_states(lx: &mut LexcCompiler) {
                         .lexstate
                         .expect("state carries a lexstate here");
                     let name = lx.lexstates_arena[lidx].name.as_deref().unwrap_or("");
-                    eprint!("*Warning: no Root lexicon, using '{}' as Root.\n", name);
+                    tracing::warn!("no Root lexicon, using '{}' as Root.", name);
                 }
                 lx.statelist_arena[sidx].start = 1;
                 n += 1;
@@ -1263,7 +1263,7 @@ fn lexc_number_states(lx: &mut LexcCompiler) {
             if lx.lexstates_arena[lidx].targeted == 0 && lx.state_arena[state].number != 0 {
                 if lx.opts.verbose {
                     let name = lx.lexstates_arena[lidx].name.as_deref().unwrap_or("");
-                    eprint!("*Warning: lexicon '{}' defined but not used\n", name);
+                    tracing::warn!("lexicon '{}' defined but not used", name);
                 }
             }
             if lx.lexstates_arena[lidx].has_outgoing == 0
@@ -1271,7 +1271,7 @@ fn lexc_number_states(lx: &mut LexcCompiler) {
             {
                 if lx.opts.verbose {
                     let name = lx.lexstates_arena[lidx].name.as_deref().unwrap_or("");
-                    eprint!("***Warning: lexicon '{}' used but never defined\n", name);
+                    tracing::warn!("lexicon '{}' used but never defined", name);
                 }
             }
             l = lx.lexstates_arena[lidx].next;
@@ -1497,7 +1497,7 @@ fn lexc_merge_states(lx: &mut LexcCompiler) {
 // [spec:foma:sem:lexc.lexc-to-fsm-fn]
 fn lexc_to_fsm(lx: &mut LexcCompiler) -> Box<Fsm> {
     if lx.opts.verbose {
-        eprint!("Building lexicon...\n");
+        tracing::info!("Building lexicon...");
     }
     lexc_merge_states(lx);
     let mut net = fsm_create("");
@@ -1506,7 +1506,7 @@ fn lexc_to_fsm(lx: &mut LexcCompiler) -> Box<Fsm> {
     lexc_number_states(lx);
     if lx.hasfinal == 0 {
         if lx.opts.verbose {
-            eprint!("Warning: # is never reached!!!\n");
+            tracing::warn!("# is never reached!!!");
         }
         /* Leak path: lexc_cleanup is not called; the state graph and hash
         tables persist in the arenas until the next lexc_init. */
@@ -1607,15 +1607,15 @@ fn lexc_to_fsm(lx: &mut LexcCompiler) -> Box<Fsm> {
     sigma_sort(&mut net);
 
     if lx.opts.verbose {
-        eprint!("Determinizing...\n");
+        tracing::info!("Determinizing...");
     }
     let net = fsm_determinize(net);
     if lx.opts.verbose {
-        eprint!("Minimizing...\n");
+        tracing::info!("Minimizing...");
     }
     let net = fsm_topsort(fsm_minimize(&lx.opts, net));
     if lx.opts.verbose {
-        eprint!("Done!\n");
+        tracing::info!("Done!");
     }
     net
 }
@@ -1668,7 +1668,6 @@ pub fn fsm_lexc_parse_string(
     mut defines: Option<&mut DefinedNetworks>,
     string: &str,
 ) -> Option<Box<Fsm>> {
-    use std::io::Write;
     /* C took an (ignored) `verbose` int parameter; the warnings keyed off the
     global g_verbose instead. Both collapse into `opts.verbose` here. C read the
     `g_defines` registry global ("olddefines"); it is the `defines` parameter
@@ -1694,7 +1693,7 @@ pub fn fsm_lexc_parse_string(
             <*>(.) syntax-error rule. nfst-lexc accepts it (an HFST feature), so
             reject here to stay faithful (see report). */
             if !f.noflags.is_empty() {
-                eprintln!("***lexc: NOFLAGS section is not supported by foma");
+                tracing::error!("lexc: NOFLAGS section is not supported by foma");
                 return None;
             }
 
@@ -1719,10 +1718,9 @@ pub fn fsm_lexc_parse_string(
             for lex in &f.lexicons {
                 /* <*>(LEXICON|Lexicon){SPACE}+{NONRESERVED}+ */
                 if lexentries != -1 {
-                    print!("{}, ", lexentries);
+                    tracing::info!("{} entries", lexentries);
                 }
-                print!("{}...", lex.value.name);
-                let _ = std::io::stdout().flush();
+                tracing::info!("building lexicon '{}'...", lex.value.name);
                 lexentries = 0;
                 lexc_set_current_lexicon(&mut lx, &lex.value.name, SOURCE_LEXICON);
 
@@ -1762,8 +1760,7 @@ pub fn fsm_lexc_parse_string(
                     lexc_clear_current_word(&mut lx);
                     lexentries += 1;
                     if lexentries % 10000 == 0 {
-                        print!("{}...", lexentries);
-                        let _ = std::io::stdout().flush();
+                        tracing::info!("{}...", lexentries);
                     }
                 }
             }
@@ -1779,13 +1776,13 @@ pub fn fsm_lexc_parse_string(
                 .first()
                 .map(|d| d.message.clone())
                 .unwrap_or_else(|| "syntax error".to_string());
-            eprintln!("\n***Syntax error: {}", msg);
+            tracing::error!("Syntax error: {}", msg);
         }
     }
 
     /* if (lexclex() != 1) { if (lexentries != -1) printf("%i\n", lexentries); } */
     if !syntax_error && lexentries != -1 {
-        println!("{}", lexentries);
+        tracing::info!("{} entries", lexentries);
     }
 
     /* return lexc_to_fsm() */

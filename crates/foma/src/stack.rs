@@ -393,7 +393,7 @@ impl Session {
         // not renumbered, matching the C code's evident intent), so afterwards the
         // former top is the new bottom and the former bottom is the new top.
         if self.stack_isempty() {
-            println!("Stack is empty.");
+            tracing::info!("Stack is empty.");
             return 0;
         }
         if self.stack_size() == 1 {
@@ -495,7 +495,7 @@ impl Session {
     pub fn stack_rotate(&mut self) -> i32 {
         /* Top element of stack to bottom */
         if self.stack_isempty() {
-            println!("Stack is empty.");
+            tracing::info!("Stack is empty.");
             return -1;
         }
         if self.stack_size() == 1 {
@@ -747,7 +747,7 @@ mod tests {
     #[test]
     fn stack_rotate_swaps_top_and_bottom_fsms_with_their_handles() {
         let mut session = Session::new();
-        // Empty: prints "Stack is empty." and returns -1.
+        // Empty: logs "Stack is empty." and returns -1.
         assert_eq!(session.stack_rotate(), -1);
         add_named(&mut session, "a", "bottomnet");
         // Size 1: returns 1, no change.
@@ -813,7 +813,7 @@ mod tests {
     #[test]
     fn stack_turn_reverses_the_stack() {
         let mut session = Session::new();
-        // Empty: prints "Stack is empty." and returns 0.
+        // Empty: logs "Stack is empty." and returns 0.
         assert_eq!(session.stack_turn(), 0);
         add_named(&mut session, "a", "solo");
         // Size 1: returns 1 with no change.

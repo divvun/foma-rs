@@ -525,7 +525,7 @@ pub fn fsm_issequential(net: &Fsm) -> bool {
     /* free(sigtable) */
     drop(sigtable);
     if !sequential {
-        print!("fails at state {}\n", fsm[i].state_no);
+        tracing::info!("fails at state {}", fsm[i].state_no);
     }
     sequential
 }

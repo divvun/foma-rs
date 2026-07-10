@@ -102,7 +102,7 @@ fn my_yyparse(
     the depth guard is observable. Returns the net the parse deposits in
     current_parse (unminimized — fsm_parse_regex/@re do the minimize). */
     if ps.depth >= MAX_PARSE_DEPTH {
-        eprintln!("Exceeded parser stack depth.  Self-recursive call?");
+        tracing::error!("Exceeded parser stack depth.  Self-recursive call?");
         return None;
     }
     ps.depth += 1;
@@ -128,7 +128,7 @@ fn my_yyparse_inner(
                 .first()
                 .map(|d| d.message.clone())
                 .unwrap_or_else(|| "syntax error".to_string());
-            eprintln!("*** Syntax error: {}", msg);
+            tracing::error!("Syntax error: {}", msg);
             return None;
         }
     };
@@ -138,7 +138,7 @@ fn my_yyparse_inner(
     let last = match exprs.last() {
         Some(e) => e,
         None => {
-            eprintln!("*** Syntax error: empty regular expression");
+            tracing::error!("Syntax error: empty regular expression");
             return None;
         }
     };
@@ -198,11 +198,11 @@ fn build_net(
             Some(fsm_cross_product(opts, u, l))
         }
         XreExpr::Weighted { .. } => {
-            eprintln!("*** Syntax error: weights (::w) are not supported");
+            tracing::error!("Syntax error: weights (::w) are not supported");
             None
         }
         XreExpr::ContainmentWithWeight { .. } => {
-            eprintln!("*** Syntax error: weighted containment ($::w) is not supported");
+            tracing::error!("Syntax error: weighted containment ($::w) is not supported");
             None
         }
 
@@ -221,7 +221,7 @@ fn build_net(
         XreExpr::BracketedDotted(_) => {
             /* `[. E .]` outside a replacement mapping is a syntax error in the C
             grammar (LDOT/RDOT only appear inside rule productions). */
-            eprintln!("*** Syntax error: [. .] is only valid as a replacement mapping side");
+            tracing::error!("Syntax error: [. .] is only valid as a replacement mapping side");
             None
         }
 
@@ -344,7 +344,7 @@ fn build_binary(
         | BinaryOp::MergeLeft
         | BinaryOp::UpperSubtract
         | BinaryOp::LowerSubtract => {
-            eprintln!("*** Syntax error: operator not supported by foma regex grammar");
+            tracing::error!("Syntax error: operator not supported by foma regex grammar");
             fsm_destroy(l);
             fsm_destroy(r);
             None
@@ -365,21 +365,21 @@ fn build_read_file(
         ReadKind::Binary => match fsm_read_binary_file(path).ok() {
             Some(n) => Some(n),
             None => {
-                eprintln!("*** Error reading binary file '{}'", path);
+                tracing::error!("Error reading binary file '{}'", path);
                 None
             }
         },
         ReadKind::Text => match fsm_read_text_file(path) {
             Some(n) => Some(n),
             None => {
-                eprintln!("*** Error reading text file '{}'", path);
+                tracing::error!("Error reading text file '{}'", path);
                 None
             }
         },
         ReadKind::Spaced => match fsm_read_spaced_text_file(path) {
             Some(n) => Some(n),
             None => {
-                eprintln!("*** Error reading spaced text file '{}'", path);
+                tracing::error!("Error reading spaced text file '{}'", path);
                 None
             }
         },
@@ -389,21 +389,21 @@ fn build_read_file(
             let bytes = match file_to_mem(path).ok() {
                 Some(b) => b,
                 None => {
-                    eprintln!("*** Error reading regex file '{}'", path);
+                    tracing::error!("Error reading regex file '{}'", path);
                     return None;
                 }
             };
             let s = match String::from_utf8(bytes) {
                 Ok(s) => s,
                 Err(_) => {
-                    eprintln!("*** Error: regex file '{}' is not valid UTF-8", path);
+                    tracing::error!("Error: regex file '{}' is not valid UTF-8", path);
                     return None;
                 }
             };
             Some(fsm_minimize(opts, my_yyparse(opts, ps, &s, nets, funcs)?))
         }
         ReadKind::Prolog => {
-            eprintln!("*** Syntax error: @pl\"…\" prolog files are not supported");
+            tracing::error!("Syntax error: @pl\"…\" prolog files are not supported");
             None
         }
     }
@@ -428,12 +428,12 @@ fn function_apply(
         Some(f) => match find_defined_function(f, name, numargs) {
             Some(s) => s.to_string(),
             None => {
-                eprintln!("***Error: function {}@{}) not defined!", name, numargs);
+                tracing::error!("function {}@{}) not defined!", name, numargs);
                 return None;
             }
         },
         None => {
-            eprintln!("***Error: function {}@{}) not defined!", name, numargs);
+            tracing::error!("function {}@{}) not defined!", name, numargs);
             return None;
         }
     };
@@ -483,7 +483,7 @@ fn function_apply(
                     remove_defined(n, Some(r));
                 }
             }
-            eprintln!("***Error: function {} produced a non-UTF-8 expansion", name);
+            tracing::error!("function {} produced a non-UTF-8 expansion", name);
             return None;
         }
     };
@@ -680,8 +680,8 @@ fn build_substitute(
             replacement,
         } => {
             if replacement.len() != 1 {
-                eprintln!(
-                    "*** Syntax error: substitution replaces a symbol with exactly one symbol"
+                tracing::error!(
+                    "Syntax error: substitution replaces a symbol with exactly one symbol"
                 );
                 fsm_destroy(net);
                 return None;
@@ -689,7 +689,7 @@ fn build_substitute(
             Some(fsm_substitute_symbol(net, needle, &replacement[0]))
         }
         SubstituteWhat::Pair { .. } => {
-            eprintln!("*** Syntax error: pair substitution (a:b) is not supported");
+            tracing::error!("Syntax error: pair substitution (a:b) is not supported");
             fsm_destroy(net);
             None
         }

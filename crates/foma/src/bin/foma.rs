@@ -384,6 +384,17 @@ fn my_generator(text: &str, state: i32) -> Option<String> {
 // [spec:foma:def:foma.main-fn]
 // [spec:foma:sem:foma.main-fn]
 fn main() {
+    // Route library diagnostics (tracing events) to stderr in a compact,
+    // CLI-friendly form. Library INFO events are already gated behind the
+    // interpreter's `verbose` flag, so a fixed INFO level here shows warnings
+    // and errors always, progress only when the emitting code opts in.
+    let _ = tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .without_time()
+        .with_target(false)
+        .with_max_level(tracing::Level::INFO)
+        .try_init();
+
     let args: Vec<String> = std::env::args().collect();
     let argv0 = args.first().cloned().unwrap_or_else(|| "foma".to_string());
 

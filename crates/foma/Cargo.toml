@@ -17,6 +17,8 @@ all-features = true
 flate2 = { workspace = true }
 nfst-lexc = { workspace = true }
 nfst-xre = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [[bin]]
 name = "foma"

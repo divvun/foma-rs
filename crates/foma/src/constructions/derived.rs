@@ -1870,8 +1870,8 @@ pub fn fsm_equal_substrings(
 // [spec:foma:def:fomalib.fsm-sequentialize-fn]
 // [spec:foma:sem:fomalib.fsm-sequentialize-fn]
 pub fn fsm_sequentialize(net: Box<Fsm>) -> Box<Fsm> {
-    /* C: unimplemented stub — prints and returns the input unchanged */
-    print!("Implementation pending\n");
+    /* C: unimplemented stub — warns and returns the input unchanged */
+    tracing::warn!("Implementation pending");
     net
 }
 
@@ -1880,8 +1880,8 @@ pub fn fsm_sequentialize(net: Box<Fsm>) -> Box<Fsm> {
 // [spec:foma:def:fomalib.fsm-bimachine-fn]
 // [spec:foma:sem:fomalib.fsm-bimachine-fn]
 pub fn fsm_bimachine(net: Box<Fsm>) -> Box<Fsm> {
-    /* C: unimplemented stub — prints and returns the input unchanged */
-    print!("implementation pending\n");
+    /* C: unimplemented stub — warns and returns the input unchanged */
+    tracing::warn!("implementation pending");
     net
 }
 

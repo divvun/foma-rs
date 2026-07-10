@@ -1198,7 +1198,7 @@ pub fn cmatrix_set_cost(net: &mut Fsm, r#in: Option<&str>, out: Option<&str>, co
         Some(s) => {
             let found = sigma_find(s, &net.sigma);
             if found == -1 {
-                println!("Warning, symbol '{}' not in alphabet", s);
+                tracing::warn!("symbol '{}' not in alphabet", s);
                 return;
             }
             found
@@ -1209,7 +1209,7 @@ pub fn cmatrix_set_cost(net: &mut Fsm, r#in: Option<&str>, out: Option<&str>, co
         Some(s) => {
             let found = sigma_find(s, &net.sigma);
             if found == -1 {
-                println!("Warning, symbol '{}' not in alphabet", s);
+                tracing::warn!("symbol '{}' not in alphabet", s);
                 return;
             }
             found

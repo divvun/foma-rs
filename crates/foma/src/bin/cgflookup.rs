@@ -232,6 +232,15 @@ fn app_print(result: Option<&str>) {
 // [spec:foma:def:cgflookup.main-fn]
 // [spec:foma:sem:cgflookup.main-fn+1]
 fn main() {
+    // Route library diagnostics (tracing events) to stderr in a compact,
+    // CLI-friendly form (LEVEL message, no timestamp/target).
+    let _ = tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .without_time()
+        .with_target(false)
+        .with_max_level(tracing::Level::INFO)
+        .try_init();
+
     let mut sortarcs = 1i32;
     let mut direction = DIR_UP;
     let mut index_arcs = 0i32;

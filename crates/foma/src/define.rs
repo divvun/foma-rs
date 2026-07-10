@@ -189,8 +189,7 @@ pub fn add_defined_function(
             node.regex = Some(regex.to_string());
             if opts.verbose {
                 /* literal C message, including the unbalanced trailing ')' */
-                eprint!("redefined {}@{})\n", name, numargs);
-                /* fflush(stderr) — stderr is unbuffered */
+                tracing::info!("redefined {}@{})", name, numargs);
             }
             return 1;
         }

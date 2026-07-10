@@ -420,7 +420,7 @@ pub fn fsm_read_prolog(filename: &str) -> Option<Box<Fsm>> {
             match $e {
                 Some(v) => v,
                 None => {
-                    print!("File format error in prolog file.\n");
+                    tracing::error!("File format error in prolog file.");
                     return None;
                 }
             }
@@ -445,9 +445,7 @@ pub fn fsm_read_prolog(filename: &str) -> Option<Box<Fsm>> {
             /* Extract network name */
             if has_net == 1 {
                 /* C: perror(...) — appends the errno string, not reproduced */
-                eprint!(
-                    "WARNING: prolog file contains multiple nets. Only returning the first one.\n"
-                );
+                tracing::warn!("prolog file contains multiple nets. Only returning the first one.");
                 break;
             } else {
                 has_net = 1;
@@ -1567,7 +1565,7 @@ pub fn file_to_mem(name: &str) -> Result<Vec<u8>, FomaError> {
     let mut infile = match File::open(name) {
         Ok(f) => f,
         Err(_) => {
-            print!("Error opening file '{}'\n", name);
+            tracing::error!("Error opening file '{}'", name);
             return Err(FomaError::Io(format!("cannot open file '{name}'")));
         }
     };
@@ -1576,14 +1574,14 @@ pub fn file_to_mem(name: &str) -> Result<Vec<u8>, FomaError> {
     /* malloc(numbytes+1) — never NULL in Rust; fread numbytes */
     let mut content = vec![0u8; numbytes];
     if infile.read_exact(&mut content).is_err() {
-        print!("Error reading file '{}'\n", name);
+        tracing::error!("Error reading file '{}'", name);
         return Err(FomaError::Io(format!("cannot read file '{name}'")));
     }
     /* check_BOM runs on the buffer BEFORE the '\0' terminator is written, as in
     C (bytes past the file end are absent, so a short file cannot false-match). */
     if let Some(bom) = check_BOM(&content) {
-        print!(
-            "{} BOM mark is detected in file '{}'.\n",
+        tracing::error!(
+            "{} BOM mark is detected in file '{}'.",
             bom.name.expect("a matched BOM entry has a name"),
             name
         );

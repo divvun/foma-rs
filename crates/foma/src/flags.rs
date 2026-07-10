@@ -62,8 +62,7 @@ pub fn flag_eliminate(opts: &FomaOptions, net: Box<Fsm>, name: Option<&str>) -> 
 
     if net.pathcount == 0 {
         if opts.verbose {
-            eprint!("Skipping flag elimination since there are no paths in network.\n");
-            /* fflush(stderr) — stderr is unbuffered */
+            tracing::warn!("Skipping flag elimination since there are no paths in network.");
         }
         return net;
     }
@@ -82,8 +81,7 @@ pub fn flag_eliminate(opts: &FomaOptions, net: Box<Fsm>, name: Option<&str>) -> 
         }
         if found == 0 {
             if opts.verbose {
-                eprint!("Flag attribute '{}' does not occur in the network.\n", name);
-                /* fflush(stderr) */
+                tracing::warn!("Flag attribute '{}' does not occur in the network.", name);
             }
             return net;
         }

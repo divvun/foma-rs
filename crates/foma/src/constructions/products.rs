@@ -251,8 +251,8 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
         sigma_sort(&mut net2);
         sigma_sort(&mut net1);
         if flags1 != 0 && flags2 != 0 {
-            print!(
-                "***Warning: flag-is-epsilon is ON and both networks contain flags in composition.  This may yield incorrect results.  Set flag-is-epsilon to OFF.\n"
+            tracing::warn!(
+                "flag-is-epsilon is ON and both networks contain flags in composition.  This may yield incorrect results.  Set flag-is-epsilon to OFF."
             );
         }
     }

@@ -49,10 +49,11 @@ fn segfault_eliminate_exits_zero() {
 // error'` — the run must REPORT a syntax error (for `regex ||;`).
 //
 // DEVIATION from run.sh: our parser (nfst-xre) emits the diagnostic
-// "*** Syntax error: …" on stderr (capital S), rather than the lowercase
-// "syntax error" the upstream grep matches. We assert our documented one-line
-// "*** Syntax error" diagnostic (case-insensitively it still contains "syntax
-// error"). The whole -f run still exits 0.
+// "Syntax error: …" (capital S), rather than the lowercase "syntax error" the
+// upstream grep matches. The diagnostic is now a `tracing::error!` event routed
+// to stderr by the CLI subscriber (rendered as "ERROR Syntax error: …"); we
+// assert it case-insensitively contains "syntax error". The whole -f run still
+// exits 0.
 #[test]
 fn error_rendering_reports_syntax_error() {
     let out = run_script("test-error-rendering.foma");
@@ -62,8 +63,8 @@ fn error_rendering_reports_syntax_error() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        combined.contains("*** Syntax error"),
-        "expected a '*** Syntax error' diagnostic, got: {combined:?}"
+        combined.contains("Syntax error"),
+        "expected a 'Syntax error' diagnostic, got: {combined:?}"
     );
     // Matches run.sh's grep 'syntax error' case-insensitively.
     assert!(combined.to_lowercase().contains("syntax error"));

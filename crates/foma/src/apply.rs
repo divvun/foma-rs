@@ -238,7 +238,7 @@ pub(crate) fn apply_stack_pop(h: &mut ApplyHandle) {
                 // C: perror("***Nothing to pop") then dereferences NULL (crash).
                 // DEVIATION from C (NULL deref after "Nothing to pop"; unreachable
                 // in practice — every feature name is pre-registered).
-                eprintln!("***Nothing to pop");
+                tracing::warn!("Nothing to pop");
             }
         }
     }
@@ -1971,8 +1971,8 @@ pub fn apply_check_flag(
         return FAIL;
     }
 
-    eprintln!(
-        "***Don't know what do with flag [{}][{}][{}]",
+    tracing::warn!(
+        "Don't know what do with flag [{}][{}][{}]",
         r#type,
         name,
         value.unwrap_or("")
