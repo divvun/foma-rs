@@ -14,7 +14,6 @@ use crate::types::{EPSILON, Fsm, FsmState, NO, UNK};
 use crate::types::{
     FLAG_CLEAR, FLAG_DISALLOW, FLAG_EQUAL, FLAG_NEGATIVE, FLAG_POSITIVE, FLAG_REQUIRE, FLAG_UNIFY,
 };
-use crate::utf8::utf8skip;
 use smol_str::SmolStr;
 
 /* File-local constants (C #defines; distinct from apply.c's FAIL/SUCCEED) */
@@ -632,29 +631,16 @@ pub fn flag_get_type(string: &str) -> i32 {
 // [spec:foma:def:fomalibconf.flag-get-name-fn]
 // [spec:foma:sem:fomalibconf.flag-get-name-fn]
 pub fn flag_get_name(string: &str) -> Option<SmolStr> {
-    let s = string.as_bytes();
-    let mut start = 0usize;
-    let mut end = 0usize;
-    let len = s.len(); /* strlen(string) */
-
-    /* for (i=0; i < len; i += (utf8skip(string+i) + 1)) */
-    let mut i = 0usize;
-    while i < len {
-        if s[i] == b'.' && start == 0 {
-            start = i + 1;
-            i += utf8skip(&s[i..]) as usize + 1;
-            continue;
+    // A flag diacritic is `@X.name.value@` / `@X.name@`: the name is the run
+    // between the first '.' and the next '.' or '@'. Those delimiters are ASCII,
+    // so they never occur inside a multi-byte char — walk characters directly.
+    let mut start: Option<usize> = None;
+    for (i, c) in string.char_indices() {
+        match c {
+            '.' if start.is_none() => start = Some(i + 1),
+            '.' | '@' if start.is_some() => return Some(string[start.unwrap()..i].into()),
+            _ => {}
         }
-        if (s[i] == b'.' || s[i] == b'@') && start != 0 {
-            end = i;
-            break;
-        }
-        i += utf8skip(&s[i..]) as usize + 1;
-    }
-    if start > 0 && end > 0 {
-        // start/end are byte indices the utf8skip walk landed on codepoint
-        // boundaries, so this slice is the flag name between the delimiters.
-        return Some(string[start..end].into());
     }
     None
 }
@@ -664,33 +650,19 @@ pub fn flag_get_name(string: &str) -> Option<SmolStr> {
 // [spec:foma:def:fomalibconf.flag-get-value-fn]
 // [spec:foma:sem:fomalibconf.flag-get-value-fn]
 pub fn flag_get_value(string: &str) -> Option<SmolStr> {
-    let s = string.as_bytes();
-    let mut first = 0usize;
-    let mut start = 0usize;
-    let mut end = 0usize;
-    let len = s.len(); /* strlen(string) */
-
-    /* for (i=0; i < len; i += (utf8skip(string+i) + 1)) */
-    let mut i = 0usize;
-    while i < len {
-        if s[i] == b'.' && first == 0 {
-            first = i + 1;
-            i += utf8skip(&s[i..]) as usize + 1;
-            continue;
+    // The value is the run between the SECOND '.' and the closing '@'
+    // (`@X.name.value@`); a one-argument flag `@X.name@` has no second '.', so
+    // `start` stays unset and the closing '@' yields nothing. ASCII delimiters,
+    // so walk characters directly.
+    let mut seen_first_dot = false;
+    let mut start: Option<usize> = None;
+    for (i, c) in string.char_indices() {
+        match c {
+            '.' if !seen_first_dot => seen_first_dot = true,
+            '@' if start.is_some() => return Some(string[start.unwrap()..i].into()),
+            '.' if seen_first_dot => start = Some(i + 1),
+            _ => {}
         }
-        if s[i] == b'@' && start != 0 {
-            end = i;
-            break;
-        }
-        if s[i] == b'.' && first != 0 {
-            start = i + 1;
-            i += utf8skip(&s[i..]) as usize + 1;
-            continue;
-        }
-        i += utf8skip(&s[i..]) as usize + 1;
-    }
-    if start > 0 && end > 0 {
-        return Some(string[start..end].into());
     }
     None
 }

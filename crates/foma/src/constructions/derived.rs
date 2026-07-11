@@ -21,12 +21,6 @@ pub fn fsm_escape(symbol: &str) -> Box<Fsm> {
 // [spec:foma:def:fomalib.fsm-letter-machine-fn]
 // [spec:foma:sem:fomalib.fsm-letter-machine-fn+1]
 pub fn fsm_letter_machine(opts: &FomaOptions, net: Box<Fsm>) -> Box<Fsm> {
-    /* C: char tmpin[128], tmpout[128] — uninitialized stack buffers reused
-    across iterations; zero-initialized here (stale bytes persist between
-    iterations as in C) */
-    let mut tmpin = [0u8; 128];
-    let mut tmpout = [0u8; 128];
-
     // DEVIATION from C (discarded minimize return; C reads net->statecount
     // through the original pointer after fsm_minimize and dangles under
     // Brzozowski — bind the returned Box and continue with it)
@@ -50,74 +44,44 @@ pub fn fsm_letter_machine(opts: &FomaOptions, net: Box<Fsm>) -> Box<Fsm> {
         if (innum > IDENTITY && in_full.chars().count() > 1)
             || (outnum > IDENTITY && out_full.chars().count() > 1)
         {
-            let mut inlen = if innum <= IDENTITY {
+            let inlen = if innum <= IDENTITY {
                 1
             } else {
                 in_full.chars().count() as i32
             };
-            let mut outlen = if outnum <= IDENTITY {
+            let outlen = if outnum <= IDENTITY {
                 1
             } else {
                 out_full.chars().count() as i32
             };
-            let steps = if inlen > outlen { inlen } else { outlen };
+            let steps = inlen.max(outlen);
 
-            /* C: char *in / *out advance through the label bytes — byte
-            cursors here */
-            let mut in_bytes: &[u8] = in_full.as_bytes();
-            let mut out_bytes: &[u8] = out_full.as_bytes();
+            /* Split the multi-character label into a chain of single-character
+            arcs, pulling one character per step from each side (C walked the
+            label bytes with utf8skip; a &str yields characters directly). A
+            special side (<= IDENTITY) repeats its whole label at every step; a
+            normal side that runs out of characters pads with epsilon. */
+            let mut in_chars = in_full.chars();
+            let mut out_chars = out_full.chars();
+            let mut inbuf = [0u8; 4];
+            let mut outbuf = [0u8; 4];
 
             target = addstate;
-            let mut i = 0;
-            while i < steps {
-                let currin: String;
-                if innum <= IDENTITY || inlen < 1 {
-                    if inlen < 1 {
-                        currin = "@_EPSILON_SYMBOL_@".to_string();
-                    } else {
-                        /* special label string repeated at every step */
-                        currin = String::from_utf8_lossy(in_bytes).into_owned();
-                    }
+            for i in 0..steps {
+                let currin: &str = if innum <= IDENTITY {
+                    &in_full
+                } else if let Some(c) = in_chars.next() {
+                    c.encode_utf8(&mut inbuf)
                 } else {
-                    /* strncpy(tmpin, in, utf8skip(in)+1);
-                     *(tmpin+utf8skip(in)+1) = '\0' */
-                    let n = (utf8skip(in_bytes) + 1) as usize;
-                    let copy = std::cmp::min(n, in_bytes.len());
-                    tmpin[..copy].copy_from_slice(&in_bytes[..copy]);
-                    for k in copy..n {
-                        tmpin[k] = 0;
-                    }
-                    tmpin[n] = 0;
-                    let end = tmpin.iter().position(|&b| b == 0).unwrap_or(128);
-                    currin = String::from_utf8_lossy(&tmpin[..end]).into_owned();
-                    inlen -= 1;
-                    in_bytes = &in_bytes[n..];
-                }
-                let currout: String;
-                if outnum <= IDENTITY || outlen < 1 {
-                    if outlen < 1 {
-                        currout = "@_EPSILON_SYMBOL_@".to_string();
-                    } else {
-                        currout = String::from_utf8_lossy(out_bytes).into_owned();
-                    }
+                    "@_EPSILON_SYMBOL_@"
+                };
+                let currout: &str = if outnum <= IDENTITY {
+                    &out_full
+                } else if let Some(c) = out_chars.next() {
+                    c.encode_utf8(&mut outbuf)
                 } else {
-                    /* Wave 4 fix: size the output copy by the OUTPUT cursor's
-                    current character (utf8skip(out)+1), mirroring the input
-                    side. The C used utf8skip(in) here (a copy-past-the-char
-                    bug when the input char was shorter than the output char);
-                    utf8skip(out) copies exactly one UTF-8 output character. */
-                    let n = (utf8skip(out_bytes) + 1) as usize;
-                    let copy = std::cmp::min(n, out_bytes.len());
-                    tmpout[..copy].copy_from_slice(&out_bytes[..copy]);
-                    for k in copy..n {
-                        tmpout[k] = 0;
-                    }
-                    tmpout[n] = 0;
-                    let end = tmpout.iter().position(|&b| b == 0).unwrap_or(128);
-                    currout = String::from_utf8_lossy(&tmpout[..end]).into_owned();
-                    out_bytes = &out_bytes[n..];
-                    outlen -= 1;
-                }
+                    "@_EPSILON_SYMBOL_@"
+                };
                 if i == 0 && steps > 1 {
                     target = addstate;
                     addstate += 1;
@@ -131,8 +95,7 @@ pub fn fsm_letter_machine(opts: &FomaOptions, net: Box<Fsm>) -> Box<Fsm> {
                     target = addstate;
                     addstate += 1;
                 }
-                fsm_construct_add_arc(&mut outh, source, target, &currin, &currout);
-                i += 1;
+                fsm_construct_add_arc(&mut outh, source, target, currin, currout);
             }
         } else {
             fsm_construct_add_arc(&mut outh, source, target, &in_full, &out_full);
@@ -156,18 +119,14 @@ pub fn fsm_explode(symbol: &str) -> Box<Fsm> {
     let mut h = fsm_construct_init("");
     fsm_construct_set_initial(&mut h, 0);
 
-    let bytes = symbol.as_bytes();
-    let length = bytes.len() as i32 - 2;
-    let mut i: i32 = 1;
+    /* `symbol` is `{...}`; emit one identity arc per character of the interior
+    (C skipped the two brace bytes and walked the middle with utf8skip). */
+    let interior = &symbol[1..symbol.len() - 1];
     let mut j: i32 = 1;
-    while i <= length {
-        let skip = utf8skip(&bytes[i as usize..]) + 1;
-        /* one whole symbol (utf8skip+1 bytes), clamped to the string's end */
-        let end = std::cmp::min((i + skip) as usize, bytes.len());
-        let tempstring = String::from_utf8_lossy(&bytes[i as usize..end]).into_owned();
-        fsm_construct_add_arc(&mut h, j - 1, j, &tempstring, &tempstring);
-        /* free(tempstring) — dropped */
-        i += skip;
+    let mut buf = [0u8; 4];
+    for ch in interior.chars() {
+        let sym = ch.encode_utf8(&mut buf);
+        fsm_construct_add_arc(&mut h, j - 1, j, sym, sym);
         j += 1;
     }
     fsm_construct_set_final(&mut h, j - 1);

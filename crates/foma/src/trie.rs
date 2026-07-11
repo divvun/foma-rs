@@ -12,7 +12,6 @@ use crate::dynarray::{
 use crate::mem::next_power_of_two;
 use crate::stringhash::{sh_done, sh_find_add_string, sh_init};
 use crate::types::{Fsm, FsmTrieHandle, TrieHash, TrieStates};
-use crate::utf8::utf8skip;
 
 /* C: #define THASH_TABLESIZE 1048573 */
 pub const THASH_TABLESIZE: u32 = 1048573;
@@ -95,23 +94,13 @@ pub fn fsm_trie_done(th: Box<FsmTrieHandle>) -> Box<Fsm> {
 // [spec:foma:def:fomalib.fsm-trie-add-word-fn]
 // [spec:foma:sem:fomalib.fsm-trie-add-word-fn]
 pub fn fsm_trie_add_word(th: &mut FsmTrieHandle, word: &str) {
-    /* C: wcopy = strdup(word) is a scratch buffer holding one UTF-8
-    character at a time; here each character is sliced out of `word`
-    directly (observably equivalent). len = strlen(wcopy). */
-    let len = word.len() as i32;
-    /* C advances the `word` pointer; here a byte offset into it */
-    let mut pos = 0usize;
-    let mut i: i32 = 0;
-    while pos < word.len() && i < len {
-        let skip = utf8skip(&word.as_bytes()[pos..]);
-        /* strncpy(wcopy, word, utf8skip(word)+1); *(wcopy+utf8skip(word)+1) = '\0';
-        for an invalid lead byte utf8skip returns -1, so wcopy becomes ""
-        and word does not advance (the i < len bound terminates the loop) */
-        let end = (pos + (skip + 1) as usize).min(word.len());
-        let wcopy = &word[pos..end];
-        fsm_trie_symbol(th, wcopy, wcopy);
-        pos += (skip + 1) as usize;
-        i += 1;
+    /* Each character of the word becomes one trie symbol (identity: same on
+    both sides). C walked `word` as a byte pointer, using utf8skip to size
+    each character; a &str is already UTF-8, so iterate characters directly. */
+    let mut buf = [0u8; 4];
+    for ch in word.chars() {
+        let sym = ch.encode_utf8(&mut buf);
+        fsm_trie_symbol(th, sym, sym);
     }
     fsm_trie_end_word(th);
 }

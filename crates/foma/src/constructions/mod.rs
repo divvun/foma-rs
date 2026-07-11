@@ -43,7 +43,6 @@ pub(crate) use crate::types::{
     EPSILON, Fsm, FsmState, Fsmcontexts, IDENTITY, M_LOWER, M_UPPER, NO, OP_IGNORE_ALL,
     OP_IGNORE_INTERNAL, PATHCOUNT_CYCLIC, PATHCOUNT_UNKNOWN, Sigma, UNK, UNKNOWN, YES,
 };
-pub(crate) use crate::utf8::utf8skip;
 
 /* C: #define KLEENE_STAR 0 / KLEENE_PLUS 1 / OPTIONALITY 2 and
 #define COMPLEMENT 0 / COMPLETE 1 — file-local constants, no spec ids */
