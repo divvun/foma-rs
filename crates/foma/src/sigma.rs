@@ -316,10 +316,10 @@ pub fn sigma_copy(sigma: &[Sigma]) -> Vec<Sigma> {
 // [spec:foma:sem:sigma.sigma-sort-fn+2]
 // [spec:foma:def:fomalibconf.sigma-sort-fn]
 // [spec:foma:sem:fomalibconf.sigma-sort-fn+2]
-pub fn sigma_sort(net: &mut Fsm) -> i32 {
+pub fn sigma_sort(net: &mut Fsm) {
     let size = sigma_max(&net.sigma);
     if size < 0 {
-        return 1;
+        return;
     }
     /* C mallocs `size` ssort entries and fills the first `max`; collect every
     non-special entry (number > IDENTITY), moving its symbol out for the sort */
@@ -370,7 +370,6 @@ pub fn sigma_sort(net: &mut Fsm) -> i32 {
             i += 1;
         }
     }
-    1
 }
 
 // [spec:foma:def:sigma.sigma-create-fn]
@@ -950,9 +949,9 @@ mod tests {
     // [spec:foma:sem:sigma.sigma-sort-fn+2/test]
     // [spec:foma:sem:fomalibconf.sigma-sort-fn+2/test]
     #[test]
-    fn sigma_sort_empty_sigma_returns_1_without_touching_states() {
+    fn sigma_sort_empty_sigma_is_noop_without_touching_states() {
         let mut net = fsm_create("t");
-        assert_eq!(sigma_sort(&mut net), 1);
+        sigma_sort(&mut net);
         assert!(net.states.is_empty());
     }
 
@@ -966,7 +965,7 @@ mod tests {
         sigma_add_number(&mut net.sigma, "a", 4);
         sigma_add_number(&mut net.sigma, "b", 5);
         net.states = vec![line(0, 3, 4, 0), line(0, 5, 0, 0), sentinel_line()];
-        assert_eq!(sigma_sort(&mut net), 1);
+        sigma_sort(&mut net);
         /* specials keep number/position; k-th non-special node gets the
         k-th smallest symbol and number k+3 */
         assert_eq!(
@@ -993,7 +992,7 @@ mod tests {
         sigma_add_number(&mut net.sigma, "b", 3);
         sigma_add_number(&mut net.sigma, "a", 5);
         net.states = vec![line(0, 4, 3, 0), sentinel_line()];
-        assert_eq!(sigma_sort(&mut net), 1);
+        sigma_sort(&mut net);
         assert_eq!(syms(&net.sigma), vec![pair(3, "a"), pair(4, "b")]);
         /* in=4 is absent from sigma → replacearray[4] == 4 (identity, kept);
         out: b 3→4 */

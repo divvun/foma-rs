@@ -1284,7 +1284,7 @@ fn lexc_number_states(lx: &mut LexcCompiler) {
 
 // [spec:foma:def:lexcread.lexc-eq-paths-fn]
 // [spec:foma:sem:lexcread.lexc-eq-paths-fn]
-fn lexc_eq_paths(lx: &LexcCompiler, mut one: usize, mut two: usize) -> i32 {
+fn lexc_eq_paths(lx: &LexcCompiler, mut one: usize, mut two: usize) -> bool {
     while lx.state_arena[one].lexstate.is_none() && lx.state_arena[two].lexstate.is_none() {
         /* dereferences trans without a NULL check (unwrap → panic on None,
         the nearest safe behavior to C's crash) */
@@ -1297,15 +1297,12 @@ fn lexc_eq_paths(lx: &LexcCompiler, mut one: usize, mut two: usize) -> i32 {
         if lx.trans_arena[ot].r#in != lx.trans_arena[tt].r#in
             || lx.trans_arena[ot].out != lx.trans_arena[tt].out
         {
-            return 0;
+            return false;
         }
         one = lx.trans_arena[ot].target;
         two = lx.trans_arena[tt].target;
     }
-    if lx.state_arena[one].lexstate != lx.state_arena[two].lexstate {
-        return 0;
-    }
-    1
+    lx.state_arena[one].lexstate == lx.state_arena[two].lexstate
 }
 
 /* Local chained bucket cell for lexc_merge_states (lenlist / hashstates).
@@ -1408,7 +1405,7 @@ fn lexc_merge_states(lx: &mut LexcCompiler) {
                             if hstate != state
                                 && lx.state_arena[hstate].mergeable == 1
                                 && lx.state_arena[hstate].distance == lx.state_arena[state].distance
-                                && lexc_eq_paths(lx, hstate, state) == 1
+                                && lexc_eq_paths(lx, hstate, state)
                             {
                                 lx.state_arena[hstate].merge_with = state;
                                 let mut purge = hstate;
@@ -2288,8 +2285,8 @@ mod tests {
         let a = push_chain(&mut lx, 5, 5, dest); // (5:5) -> dest
         let b = push_chain(&mut lx, 5, 5, dest);
         let c = push_chain(&mut lx, 6, 6, dest); // different label
-        assert_eq!(lexc_eq_paths(&lx, a, b), 1);
-        assert_eq!(lexc_eq_paths(&lx, a, c), 0);
+        assert!(lexc_eq_paths(&lx, a, b));
+        assert!(!lexc_eq_paths(&lx, a, c));
     }
 
     // Null trans deref: eq_paths on two non-lexicon states with no transition
