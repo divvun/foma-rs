@@ -83,31 +83,31 @@ pub(crate) fn print_net(net: &mut Fsm, filename: Option<&str>) -> i32 {
         i += 1;
     }
     print_sigma(&net.sigma, &mut out);
-    let _ = write!(out, "Net: {}\n", net.name);
-    let _ = write!(out, "Flags: ");
+    write!(out, "Net: {}\n", net.name).expect("writing net");
+    write!(out, "Flags: ").expect("writing net");
     if net.is_deterministic == YES {
-        let _ = write!(out, "deterministic ");
+        write!(out, "deterministic ").expect("writing net");
     }
     if net.is_pruned == YES {
-        let _ = write!(out, "pruned ");
+        write!(out, "pruned ").expect("writing net");
     }
     if net.is_minimized == YES {
-        let _ = write!(out, "minimized ");
+        write!(out, "minimized ").expect("writing net");
     }
     if net.is_epsilon_free == YES {
-        let _ = write!(out, "epsilon_free ");
+        write!(out, "epsilon_free ").expect("writing net");
     }
     if net.is_loop_free != 0 {
-        let _ = write!(out, "loop_free ");
+        write!(out, "loop_free ").expect("writing net");
     }
     if net.arcs_sorted_in != 0 {
-        let _ = write!(out, "arcs_sorted_in ");
+        write!(out, "arcs_sorted_in ").expect("writing net");
     }
     if net.arcs_sorted_out != 0 {
-        let _ = write!(out, "arcs_sorted_out ");
+        write!(out, "arcs_sorted_out ").expect("writing net");
     }
-    let _ = write!(out, "\n");
-    let _ = write!(out, "Arity: {}\n", net.arity);
+    write!(out, "\n").expect("writing net");
+    write!(out, "Arity: {}\n", net.arity).expect("writing net");
     let mut previous_state: i32 = -1;
     let mut i = 0usize;
     loop {
@@ -122,44 +122,45 @@ pub(crate) fn print_net(net: &mut Fsm, filename: Option<&str>) -> i32 {
         let target = net.states[i].target;
         if state_no != previous_state {
             if start_state != 0 {
-                let _ = write!(out, "S");
+                write!(out, "S").expect("writing net");
             }
             if final_state != 0 {
-                let _ = write!(out, "f");
+                write!(out, "f").expect("writing net");
             }
             if in_ == -1 {
-                let _ = write!(out, "s{}:\t(no arcs).\n", state_no);
+                write!(out, "s{}:\t(no arcs).\n", state_no).expect("writing net");
                 i += 1;
                 continue;
             } else {
-                let _ = write!(out, "s{}:\t", state_no);
+                write!(out, "s{}:\t", state_no).expect("writing net");
             }
         }
         previous_state = state_no;
         if in_ == out_ {
             if in_ == IDENTITY {
-                let _ = write!(out, "@ -> ");
+                write!(out, "@ -> ").expect("writing net");
             } else if in_ == UNKNOWN {
-                let _ = write!(out, "?:? -> ");
+                write!(out, "?:? -> ").expect("writing net");
             } else {
-                let _ = write!(out, "{} -> ", sigptr(&net.sigma, in_));
+                write!(out, "{} -> ", sigptr(&net.sigma, in_)).expect("writing net");
             }
         } else {
-            let _ = write!(
+            write!(
                 out,
                 "<{}:{}> -> ",
                 sigptr(&net.sigma, in_),
                 sigptr(&net.sigma, out_)
-            );
+            )
+            .expect("writing net");
         }
         if finals[target as usize] == 1 {
-            let _ = write!(out, "f");
+            write!(out, "f").expect("writing net");
         }
-        let _ = write!(out, "s{}", target);
+        write!(out, "s{}", target).expect("writing net");
         if net.states[i + 1].state_no == state_no {
-            let _ = write!(out, ", ");
+            write!(out, ", ").expect("writing net");
         } else {
-            let _ = write!(out, ".\n");
+            write!(out, ".\n").expect("writing net");
         }
         i += 1;
     }
@@ -199,7 +200,7 @@ pub(crate) fn print_mem_size(net: &Fsm) {
         size = format!("{:.1} GB. ", (sf / 1073741824.0f32) as f64);
     }
     print!("{}", size);
-    let _ = std::io::stdout().flush();
+    std::io::stdout().flush().expect("flush stdout");
 }
 
 // [spec:foma:def:iface.print-stats-fn]
@@ -238,21 +239,21 @@ pub fn print_stats(net: &Fsm) -> i32 {
 // [spec:foma:sem:iface.print-sigma-fn]
 pub(crate) fn print_sigma<W: std::io::Write + ?Sized>(sigma: &[Sigma], out: &mut W) -> i32 {
     let mut size = 0;
-    let _ = write!(out, "Sigma:");
+    write!(out, "Sigma:").expect("writing sigma");
     for node in sigma {
         if node.number > 2 {
-            let _ = write!(out, " {}", node.symbol);
+            write!(out, " {}", node.symbol).expect("writing sigma");
             size += 1;
         }
         if node.number == IDENTITY {
-            let _ = write!(out, " {}", "@");
+            write!(out, " {}", "@").expect("writing sigma");
         }
         if node.number == UNKNOWN {
-            let _ = write!(out, " {}", "?");
+            write!(out, " {}", "?").expect("writing sigma");
         }
     }
-    let _ = write!(out, "\n");
-    let _ = write!(out, "Size: {}.\n", size);
+    write!(out, "\n").expect("writing sigma");
+    write!(out, "Size: {}.\n", size).expect("writing sigma");
     1
 }
 
@@ -284,12 +285,13 @@ pub(crate) fn print_dot(net: &mut Fsm, filename: Option<&str>) -> i32 {
         },
         None => Output::Stdout(std::io::stdout()),
     };
-    let _ = write!(dotfile, "digraph A {{\nrankdir = LR;\n");
+    write!(dotfile, "digraph A {{\nrankdir = LR;\n").expect("writing dot graph");
     for i in 0..net.statecount {
         if finals[i as usize] != 0 {
-            let _ = write!(dotfile, "node [shape=doublecircle,style=filled] {}\n", i);
+            write!(dotfile, "node [shape=doublecircle,style=filled] {}\n", i)
+                .expect("writing dot graph");
         } else {
-            let _ = write!(dotfile, "node [shape=circle,style=filled] {}\n", i);
+            write!(dotfile, "node [shape=circle,style=filled] {}\n", i).expect("writing dot graph");
         }
     }
     // C: calloc(linecount, sizeof(printed)) allocates sizeof(POINTER) per line
@@ -306,7 +308,7 @@ pub(crate) fn print_dot(net: &mut Fsm, filename: Option<&str>) -> i32 {
             i += 1;
             continue;
         }
-        let _ = write!(dotfile, "{} -> {} [label=\"", state_no_i, target_i);
+        write!(dotfile, "{} -> {} [label=\"", state_no_i, target_i).expect("writing dot graph");
         let mut linelen = 0i32;
         let mut j = i;
         while net.states[j].state_no == state_no_i {
@@ -317,32 +319,38 @@ pub(crate) fn print_dot(net: &mut Fsm, filename: Option<&str>) -> i32 {
                 let out_j = net.states[j].out as i32;
                 if in_j == out_j && out_j != UNKNOWN {
                     let sig = sigptr(&net.sigma, in_j);
-                    let _ = dotfile.write_all(&escape_string(sig.as_bytes(), b'"'));
+                    dotfile
+                        .write_all(&escape_string(sig.as_bytes(), b'"'))
+                        .expect("writing dot graph");
                     linelen += sig.len() as i32;
                 } else {
                     let sig_in = sigptr(&net.sigma, in_j);
                     let sig_out = sigptr(&net.sigma, out_j);
-                    let _ = dotfile.write_all(b"<");
-                    let _ = dotfile.write_all(&escape_string(sig_in.as_bytes(), b'"'));
-                    let _ = dotfile.write_all(b":");
-                    let _ = dotfile.write_all(&escape_string(sig_out.as_bytes(), b'"'));
-                    let _ = dotfile.write_all(b">");
+                    dotfile.write_all(b"<").expect("writing dot graph");
+                    dotfile
+                        .write_all(&escape_string(sig_in.as_bytes(), b'"'))
+                        .expect("writing dot graph");
+                    dotfile.write_all(b":").expect("writing dot graph");
+                    dotfile
+                        .write_all(&escape_string(sig_out.as_bytes(), b'"'))
+                        .expect("writing dot graph");
+                    dotfile.write_all(b">").expect("writing dot graph");
                     linelen += sig_in.len() as i32 + sig_out.len() as i32 + 3;
                 }
                 if linelen > 12 {
-                    let _ = write!(dotfile, "\\n");
+                    write!(dotfile, "\\n").expect("writing dot graph");
                     linelen = 0;
                 } else {
-                    let _ = write!(dotfile, " ");
+                    write!(dotfile, " ").expect("writing dot graph");
                 }
             }
             j += 1;
         }
-        let _ = write!(dotfile, "\"];\n");
+        write!(dotfile, "\"];\n").expect("writing dot graph");
         i += 1;
     }
     // free(finals); free(printed).
-    let _ = write!(dotfile, "}}\n");
+    write!(dotfile, "}}\n").expect("writing dot graph");
     // fclose only when filename != NULL — dropped at scope end.
     1
 }
