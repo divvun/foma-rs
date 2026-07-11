@@ -4,15 +4,17 @@
 use crate::constructions::fsm_count;
 use crate::options::FomaOptions;
 use crate::structures::fsm_destroy;
-use crate::types::{DefinedFunctions, DefinedNetworks, FSM_NAME_LEN, Fsm};
+use crate::types::{DefinedFunctions, DefinedNetworks, Fsm};
 
 // C: the non-static `g_defines` / `g_defines_f` registry globals defined at
 // the top of define.c (extern'd by iface.c/foma.c) live on `Session` now
 // (`session.defines` / `session.defines_f`, init'd by `Session::new`).
 
 /// Outcome of adding a definition (`add_defined` / `add_defined_function`).
-/// Replaces C's `-1`/`0`/`1` status ints: the verbose CLI printer switches on
-/// the variant instead of a magic number.
+/// Replaces C's `0`/`1` status ints: the verbose CLI printer switches on the
+/// variant instead of a magic number. (C also had a `-1` "name too long" code
+/// from the fixed 40-byte name buffer; names are heap Strings now, so that
+/// case no longer exists.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Defined {
     /// A fresh definition was stored (C returned 0), or the no-op when the
@@ -21,9 +23,6 @@ pub enum Defined {
     /// An existing definition of the same name (+ arity, for functions) was
     /// replaced in place (C returned 1).
     Redefined,
-    /// The name exceeded `FSM_NAME_LEN` and nothing was stored (C returned -1).
-    /// Only `add_defined` produces this — functions have no length gate.
-    NameTooLong,
 }
 
 /// Outcome of removing a definition (`remove_defined`). Replaces C's `0`/`1`
@@ -251,9 +250,6 @@ pub fn add_defined(def: &mut DefinedNetworks, net: Option<Box<Fsm>>, string: &st
         None => return Defined::New,
         Some(net) => net,
     };
-    if string.len() > FSM_NAME_LEN {
-        return Defined::NameTooLong;
-    }
 
     fsm_count(&mut net);
     let mut d = Some(&mut *def);
@@ -367,20 +363,13 @@ mod tests {
         assert_eq!(add_defined(&mut def, None, "q"), Defined::New);
         assert!(find_defined(&mut def, "q").is_none());
 
-        /* Name longer than FSM_NAME_LEN (40) is rejected without storing. */
-        let long = "x".repeat(41);
+        /* Names are heap Strings with no length cap: a long name is stored as-is. */
+        let long = "x".repeat(300);
         assert_eq!(
             add_defined(&mut def, Some(fsm_symbol("Z")), &long),
-            Defined::NameTooLong
-        );
-        assert!(find_defined(&mut def, &long).is_none());
-        /* Exactly 40 bytes is accepted. */
-        let ok40 = "y".repeat(40);
-        assert_eq!(
-            add_defined(&mut def, Some(fsm_symbol("Z")), &ok40),
             Defined::New
         );
-        assert!(find_defined(&mut def, &ok40).is_some());
+        assert!(find_defined(&mut def, &long).is_some());
     }
 
     // [spec:foma:sem:define.remove-defined-fn/test]

@@ -70,9 +70,6 @@ pub const M_LOWER: i32 = 2;
 pub const APPLY_INDEX_INPUT: i32 = 1;
 pub const APPLY_INDEX_OUTPUT: i32 = 2;
 
-/// C: `#define FSM_NAME_LEN 40` — size of `struct fsm`'s `name` array.
-pub const FSM_NAME_LEN: usize = 40;
-
 /* ------------------------------------------------------------------ */
 /* Constants from foma.h                                               */
 /* ------------------------------------------------------------------ */
@@ -158,8 +155,8 @@ pub struct DefinedQuantifiers {
 // [spec:foma:def:fomalib.fsm]
 #[derive(Debug, Clone)]
 pub struct Fsm {
-    /// C: `char name[FSM_NAME_LEN]` — capped at 40 bytes; writers reproduce
-    /// the "no NUL when length >= 40" quirk as truncation to 40 bytes.
+    /// C: `char name[FSM_NAME_LEN]` — a fixed 40-byte struct buffer. Here it is
+    /// an unbounded heap `String`: the 40-byte cap (and its truncation) is gone.
     pub name: String,
     pub arity: i32,
     pub arccount: i32,

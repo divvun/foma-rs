@@ -22,8 +22,8 @@ use crate::mem::next_power_of_two;
 use crate::sigma::{sigma_max, sigma_sort, sigma_to_list};
 use crate::structures::{fsm_create, fsm_destroy, fsm_empty_set};
 use crate::types::{
-    EPSILON, FSM_NAME_LEN, Fsm, FsmConstructHandle, FsmReadHandle, FsmSigmaHash, FsmSigmaList,
-    FsmState, FsmStateList, FsmTransList, IDENTITY, PATHCOUNT_UNKNOWN, Sigma, UNK, UNKNOWN,
+    EPSILON, Fsm, FsmConstructHandle, FsmReadHandle, FsmSigmaHash, FsmSigmaList, FsmState,
+    FsmStateList, FsmTransList, IDENTITY, PATHCOUNT_UNKNOWN, Sigma, UNK, UNKNOWN,
 };
 
 /* C: #define INITIAL_SIZE 16384 */
@@ -773,18 +773,9 @@ pub fn fsm_construct_done(handle: Box<FsmConstructHandle>) -> Box<Fsm> {
 
     net.sigma = fsm_construct_convert_sigma(&handle);
     if let Some(name) = handle.name.take() {
-        /* strncpy(net->name, handle->name, 40): at most 40 bytes are copied.
-        The C cut at exactly 40 bytes, which can split a UTF-8 codepoint; keep
-        the byte cap but round down to a character boundary. */
-        if name.len() > FSM_NAME_LEN {
-            let mut end = FSM_NAME_LEN;
-            while !name.is_char_boundary(end) {
-                end -= 1;
-            }
-            net.name = name[..end].to_string();
-        } else {
-            net.name = name;
-        }
+        /* C: strncpy(net->name, handle->name, 40) — the 40-byte cap was the
+        struct name-buffer size, gone now that names are heap Strings. */
+        net.name = name;
         /* free(handle->name) — dropped with the take() above */
     } else {
         net.name = format!("{:X}", lcg.rand());
@@ -1701,7 +1692,7 @@ mod tests {
     // [spec:foma:sem:dynarray.fsm-construct-done-fn+1/test]
     // [spec:foma:sem:fomalib.fsm-construct-done-fn+1/test]
     #[test]
-    fn fsm_construct_done_name_truncated_at_40() {
+    fn fsm_construct_done_keeps_full_length_name() {
         let build = |name: &str| {
             let mut h = fsm_construct_init(name);
             fsm_construct_set_initial(&mut h, 0);
@@ -1709,14 +1700,14 @@ mod tests {
             fsm_construct_add_arc(&mut h, 0, 1, "a", "a");
             fsm_construct_done(h)
         };
-        // ASCII: exactly 40 bytes.
+        // Names are heap Strings now — the old 40-byte struct cap is gone, so
+        // the name is kept verbatim however long it is.
         let net = build(&"a".repeat(50));
-        assert_eq!(net.name, "a".repeat(FSM_NAME_LEN));
-        // Non-ASCII crossing the 40-byte cap mid-codepoint (é = 2 bytes at 39..41):
-        // round down to the char boundary (39) instead of splitting it.
+        assert_eq!(net.name, "a".repeat(50));
+        // Multi-byte names survive intact (no mid-codepoint truncation).
         let net = build(&format!("{}é", "a".repeat(39)));
-        assert_eq!(net.name, "a".repeat(39));
-        assert_eq!(net.name.len(), 39);
+        assert_eq!(net.name, format!("{}é", "a".repeat(39)));
+        assert_eq!(net.name.chars().count(), 40);
     }
 
     /* ---- reading family --------------------------------------------- */

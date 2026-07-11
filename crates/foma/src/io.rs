@@ -37,8 +37,7 @@ use crate::trie::{
     fsm_trie_add_word, fsm_trie_done, fsm_trie_end_word, fsm_trie_init, fsm_trie_symbol,
 };
 use crate::types::{
-    DefinedNetworks, FSM_NAME_LEN, Fsm, FsmConstructHandle, FsmReadBinaryHandle, FsmState,
-    IDENTITY, UNKNOWN,
+    DefinedNetworks, Fsm, FsmConstructHandle, FsmReadBinaryHandle, FsmState, IDENTITY, UNKNOWN,
 };
 
 /* C: #define READ_BUF_SIZE 4096 (the io_gets/io_net_read line buffer size).
@@ -138,20 +137,6 @@ fn atoll(s: &str) -> i64 {
 /* C `atoi`: like atoll truncated to int. */
 fn atoi(s: &str) -> i32 {
     atoll(s) as i32
-}
-
-/* strncpy(dst, src, FSM_NAME_LEN): at most 40 bytes are copied. The C cut at
-exactly 40 bytes, which can split a UTF-8 codepoint; keep the byte cap but round
-down to the nearest character boundary so the name stays valid UTF-8. */
-fn truncate_name(name: &str) -> String {
-    if name.len() <= FSM_NAME_LEN {
-        return name.to_string();
-    }
-    let mut end = FSM_NAME_LEN;
-    while !name.is_char_boundary(end) {
-        end -= 1;
-    }
-    name[..end].to_string()
 }
 
 /* strlen from a byte index into a NUL-terminated buffer image. */
@@ -930,8 +915,9 @@ pub fn save_defined(def: &mut DefinedNetworks, filename: &str) -> Result<(), Fom
             d = node.next.as_deref_mut();
             continue;
         };
-        /* strncpy(d->net->name, d->name, FSM_NAME_LEN) */
-        net.name = truncate_name(&name);
+        /* C: strncpy(d->net->name, d->name, FSM_NAME_LEN) — the 40-byte cap was
+        a struct-buffer size, gone now that names are heap Strings. */
+        net.name = name;
         foma_net_print(net, &mut outfile)?;
         d = node.next.as_deref_mut();
     }
@@ -1085,7 +1071,7 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Result<Option<(Box<Fsm>, String)>,
         } else {
             String::new()
         };
-        net.name = truncate_name(&name);
+        net.name = name.clone();
         net_name = name;
     }
     io_gets(iobh, &mut buf);

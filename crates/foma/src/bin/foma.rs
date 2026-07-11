@@ -28,8 +28,8 @@ use foma::session::Session;
 use foma::structures::fsm_copy;
 use foma::topsort::fsm_topsort;
 use foma::types::{
-    AP_D, AP_M, AP_U, BUILD_VERSION, FSM_NAME_LEN, MAJOR_VERSION, MINOR_VERSION, PROMPT_A,
-    PROMPT_MAIN, STATUS_VERSION,
+    AP_D, AP_M, AP_U, BUILD_VERSION, MAJOR_VERSION, MINOR_VERSION, PROMPT_A, PROMPT_MAIN,
+    STATUS_VERSION,
 };
 
 /* interface.l: #define RE 0 (regex) / #define DE 1 (define) */
@@ -710,20 +710,13 @@ fn compile_regex(session: &mut Session, pmode: i32, defname: &str, body: &str) {
             } else {
                 let olddef = add_defined(&mut session.defines, Some(tempnet), defname);
                 if verbose {
-                    if olddef == Defined::NameTooLong {
-                        println!(
-                            "Network name '{}' should consist of at most {} characters.",
-                            defname, FSM_NAME_LEN
-                        );
+                    if olddef == Defined::Redefined {
+                        print!("redefined {}: ", defname);
                     } else {
-                        if olddef == Defined::Redefined {
-                            print!("redefined {}: ", defname);
-                        } else {
-                            print!("defined {}: ", defname);
-                        }
-                        if let Some(n) = find_defined(&mut session.defines, defname) {
-                            print_stats(n);
-                        }
+                        print!("defined {}: ", defname);
+                    }
+                    if let Some(n) = find_defined(&mut session.defines, defname) {
+                        print_stats(n);
                     }
                 }
             }
