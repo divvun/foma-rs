@@ -129,7 +129,7 @@ mod tests {
     fn sigma_syms(net: &Fsm) -> Vec<(i32, String)> {
         net.sigma
             .iter()
-            .map(|node| (node.number, node.symbol.clone()))
+            .map(|node| (node.number, node.symbol.to_string()))
             .collect()
     }
 

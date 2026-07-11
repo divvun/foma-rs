@@ -937,7 +937,10 @@ fn read_text_and_spaced_text() {
 
     let mut session = Session::new();
     assert!(!iface_read_text(&mut session, "/no/such/foma/text"));
-    assert!(!iface_read_spaced_text(&mut session, "/no/such/foma/spaced"));
+    assert!(!iface_read_spaced_text(
+        &mut session,
+        "/no/such/foma/spaced"
+    ));
     assert_eq!(session.stack_size(), 0);
     assert!(iface_read_text(&mut session, rt));
     assert_eq!(session.stack_size(), 1);
@@ -1592,23 +1595,23 @@ fn sigptr_maps_reserved_and_special_symbols() {
     let sig = vec![
         Sigma {
             number: 3,
-            symbol: "0".to_string(),
+            symbol: "0".into(),
         },
         Sigma {
             number: 4,
-            symbol: "?".to_string(),
+            symbol: "?".into(),
         },
         Sigma {
             number: 5,
-            symbol: "\n".to_string(),
+            symbol: "\n".into(),
         },
         Sigma {
             number: 6,
-            symbol: "\r".to_string(),
+            symbol: "\r".into(),
         },
         Sigma {
             number: 7,
-            symbol: "hello".to_string(),
+            symbol: "hello".into(),
         },
     ];
     assert_eq!(sigptr(&sig, EPSILON), "0");

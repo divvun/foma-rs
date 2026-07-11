@@ -23,15 +23,3 @@
 > Edge cases (wrapping unsigned arithmetic): v = 0 returns 0 (0-1 smears to 0xFFFFFFFF,
 > +1 wraps to 0); v = 1 returns 1; any v > 2^31 also wraps to 0. Pure function.
 
-> [spec:foma:def:mem.xxstrndup-fn]
-> char *xxstrndup(const char *s, size_t n)
-
-> [spec:foma:sem:mem.xxstrndup-fn]
-> Portable strndup replacement: copies at most `n` bytes of NUL-terminated string `s`
-> into a fresh allocation. Effective length `len = min(n, strlen(s))` (computed in C by
-> scanning: `p = s; while (*p++ && n--);` then `len = p - s - 1` — never reads more than
-> `n + 1` bytes of `s`). Allocates `len + 1` bytes with malloc; if malloc returns NULL,
-> returns NULL. Otherwise memcpy's `len` bytes from `s`, writes a NUL terminator at
-> index `len`, and returns the buffer. Caller owns and must free the result. `s` is not
-> modified. n = 0 or an empty `s` yields an allocated empty string "".
-

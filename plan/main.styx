@@ -1159,6 +1159,20 @@ children (
                     }
                 )
             }
+
+            {
+                id w9-smolstr
+                title "Tier 8: owned symbol/name/value String fields → smol_str::SmolStr (small-string-optimized, cheap clone, immutable), matching nfst's SmolStr migration. Sigma.symbol, Fsm.name, defined-net/function names, mergesigma symbol, apply/MED handle symbol/name/flag/value fields, iface option strings → SmolStr / Option<SmolStr>. The 4 mutable accumulator buffers (Apply/MED instring/outstring, built via push_str/truncate/clear) STAY String — SmolStr is immutable; results convert to SmolStr at return points. nfst boundary (EntrySpec String/Pair) converts via .into(), forward-compatible with nfst's own SmolStr landing. Public API shift → hfst-backend catch-up item."
+                priority 8
+                log (
+                    {
+                        at 2026-07-11T11:58:09.728756Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan_start)"
+                    }
+                )
+            }
         )
     }
 )

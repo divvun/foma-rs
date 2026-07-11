@@ -1,6 +1,7 @@
 //! Wave-4 split of constructions.c (see mod.rs). Cross-module and
 //! external names come via `use super::*` (re-exported by mod.rs).
 use super::*;
+use smol_str::SmolStr;
 
 // [spec:foma:def:constructions.fsm-escape-fn]
 // [spec:foma:sem:constructions.fsm-escape-fn]
@@ -161,8 +162,7 @@ pub fn fsm_explode(symbol: &str) -> Box<Fsm> {
     let mut j: i32 = 1;
     while i <= length {
         let skip = utf8skip(&bytes[i as usize..]) + 1;
-        /* xxstrndup(symbol+i, skip) — stops at the string's end like
-        strndup stops at NUL */
+        /* one whole symbol (utf8skip+1 bytes), clamped to the string's end */
         let end = std::cmp::min((i + skip) as usize, bytes.len());
         let tempstring = String::from_utf8_lossy(&bytes[i as usize..end]).into_owned();
         fsm_construct_add_arc(&mut h, j - 1, j, &tempstring, &tempstring);
@@ -245,7 +245,7 @@ pub fn fsm_symbol(symbol: &str) -> Box<Fsm> {
 // [spec:foma:sem:constructions.fsm-network-to-char-fn]
 // [spec:foma:def:fomalib.fsm-network-to-char-fn]
 // [spec:foma:sem:fomalib.fsm-network-to-char-fn]
-pub fn fsm_network_to_char(net: &Fsm) -> Option<String> {
+pub fn fsm_network_to_char(net: &Fsm) -> Option<SmolStr> {
     /* an empty alphabet has no last symbol; otherwise strdup(last->symbol) */
     net.sigma.last().map(|s| s.symbol.clone())
 }

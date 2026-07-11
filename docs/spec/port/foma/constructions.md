@@ -564,7 +564,7 @@
 > excluding the first and last byte of the string (assumed to be enclosing
 > delimiters, e.g. the braces of {abc}): the payload is symbol[1..strlen-2].
 > Iterates over the payload one UTF-8 character at a time (each character is
-> utf8skip+1 bytes, duplicated with xxstrndup and freed after use); the k-th
+> utf8skip+1 bytes, copied out as one symbol and freed after use); the k-th
 > character becomes an arc from state k-1 to state k labeled c:c, added by name
 > via the construct API (each distinct character enters the sigma). State 0 is
 > initial; the state after the last character is final. A two-byte input (empty

@@ -103,7 +103,7 @@
 > Extracts the attribute field from a flag-symbol string: iterates over the string advancing
 > utf8skip(s+i)+1 bytes per step (UTF-8 code points); start = index just after the FIRST '.'
 > encountered; end = index of the next '.' or '@' found after start is set. If both were found
-> (start > 0 and end > 0), returns xxstrndup(string+start, end-start) — a fresh allocation of the
+> (start > 0 and end > 0), returns a copy of the substring between the delimiters (string[start..end]) — a fresh allocation of the
 > bytes in between; otherwise NULL. E.g. "@U.FEAT.VAL@" yields "FEAT", "@R.A@" yields "A".
 
 > [spec:foma:def:flags.flag-get-type-fn]
@@ -121,7 +121,7 @@
 > Extracts the value field, iterating UTF-8 code-point-wise like flag_get_name. first is set to
 > the index after the FIRST '.'; each subsequent '.' (while first is set) updates start to the
 > index after it — so start ends up after the LAST '.' in the string; the first '@' seen while
-> start != 0 sets end and stops the scan. Returns xxstrndup(string+start, end-start) when both
+> start != 0 sets end and stops the scan. Returns a copy of the substring (string[start..end]) when both
 > start and end were set, else NULL — valueless flags ("@R.A@", "@C.X@", "@D.F@") yield NULL.
 > "@U.FEAT.VAL@" yields "VAL".
 

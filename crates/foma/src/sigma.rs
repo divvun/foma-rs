@@ -6,6 +6,7 @@
 //! Read-only walks take `&[Sigma]`; mutators take `&mut Vec<Sigma>`.
 
 use crate::types::{EPSILON, Fsm, FsmSigmaList, IDENTITY, Sigma, UNKNOWN};
+use smol_str::SmolStr;
 
 // [spec:foma:def:sigma.sigma-remove-fn]
 // [spec:foma:sem:sigma.sigma-remove-fn+1]
@@ -62,7 +63,7 @@ pub fn sigma_add_special(symbol: i32, sigma: &mut Vec<Sigma>) -> i32 {
         pos,
         Sigma {
             number: symbol,
-            symbol: str,
+            symbol: str.into(),
         },
     );
     symbol
@@ -102,7 +103,7 @@ pub fn sigma_add(symbol: &str, sigma: &mut Vec<Sigma>) -> i32 {
         };
         sigma.push(Sigma {
             number,
-            symbol: symbol.to_string(),
+            symbol: symbol.into(),
         });
         number
     } else {
@@ -113,7 +114,7 @@ pub fn sigma_add(symbol: &str, sigma: &mut Vec<Sigma>) -> i32 {
             pos,
             Sigma {
                 number: assert,
-                symbol: symbol.to_string(),
+                symbol: symbol.into(),
             },
         );
         assert
@@ -230,7 +231,7 @@ pub fn sigma_add_number(sigma: &mut Vec<Sigma>, symbol: &str, number: i32) {
     /* append with the caller's explicit (possibly out-of-order) number */
     sigma.push(Sigma {
         number,
-        symbol: symbol.to_string(),
+        symbol: symbol.into(),
     });
 }
 
@@ -266,7 +267,7 @@ pub fn sigma_substitute(symbol: &str, sub: &str, sigma: &mut [Sigma]) -> Option<
     for s in sigma.iter_mut() {
         if s.symbol == symbol {
             /* free(sigma->symbol); sigma->symbol = strdup(sub) */
-            s.symbol = sub.to_string();
+            s.symbol = sub.into();
             return Some(s.number);
         }
     }
@@ -288,7 +289,7 @@ here the String is moved through the sort scratch array and moved back
 (same permutation, observably equivalent) */
 #[derive(Debug, Clone)]
 pub struct Ssort {
-    pub symbol: String,
+    pub symbol: SmolStr,
     pub number: i32,
 }
 
@@ -390,7 +391,10 @@ mod tests {
 
     /// Snapshot the alphabet as (number, symbol) pairs in Vec order.
     fn syms(sigma: &[Sigma]) -> Vec<(i32, String)> {
-        sigma.iter().map(|s| (s.number, s.symbol.clone())).collect()
+        sigma
+            .iter()
+            .map(|s| (s.number, s.symbol.to_string()))
+            .collect()
     }
 
     fn pair(number: i32, symbol: &str) -> (i32, String) {
@@ -906,7 +910,7 @@ mod tests {
         let mut copy = sigma_copy(&src);
         assert_eq!(syms(&copy), syms(&src));
         /* deep: mutating the copy leaves the source intact */
-        copy[1].symbol = "zzz".to_string();
+        copy[1].symbol = "zzz".into();
         assert_eq!(
             syms(&src),
             vec![pair(0, "@_EPSILON_SYMBOL_@"), pair(3, "a"), pair(4, "b")]
@@ -920,24 +924,24 @@ mod tests {
     fn ssortcmp_orders_bytewise_on_symbol_ignoring_number() {
         use core::cmp::Ordering;
         let a = Ssort {
-            symbol: "a".to_string(),
+            symbol: "a".into(),
             number: 99,
         };
         let b = Ssort {
-            symbol: "b".to_string(),
+            symbol: "b".into(),
             number: 1,
         };
         assert_eq!(ssortcmp(&a, &b), Ordering::Less);
         assert_eq!(ssortcmp(&b, &a), Ordering::Greater);
         /* equal strings → Equal even with different numbers */
         let a2 = Ssort {
-            symbol: "a".to_string(),
+            symbol: "a".into(),
             number: 5,
         };
         assert_eq!(ssortcmp(&a, &a2), Ordering::Equal);
         /* byte order, not case-insensitive: 'B' (0x42) < 'a' (0x61) */
         let upper = Ssort {
-            symbol: "B".to_string(),
+            symbol: "B".into(),
             number: 0,
         };
         assert_eq!(ssortcmp(&upper, &a), Ordering::Less);

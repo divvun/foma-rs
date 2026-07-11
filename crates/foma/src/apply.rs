@@ -43,6 +43,7 @@ use crate::types::{
     Searchstack, SigmaTrie, SigmaTrieArrays, SigmatchArray, Sigs, UNKNOWN, UP, UPPER,
 };
 use crate::utf8::{utf8iscombining, utf8skip};
+use smol_str::SmolStr;
 
 /* ------------------------------------------------------------------ */
 /* Small helpers reproducing the C pointer/bit macros                 */
@@ -124,7 +125,7 @@ pub fn apply_set_show_flags(h: &mut ApplyHandle, value: i32) {
 // [spec:foma:sem:fomalib.apply-set-print-space-fn]
 pub fn apply_set_print_space(h: &mut ApplyHandle, value: i32) {
     h.print_space = value;
-    h.space_symbol = Some(" ".to_string()); // C: strdup(" ")
+    h.space_symbol = Some(" ".into()); // C: strdup(" ")
 }
 
 // [spec:foma:def:apply.apply-set-separator-fn]
@@ -132,7 +133,7 @@ pub fn apply_set_print_space(h: &mut ApplyHandle, value: i32) {
 // [spec:foma:def:fomalib.apply-set-separator-fn]
 // [spec:foma:sem:fomalib.apply-set-separator-fn]
 pub fn apply_set_separator(h: &mut ApplyHandle, symbol: &str) {
-    h.separator = Some(symbol.to_string());
+    h.separator = Some(symbol.into());
 }
 
 // [spec:foma:def:apply.apply-set-epsilon-fn]
@@ -141,7 +142,7 @@ pub fn apply_set_separator(h: &mut ApplyHandle, symbol: &str) {
 // [spec:foma:sem:fomalib.apply-set-epsilon-fn]
 pub fn apply_set_epsilon(h: &mut ApplyHandle, symbol: &str) {
     // free(h->epsilon_symbol); strdup(symbol)
-    h.epsilon_symbol = Some(symbol.to_string());
+    h.epsilon_symbol = Some(symbol.into());
     let len = symbol.len() as i32;
     h.sigs[EPSILON as usize].symbol = h.epsilon_symbol.clone();
     h.sigs[EPSILON as usize].length = len;
@@ -152,7 +153,7 @@ pub fn apply_set_epsilon(h: &mut ApplyHandle, symbol: &str) {
 // [spec:foma:def:fomalib.apply-set-space-symbol-fn]
 // [spec:foma:sem:fomalib.apply-set-space-symbol-fn]
 pub fn apply_set_space_symbol(h: &mut ApplyHandle, space: &str) {
-    h.space_symbol = Some(space.to_string());
+    h.space_symbol = Some(space.into());
     h.print_space = 1;
 }
 
@@ -235,8 +236,8 @@ pub(crate) fn apply_stack_pop(h: &mut ApplyHandle) {
 pub(crate) fn apply_stack_push(
     h: &mut ApplyHandle,
     vmark: i32,
-    sflagname: Option<String>,
-    sflagvalue: Option<String>,
+    sflagname: Option<SmolStr>,
+    sflagvalue: Option<SmolStr>,
     sflagneg: i32,
 ) {
     if h.apply_stack_ptr == h.apply_stack_top {
@@ -518,8 +519,8 @@ pub fn apply_init(net: &Fsm) -> Box<ApplyHandle> {
     h.show_flags = 0;
     h.print_space = 0;
     h.print_pairs = 0;
-    h.separator = Some(":".to_string());
-    h.epsilon_symbol = Some("0".to_string());
+    h.separator = Some(":".into());
+    h.epsilon_symbol = Some("0".into());
     // C: h->last_net = net (borrowed). DEVIATION from C (owns a clone; the
     // handle never mutates it, so observably equivalent for application).
     h.last_net = Some(Box::new(net.clone()));
@@ -927,8 +928,8 @@ pub fn apply_binarysearch(h: &mut ApplyHandle) -> bool {
 // [spec:foma:def:apply.apply-follow-next-arc-fn]
 // [spec:foma:sem:apply.apply-follow-next-arc-fn]
 pub fn apply_follow_next_arc(h: &mut ApplyHandle) -> bool {
-    let fname: Option<String>;
-    let fvalue: Option<String>;
+    let fname: Option<SmolStr>;
+    let fvalue: Option<SmolStr>;
     let mut eatupi: i32;
     let eatupo: i32;
     let mut symin: i32;
@@ -1654,7 +1655,7 @@ pub fn apply_create_sigarray(h: &mut ApplyHandle, net: &Fsm) {
     }));
 
     // Snapshot sigma (number, symbol) so we can mutate h while iterating.
-    let sig_entries: Vec<(i32, String)> = h
+    let sig_entries: Vec<(i32, SmolStr)> = h
         .gsigma
         .iter()
         .map(|s| (s.number, s.symbol.clone()))
@@ -1665,7 +1666,7 @@ pub fn apply_create_sigarray(h: &mut ApplyHandle, net: &Fsm) {
             h.has_flags = 1;
             apply_add_flag(h, flag_get_name(symbol));
         }
-        h.sigs[*number as usize].symbol = Some(symbol.clone());
+        h.sigs[*number as usize].symbol = Some(symbol.clone().into());
         h.sigs[*number as usize].length = symbol.len() as i32;
         /* Add sigma entry to trie */
         if *number > IDENTITY {
@@ -1678,9 +1679,9 @@ pub fn apply_create_sigarray(h: &mut ApplyHandle, net: &Fsm) {
         let epslen = eps.as_deref().unwrap_or("").len() as i32;
         h.sigs[EPSILON as usize].symbol = eps;
         h.sigs[EPSILON as usize].length = epslen;
-        h.sigs[UNKNOWN as usize].symbol = Some("?".to_string());
+        h.sigs[UNKNOWN as usize].symbol = Some("?".into());
         h.sigs[UNKNOWN as usize].length = 1;
-        h.sigs[IDENTITY as usize].symbol = Some("@".to_string());
+        h.sigs[IDENTITY as usize].symbol = Some("@".into());
         h.sigs[IDENTITY as usize].length = 1;
     }
     if h.has_flags != 0 {
@@ -1692,7 +1693,7 @@ pub fn apply_create_sigarray(h: &mut ApplyHandle, net: &Fsm) {
             };
             (maxsigma + 1) as usize
         ];
-        let entries2: Vec<(i32, String)> = h
+        let entries2: Vec<(i32, SmolStr)> = h
             .gsigma
             .iter()
             .map(|s| (s.number, s.symbol.clone()))
@@ -1787,7 +1788,7 @@ pub fn apply_create_sigmatch(h: &mut ApplyHandle) {
 
 // [spec:foma:def:apply.apply-add-flag-fn]
 // [spec:foma:sem:apply.apply-add-flag-fn]
-pub fn apply_add_flag(h: &mut ApplyHandle, name: Option<String>) {
+pub fn apply_add_flag(h: &mut ApplyHandle, name: Option<SmolStr>) {
     // Register the feature once; a second add for the same name is a no-op
     // (the C list dedups by walking to the tail). A malformed flag with no
     // name (flag_get_name → None) is keyed by "" and never looked up.
@@ -1824,12 +1825,12 @@ pub fn apply_check_flag(
     if r#type == FLAG_UNIFY {
         let flist = h.flag_state.get_mut(name).expect("flag not registered");
         if flist.value.is_none() {
-            flist.value = value.map(|s| s.to_string());
+            flist.value = value.map(SmolStr::from);
             return SUCCEED;
         } else if value == flist.value.as_deref() && flist.neg == 0 {
             return SUCCEED;
         } else if value != flist.value.as_deref() && flist.neg == 1 {
-            flist.value = value.map(|s| s.to_string());
+            flist.value = value.map(SmolStr::from);
             flist.neg = 0;
             return SUCCEED;
         }
@@ -1865,14 +1866,14 @@ pub fn apply_check_flag(
 
     if r#type == FLAG_NEGATIVE {
         let flist = h.flag_state.get_mut(name).expect("flag not registered");
-        flist.value = value.map(|s| s.to_string());
+        flist.value = value.map(SmolStr::from);
         flist.neg = 1;
         return SUCCEED;
     }
 
     if r#type == FLAG_POSITIVE {
         let flist = h.flag_state.get_mut(name).expect("flag not registered");
-        flist.value = value.map(|s| s.to_string());
+        flist.value = value.map(SmolStr::from);
         flist.neg = 0;
         return SUCCEED;
     }
@@ -2509,10 +2510,10 @@ mod tests {
             |h: &ApplyHandle, name: &str| -> usize { h.flag_state.contains_key(name) as usize };
         // "F" already registered by create_sigarray; adding again is a no-op.
         assert_eq!(count(&h, "F"), 1);
-        apply_add_flag(&mut h, Some("F".to_string()));
+        apply_add_flag(&mut h, Some("F".into()));
         assert_eq!(count(&h, "F"), 1);
         // a fresh feature is appended.
-        apply_add_flag(&mut h, Some("G".to_string()));
+        apply_add_flag(&mut h, Some("G".into()));
         assert_eq!(count(&h, "G"), 1);
     }
 

@@ -43,7 +43,7 @@ pub fn iface_name_net(session: &mut Session, name: &str) {
             // [spec:foma:sem:iface.iface-name-net-fn+1] store the name in full. C
             // used a fixed char[40] field (strncpy without a NUL terminator for
             // names >= 40 bytes), truncating longer names.
-            f.name = name.to_string();
+            f.name = name.into();
         });
         iface_print_name(session);
     }

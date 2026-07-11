@@ -210,7 +210,7 @@ pub fn add_defined_function(
     while let Some(node) = d {
         if node.name.as_deref() == Some(name) && node.numargs == numargs {
             /* free(d->regex); d->regex = strdup(regex) */
-            node.regex = Some(regex.to_string());
+            node.regex = Some(regex.into());
             if opts.verbose {
                 /* literal C message, including the unbalanced trailing ')' */
                 tracing::info!("redefined {}@{})", name, numargs);
@@ -232,8 +232,8 @@ pub fn add_defined_function(
         /* deff->next = d — insert returns the just-stored node */
         deff.next.insert(d).as_mut()
     };
-    d.name = Some(name.to_string()); /* strdup(name) */
-    d.regex = Some(regex.to_string()); /* strdup(regex) */
+    d.name = Some(name.into()); /* strdup(name) */
+    d.regex = Some(regex.into()); /* strdup(regex) */
     d.numargs = numargs;
     Defined::New
 }
@@ -261,7 +261,7 @@ pub fn add_defined(def: &mut DefinedNetworks, net: Option<Box<Fsm>>, string: &st
             }
             /* free(d->name) */
             node.net = Some(net);
-            node.name = Some(string.to_string()); /* strdup(string) */
+            node.name = Some(string.into()); /* strdup(string) */
             return Defined::Redefined;
         }
         d = node.next.as_deref_mut();
@@ -278,7 +278,7 @@ pub fn add_defined(def: &mut DefinedNetworks, net: Option<Box<Fsm>>, string: &st
         /* def->next = d — insert returns the just-stored node */
         def.next.insert(d).as_mut()
     };
-    d.name = Some(string.to_string()); /* strdup(string) */
+    d.name = Some(string.into()); /* strdup(string) */
     d.net = Some(net);
     Defined::New
 }
@@ -294,7 +294,7 @@ mod tests {
         let mut d = Some(def);
         while let Some(n) = d {
             if let Some(name) = &n.name {
-                v.push(name.clone());
+                v.push(name.to_string());
             }
             d = n.next.as_deref();
         }
@@ -338,9 +338,18 @@ mod tests {
         let mut def = defined_networks_init();
         /* First add fills the dummy head; subsequent adds splice in
         immediately after the head, so a,b,c inserts as [a, c, b]. */
-        assert_eq!(add_defined(&mut def, Some(fsm_symbol("A")), "a"), Defined::New);
-        assert_eq!(add_defined(&mut def, Some(fsm_symbol("B")), "b"), Defined::New);
-        assert_eq!(add_defined(&mut def, Some(fsm_symbol("C")), "c"), Defined::New);
+        assert_eq!(
+            add_defined(&mut def, Some(fsm_symbol("A")), "a"),
+            Defined::New
+        );
+        assert_eq!(
+            add_defined(&mut def, Some(fsm_symbol("B")), "b"),
+            Defined::New
+        );
+        assert_eq!(
+            add_defined(&mut def, Some(fsm_symbol("C")), "c"),
+            Defined::New
+        );
         assert_eq!(net_names(&def), vec!["a", "c", "b"]);
 
         /* find_defined returns the registry's own net (borrowed). */

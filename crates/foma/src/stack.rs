@@ -265,7 +265,7 @@ impl Session {
         if fsm.name == "" {
             // sprintf(fsm->name, "%X", rand()) — uppercase hex of rand() into the
             // fixed 40-byte name buffer (%X of a 32-bit value is <= 8 chars).
-            fsm.name = format!("{:X}", self.lcg.rand() as u32);
+            fsm.name = format!("{:X}", self.lcg.rand() as u32).into();
         }
         let mut stack_ptr = self.main_stack();
         while self.e_number(stack_ptr) != -1 {
@@ -549,18 +549,20 @@ mod tests {
     /// Push a symbol net with a caller-chosen name (fsm_symbol leaves name "").
     fn add_named(session: &mut Session, sym: &str, name: &str) -> i32 {
         let mut f = fsm_symbol(sym);
-        f.name = name.to_string();
+        f.name = name.into();
         session.stack_add(f)
     }
 
     fn top_fsm_name(session: &mut Session) -> String {
         let top = session.stack_find_top().unwrap();
-        session.stack_entry_fsm(top, |f| f.name.clone())
+        session.stack_entry_fsm(top, |f| f.name.clone()).to_string()
     }
 
     fn bottom_fsm_name(session: &mut Session) -> String {
         let bottom = session.stack_find_bottom().unwrap();
-        session.stack_entry_fsm(bottom, |f| f.name.clone())
+        session
+            .stack_entry_fsm(bottom, |f| f.name.clone())
+            .to_string()
     }
 
     // [spec:foma:sem:stack.stack-init-fn+1/test]
@@ -742,8 +744,10 @@ mod tests {
         assert_eq!(se, session.stack_find_top().unwrap());
         // apply_med_set_align_symbol(amedh, "-") ran on creation.
         assert_eq!(
-            session.stack_entry_amedh(se, |m| m.align_symbol.clone()),
-            Some("-".to_string())
+            session
+                .stack_entry_amedh(se, |m| m.align_symbol.clone())
+                .as_deref(),
+            Some("-")
         );
         // Cached: the marked handle is returned again, not re-created.
         session.stack_entry_amedh(se, |m| m.med_limit = 77);

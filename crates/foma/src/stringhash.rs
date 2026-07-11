@@ -109,12 +109,12 @@ pub fn sh_find_add_string(sh: &mut ShHandle, string: &str, value: i32) -> String
 pub fn sh_add_string(sh: &mut ShHandle, string: &str, value: i32) -> String {
     let hash: &mut ShHashtable = &mut sh.hash[sh_hashf(string) as usize];
     if hash.string.is_none() {
-        hash.string = Some(string.to_string()); /* C: strdup(string) */
+        hash.string = Some(string.into()); /* C: strdup(string) */
         hash.value = value;
         string.to_string()
     } else {
         let newhash: Box<ShHashtable> = Box::new(ShHashtable {
-            string: Some(string.to_string()), /* C: strdup(string) */
+            string: Some(string.into()), /* C: strdup(string) */
             value,
             next: hash.next.take(), /* C: newhash->next = hash->next */
         });

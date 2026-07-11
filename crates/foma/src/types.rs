@@ -8,6 +8,13 @@
 //! char* strings → Option<String>. Interior pointers into the
 //! sentinel-terminated fsm line table are represented as indices
 //! (pointer walks become index walks, per the conventions).
+//!
+//! Owned symbol/name/value strings are `smol_str::SmolStr` (immutable,
+//! small-string-optimized, cheap to clone) rather than `String`, matching
+//! nfst's SmolStr migration. Mutable accumulator buffers (Apply/MED
+//! `instring`/`outstring`, built via push_str/truncate) stay `String`.
+
+use smol_str::SmolStr;
 
 /* ------------------------------------------------------------------ */
 /* Constants from fomalib.h                                            */
@@ -129,7 +136,7 @@ pub const MED_DEFAULT_MAX_HEAP_SIZE: i32 = 262145;
 // [spec:foma:def:fomalib.defined-networks]
 #[derive(Debug, Clone)]
 pub struct DefinedNetworks {
-    pub name: Option<String>,
+    pub name: Option<SmolStr>,
     pub net: Option<Box<Fsm>>,
     pub next: Option<Box<DefinedNetworks>>,
 }
@@ -138,8 +145,8 @@ pub struct DefinedNetworks {
 // [spec:foma:def:fomalib.defined-functions]
 #[derive(Debug, Clone)]
 pub struct DefinedFunctions {
-    pub name: Option<String>,
-    pub regex: Option<String>,
+    pub name: Option<SmolStr>,
+    pub regex: Option<SmolStr>,
     pub numargs: i32,
     pub next: Option<Box<DefinedFunctions>>,
 }
@@ -147,7 +154,7 @@ pub struct DefinedFunctions {
 // [spec:foma:def:fomalib.defined-quantifiers]
 #[derive(Debug, Clone)]
 pub struct DefinedQuantifiers {
-    pub name: Option<String>,
+    pub name: Option<SmolStr>,
     pub next: Option<Box<DefinedQuantifiers>>,
 }
 
@@ -157,7 +164,7 @@ pub struct DefinedQuantifiers {
 pub struct Fsm {
     /// C: `char name[FSM_NAME_LEN]` — a fixed 40-byte struct buffer. Here it is
     /// an unbounded heap `String`: the 40-byte cap (and its truncation) is gone.
-    pub name: String,
+    pub name: SmolStr,
     pub arity: i32,
     pub arccount: i32,
     pub statecount: i32,
@@ -243,7 +250,7 @@ pub struct RewriteSet {
 #[derive(Debug, Clone)]
 pub struct Sigma {
     pub number: i32,
-    pub symbol: String,
+    pub symbol: SmolStr,
 }
 
 // [spec:foma:def:fomalib.fsm-options]
@@ -271,7 +278,7 @@ pub struct ShHandle {
 #[derive(Debug, Clone)]
 pub struct ShHashtable {
     /// NULL ↔ empty bucket head
-    pub string: Option<String>,
+    pub string: Option<SmolStr>,
     pub value: i32,
     pub next: Option<Box<ShHashtable>>,
 }
@@ -282,8 +289,8 @@ pub struct ShHashtable {
 #[derive(Debug, Clone)]
 pub struct TrieHash {
     // DEVIATION from C (insym/outsym alias strings interned in the sh_hash; owned copies here)
-    pub insym: Option<String>,
-    pub outsym: Option<String>,
+    pub insym: Option<SmolStr>,
+    pub outsym: Option<SmolStr>,
     pub sourcestate: u32,
     pub targetstate: u32,
     pub next: Option<Box<TrieHash>>,
@@ -374,7 +381,7 @@ pub struct FsmStateList {
 // [spec:foma:def:fomalibconf.fsm-sigma-list]
 #[derive(Debug, Clone)]
 pub struct FsmSigmaList {
-    pub symbol: Option<String>,
+    pub symbol: Option<SmolStr>,
 }
 
 // [spec:foma:def:fomalibconf.fsm-sigma-hash]
@@ -382,7 +389,7 @@ pub struct FsmSigmaList {
 pub struct FsmSigmaHash {
     /// NULL ↔ empty bucket head. In C this aliases the fsm_sigma_list entry's
     /// string; owned copy here (observably equivalent).
-    pub symbol: Option<String>,
+    pub symbol: Option<SmolStr>,
     pub sym: i16,
     pub next: Option<Box<FsmSigmaHash>>,
 }
@@ -414,7 +421,7 @@ pub struct FsmConstructHandle {
     pub maxsigma: i32,
     pub numfinals: i32,
     pub hasinitial: i32,
-    pub name: Option<String>,
+    pub name: Option<SmolStr>,
 }
 
 /// A* agenda node (declared inside struct apply_med_handle in C)
@@ -462,10 +469,10 @@ pub struct ApplyMedHandle {
     // DEVIATION from C (aliases net->medlookup->confusion_matrix; owned copy here)
     pub cm: Vec<i32>,
     // DEVIATION from C (aliases the caller's word — medh->word = word, no strdup; owned copy here)
-    pub word: Option<String>,
+    pub word: Option<SmolStr>,
     pub instring: String,
     pub outstring: String,
-    pub align_symbol: Option<String>,
+    pub align_symbol: Option<SmolStr>,
     /// C: malloc'd array of heap_size ints
     pub heap: Vec<i32>,
     pub intword: Vec<i32>,
@@ -511,7 +518,7 @@ pub struct SigmaTrieArrays {
 #[derive(Debug, Clone)]
 pub struct Sigs {
     // DEVIATION from C (aliases sigma symbol strings / the handle's epsilon_symbol / static "?" and "@"; owned copies here)
-    pub symbol: Option<String>,
+    pub symbol: Option<SmolStr>,
     pub length: i32,
 }
 
@@ -532,7 +539,7 @@ pub struct ApplyStateIndex {
 // observably equivalent to the list.)
 #[derive(Debug, Clone, Default)]
 pub struct FlagState {
-    pub value: Option<String>,
+    pub value: Option<SmolStr>,
     pub neg: i16,
 }
 
@@ -541,8 +548,8 @@ pub struct FlagState {
 #[derive(Debug, Clone)]
 pub struct FlagLookup {
     pub r#type: i32,
-    pub name: Option<String>,
-    pub value: Option<String>,
+    pub name: Option<SmolStr>,
+    pub value: Option<SmolStr>,
 }
 
 /// (declared inside struct apply_handle in C)
@@ -557,8 +564,8 @@ pub struct Searchstack {
     pub ipos: i32,
     pub visitmark: i32,
     // DEVIATION from C (flagname/flagvalue alias flag strings owned elsewhere in the handle; owned copies here)
-    pub flagname: Option<String>,
-    pub flagvalue: Option<String>,
+    pub flagname: Option<SmolStr>,
+    pub flagvalue: Option<SmolStr>,
     pub flagneg: i32,
 }
 
@@ -591,9 +598,9 @@ pub struct ApplyHandle {
     pub obey_flags: i32,
     pub show_flags: i32,
     pub print_space: i32,
-    pub space_symbol: Option<String>,
-    pub separator: Option<String>,
-    pub epsilon_symbol: Option<String>,
+    pub space_symbol: Option<SmolStr>,
+    pub separator: Option<SmolStr>,
+    pub epsilon_symbol: Option<SmolStr>,
     pub print_pairs: i32,
     pub apply_stack_ptr: i32,
     pub apply_stack_top: i32,
@@ -607,7 +614,7 @@ pub struct ApplyHandle {
     /// C: malloc'd array of sigma_size entries
     pub sigs: Vec<Sigs>,
     // DEVIATION from C (aliases a flag_list value string; owned copy here)
-    pub oldflagvalue: Option<String>,
+    pub oldflagvalue: Option<SmolStr>,
 
     // DEVIATION from C (borrowed pointer to the stack-owned net; the handle never owns it)
     pub last_net: Option<Box<Fsm>>,
@@ -623,7 +630,7 @@ pub struct ApplyHandle {
     pub iptr: Option<Box<ApplyStateIndex>>,
 
     /// Per-feature flag state, keyed by feature name (C: struct flag_list *).
-    pub flag_state: std::collections::HashMap<String, FlagState>,
+    pub flag_state: std::collections::HashMap<SmolStr, FlagState>,
     /// C: malloc'd array indexed by sigma number
     pub flag_lookup: Vec<FlagLookup>,
 

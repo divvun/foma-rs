@@ -1,56 +1,58 @@
 generated_at 2026-07-03T00:33:02.199389Z
 
+seal dbdbb0733342a3d1
+
 files (
-    {path README.md, code_loc 0, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/apply.c, code_loc 1193, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/cgflookup.c, code_loc 259, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/cmatrix.l, code_loc 64, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/coaccessible.c, code_loc 131, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/constructions.c, code_loc 2379, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/contrib/foma_apply_down.js, code_loc 42, function_count 2, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/contrib/pcfg2foma.py, code_loc 240, function_count 5, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/define.c, code_loc 136, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/demo.html, code_loc 16, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/determinize.c, code_loc 614, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/docs/simpleintro.md, code_loc 0, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/dynarray.c, code_loc 599, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/extract.c, code_loc 52, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/flags.c, code_loc 421, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/flookup.c, code_loc 369, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/foma.c, code_loc 179, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/foma.h, code_loc 137, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/fomalib.h, code_loc 384, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/fomalibconf.h, code_loc 230, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/iface.c, code_loc 1550, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/int_stack.c, code_loc 62, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/interface.l, code_loc 575, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/io.c, code_loc 855, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/lexc.h, code_loc 11, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/lexc.l, code_loc 189, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/lexcread.c, code_loc 961, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/libfoma.pc.in, code_loc 9, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/mem.c, code_loc 52, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/minimize.c, code_loc 481, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/python/README.md, code_loc 0, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/python/attapply.py, code_loc 150, function_count 8, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/python/foma.py, code_loc 446, function_count 51, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/python/foma2js.py, code_loc 125, function_count 1, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/python/phonrule.py, code_loc 112, function_count 5, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/python/test_foma.py, code_loc 52, function_count 5, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/python/tox.ini, code_loc 6, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/regex.l, code_loc 361, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/reverse.c, code_loc 27, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/rewrite.c, code_loc 428, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/sigma.c, code_loc 358, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/spelling.c, code_loc 660, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/stack.c, code_loc 178, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/stringhash.c, code_loc 74, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/structures.c, code_loc 783, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/tests/run.sh, code_loc 10, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/topsort.c, code_loc 113, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/trie.c, code_loc 114, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path foma/utf8.c, code_loc 209, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
-    {path plan/main.styx, code_loc 6, function_count 0, max_cyclomatic 0, duplicate_memberships 0}
+    {path README.md, code_loc 0, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/apply.c, code_loc 1193, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/cgflookup.c, code_loc 259, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/cmatrix.l, code_loc 64, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/coaccessible.c, code_loc 131, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/constructions.c, code_loc 2379, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/contrib/foma_apply_down.js, code_loc 42, function_count 2, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/contrib/pcfg2foma.py, code_loc 240, function_count 5, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/define.c, code_loc 136, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/demo.html, code_loc 16, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/determinize.c, code_loc 614, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/docs/simpleintro.md, code_loc 0, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/dynarray.c, code_loc 599, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/extract.c, code_loc 52, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/flags.c, code_loc 421, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/flookup.c, code_loc 369, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/foma.c, code_loc 179, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/foma.h, code_loc 137, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/fomalib.h, code_loc 384, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/fomalibconf.h, code_loc 230, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/iface.c, code_loc 1550, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/int_stack.c, code_loc 62, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/interface.l, code_loc 575, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/io.c, code_loc 855, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/lexc.h, code_loc 11, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/lexc.l, code_loc 189, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/lexcread.c, code_loc 961, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/libfoma.pc.in, code_loc 9, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/mem.c, code_loc 52, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/minimize.c, code_loc 481, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/python/README.md, code_loc 0, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/python/attapply.py, code_loc 150, function_count 8, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/python/foma.py, code_loc 446, function_count 51, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/python/foma2js.py, code_loc 125, function_count 1, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/python/phonrule.py, code_loc 112, function_count 5, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/python/test_foma.py, code_loc 52, function_count 5, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/python/tox.ini, code_loc 6, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/regex.l, code_loc 361, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/reverse.c, code_loc 27, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/rewrite.c, code_loc 428, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/sigma.c, code_loc 358, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/spelling.c, code_loc 660, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/stack.c, code_loc 178, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/stringhash.c, code_loc 74, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/structures.c, code_loc 783, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/tests/run.sh, code_loc 10, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/topsort.c, code_loc 113, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/trie.c, code_loc 114, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path foma/utf8.c, code_loc 209, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path plan/main.styx, code_loc 6, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
 )
 
 directories (

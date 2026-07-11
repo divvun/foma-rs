@@ -32,6 +32,7 @@ use crate::types::{
     BUILD_VERSION, DefinedQuantifiers, EPSILON, Fsm, FsmState, IDENTITY, MAJOR_VERSION,
     MINOR_VERSION, NO, OP_IGNORE_ALL, STATUS_VERSION, Sigma, StateArray, UNKNOWN, YES,
 };
+use smol_str::SmolStr;
 
 /// The parse-scoped quantifier symbol table C kept in the file-static
 /// `struct defined_quantifiers *quantifiers`. In C the lexer's `∀`/`∃`
@@ -311,7 +312,7 @@ pub fn fsm_create(name: &str) -> Box<Fsm> {
     // in full. C used a fixed char[40] field (strncpy without a NUL terminator for
     // names >= 40 bytes), truncating longer names and printing a warning. (The
     // binary file format still caps names at 40 bytes on read/write.)
-    let name = name.to_string();
+    let name: SmolStr = name.into();
     Box::new(Fsm {
         name,
         arity: 1,
@@ -389,7 +390,7 @@ pub fn fsm_identity() -> Box<Fsm> {
     add_fsm_arc(&mut net.states, 2, -1, -1, -1, -1, -1, -1);
     net.sigma = vec![Sigma {
         number: IDENTITY,
-        symbol: "@_IDENTITY_SYMBOL_@".to_string(),
+        symbol: "@_IDENTITY_SYMBOL_@".into(),
     }];
     fsm_update_flags(&mut net, YES, YES, YES, YES, YES, NO);
     net.statecount = 2;
@@ -1270,7 +1271,7 @@ pub fn add_quantifier(quantifiers: &mut Quantifiers, string: &str) {
     /* no duplicate check: adding the same name twice creates two nodes */
     if quantifiers.head.is_none() {
         quantifiers.head = Some(Box::new(DefinedQuantifiers {
-            name: Some(string.to_string()),
+            name: Some(string.into()),
             next: None,
         }));
     } else {
@@ -1283,7 +1284,7 @@ pub fn add_quantifier(quantifiers: &mut Quantifiers, string: &str) {
             q = q.next.as_deref_mut().expect("just checked next.is_some()");
         }
         q.next = Some(Box::new(DefinedQuantifiers {
-            name: Some(string.to_string()),
+            name: Some(string.into()),
             next: None,
         }));
     }
@@ -1347,7 +1348,7 @@ pub fn union_quantifiers(quantifiers: &Quantifiers) -> Box<Fsm> {
 // [spec:foma:sem:structures.find-quantifier-fn]
 // [spec:foma:def:foma.find-quantifier-fn]
 // [spec:foma:sem:foma.find-quantifier-fn]
-pub fn find_quantifier(quantifiers: &Quantifiers, string: &str) -> Option<String> {
+pub fn find_quantifier(quantifiers: &Quantifiers, string: &str) -> Option<SmolStr> {
     let mut q = quantifiers.head.as_deref();
     while let Some(node) = q {
         if string == node.name.as_deref().expect("quantifier node has a name") {
@@ -1789,11 +1790,11 @@ mod tests {
         let list = vec![
             Sigma {
                 number: 3,
-                symbol: "a".to_string(),
+                symbol: "a".into(),
             },
             Sigma {
                 number: 4,
-                symbol: "b".to_string(),
+                symbol: "b".into(),
             },
         ];
         fsm_sigma_destroy(list);

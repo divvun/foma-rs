@@ -396,7 +396,7 @@ pub fn fsm_construct_init(name: &str) -> Box<FsmConstructHandle> {
         numfinals: 0,
         /* C: name == NULL → handle->name = NULL; a &str cannot be NULL and
         no in-tree caller passes NULL */
-        name: Some(name.to_string()),
+        name: Some(name.into()),
         hasinitial: 0,
     })
 }
@@ -590,18 +590,18 @@ pub fn fsm_construct_copy_sigma(handle: &mut FsmConstructHandle, sigma: &[Sigma]
         /* C shares one strdup between the list slot and the hash node;
         owned copies here (observably equivalent) */
         let symdup = symbol.to_string();
-        handle.fsm_sigma_list[symnum as usize].symbol = Some(symdup.clone());
+        handle.fsm_sigma_list[symnum as usize].symbol = Some(symdup.clone().into());
 
         /* Insert into hashtable */
         let hash = fsm_construct_hash_sym(symbol);
         let fh = &mut handle.fsm_sigma_hash[hash as usize];
         if fh.symbol.is_none() {
-            fh.symbol = Some(symdup);
+            fh.symbol = Some(symdup.into());
             fh.sym = symnum as i16;
         } else {
             /* calloc'd chain node spliced directly after the head */
             let newfh = Box::new(FsmSigmaHash {
-                symbol: Some(symdup),
+                symbol: Some(symdup.into()),
                 sym: symnum as i16,
                 next: fh.next.take(),
             });
@@ -656,18 +656,18 @@ pub fn fsm_construct_add_symbol(handle: &mut FsmConstructHandle, symbol: &str) -
     /* C shares one strdup between the list slot and the hash node;
     owned copies here (observably equivalent) */
     let symdup = symbol.to_string();
-    handle.fsm_sigma_list[symnum as usize].symbol = Some(symdup.clone());
+    handle.fsm_sigma_list[symnum as usize].symbol = Some(symdup.clone().into());
 
     /* Insert into hashtable */
     let hash = fsm_construct_hash_sym(symbol);
     let fh = &mut handle.fsm_sigma_hash[hash as usize];
     if fh.symbol.is_none() {
-        fh.symbol = Some(symdup);
+        fh.symbol = Some(symdup.into());
         fh.sym = symnum as i16;
     } else {
         /* calloc'd chain node spliced directly after the head */
         let newfh = Box::new(FsmSigmaHash {
-            symbol: Some(symdup),
+            symbol: Some(symdup.into()),
             sym: symnum as i16,
             next: fh.next.take(),
         });
@@ -766,7 +766,7 @@ pub fn fsm_construct_done(handle: Box<FsmConstructHandle>) -> Box<Fsm> {
         fsm_state_end_state(&mut b);
     }
     let mut net = fsm_create("");
-    net.name = format!("{:X}", lcg.rand());
+    net.name = format!("{:X}", lcg.rand()).into();
     /* free(net->sigma) */
     net.sigma = Vec::new();
     fsm_state_close(&mut b, &mut net);
@@ -778,7 +778,7 @@ pub fn fsm_construct_done(handle: Box<FsmConstructHandle>) -> Box<Fsm> {
         net.name = name;
         /* free(handle->name) — dropped with the take() above */
     } else {
-        net.name = format!("{:X}", lcg.rand());
+        net.name = format!("{:X}", lcg.rand()).into();
     }
 
     /* Free transitions (all fsm_state_list_size slots), the sigma-hash
@@ -1593,11 +1593,11 @@ mod tests {
         let sigma = vec![
             Sigma {
                 number: 3,
-                symbol: "x".to_string(),
+                symbol: "x".into(),
             },
             Sigma {
                 number: 5,
-                symbol: "y".to_string(),
+                symbol: "y".into(),
             },
         ];
         let mut h = fsm_construct_init("n");
@@ -1618,7 +1618,10 @@ mod tests {
         fsm_construct_add_symbol(&mut h, "cat"); /* 3 */
         fsm_construct_add_symbol(&mut h, "dog"); /* 4 */
         let sigma = fsm_construct_convert_sigma(&h);
-        let seen: Vec<(i32, String)> = sigma.iter().map(|s| (s.number, s.symbol.clone())).collect();
+        let seen: Vec<(i32, String)> = sigma
+            .iter()
+            .map(|s| (s.number, s.symbol.to_string()))
+            .collect();
         assert_eq!(
             seen,
             vec![
@@ -1730,11 +1733,11 @@ mod tests {
         net.sigma = vec![
             Sigma {
                 number: 3,
-                symbol: "a".to_string(),
+                symbol: "a".into(),
             },
             Sigma {
                 number: 4,
-                symbol: "b".to_string(),
+                symbol: "b".into(),
             },
         ];
         net
@@ -1784,7 +1787,7 @@ mod tests {
         fsm_state_close(&mut b, &mut net);
         net.sigma = vec![Sigma {
             number: IDENTITY,
-            symbol: "@_IDENTITY_SYMBOL_@".to_string(),
+            symbol: "@_IDENTITY_SYMBOL_@".into(),
         }];
         let h = fsm_read_init(net);
         assert_eq!(fsm_get_has_unknowns(&h), 1);
@@ -1961,7 +1964,7 @@ mod tests {
         // index panic here). The growth loop must resize until the slot fits.
         let sigma = vec![Sigma {
             number: 3000,
-            symbol: "z".to_string(),
+            symbol: "z".into(),
         }];
         let mut h = fsm_construct_init("c");
         fsm_construct_copy_sigma(&mut h, &sigma);

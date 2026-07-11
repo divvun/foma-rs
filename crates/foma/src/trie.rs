@@ -153,40 +153,52 @@ pub fn fsm_trie_symbol(th: &mut FsmTrieHandle, insym: &str, outsym: &str) {
     // owned copies here, per the TrieHash type in types.rs)
     let thash = &mut th.trie_hash[h as usize];
     if thash.insym.is_none() {
-        thash.insym = Some(sh_find_add_string(
-            th.sh_hash
-                .as_deref_mut()
-                .expect("sh_hash present until fsm_trie_done"),
-            insym,
-            1,
-        ));
-        thash.outsym = Some(sh_find_add_string(
-            th.sh_hash
-                .as_deref_mut()
-                .expect("sh_hash present until fsm_trie_done"),
-            outsym,
-            1,
-        ));
+        thash.insym = Some(
+            sh_find_add_string(
+                th.sh_hash
+                    .as_deref_mut()
+                    .expect("sh_hash present until fsm_trie_done"),
+                insym,
+                1,
+            )
+            .into(),
+        );
+        thash.outsym = Some(
+            sh_find_add_string(
+                th.sh_hash
+                    .as_deref_mut()
+                    .expect("sh_hash present until fsm_trie_done"),
+                outsym,
+                1,
+            )
+            .into(),
+        );
         thash.sourcestate = th.trie_cursor;
         thash.targetstate = th.used_states;
     } else {
         let newthash = Box::new(TrieHash {
             /* calloc'd node spliced in right after the head */
             next: thash.next.take(),
-            insym: Some(sh_find_add_string(
-                th.sh_hash
-                    .as_deref_mut()
-                    .expect("sh_hash present until fsm_trie_done"),
-                insym,
-                1,
-            )),
-            outsym: Some(sh_find_add_string(
-                th.sh_hash
-                    .as_deref_mut()
-                    .expect("sh_hash present until fsm_trie_done"),
-                outsym,
-                1,
-            )),
+            insym: Some(
+                sh_find_add_string(
+                    th.sh_hash
+                        .as_deref_mut()
+                        .expect("sh_hash present until fsm_trie_done"),
+                    insym,
+                    1,
+                )
+                .into(),
+            ),
+            outsym: Some(
+                sh_find_add_string(
+                    th.sh_hash
+                        .as_deref_mut()
+                        .expect("sh_hash present until fsm_trie_done"),
+                    outsym,
+                    1,
+                )
+                .into(),
+            ),
             sourcestate: th.trie_cursor,
             targetstate: th.used_states,
         });
@@ -262,7 +274,7 @@ mod tests {
     fn sigma_pairs(net: &Fsm) -> Vec<(i32, String)> {
         net.sigma
             .iter()
-            .map(|sig| (sig.number, sig.symbol.clone()))
+            .map(|sig| (sig.number, sig.symbol.to_string()))
             .collect()
     }
 

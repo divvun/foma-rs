@@ -5,7 +5,6 @@ use crate::constructions::{
     add_fsm_arc, fsm_complement, fsm_compose, fsm_concat, fsm_contains, fsm_intersect,
     fsm_optionality, fsm_symbol, fsm_union, fsm_universal,
 };
-use crate::mem::xxstrndup;
 use crate::minimize::fsm_minimize;
 use crate::options::FomaOptions;
 use crate::sigma::{sigma_cleanup, sigma_max, sigma_remove_num, sigma_sort};
@@ -16,6 +15,7 @@ use crate::types::{
     FLAG_CLEAR, FLAG_DISALLOW, FLAG_EQUAL, FLAG_NEGATIVE, FLAG_POSITIVE, FLAG_REQUIRE, FLAG_UNIFY,
 };
 use crate::utf8::utf8skip;
+use smol_str::SmolStr;
 
 /* File-local constants (C #defines; distinct from apply.c's FAIL/SUCCEED) */
 const FAIL: i32 = 1;
@@ -25,8 +25,8 @@ const NONE: i32 = 3;
 // [spec:foma:def:flags.flags]
 pub struct Flags {
     pub r#type: i32,
-    pub name: Option<String>,
-    pub value: Option<String>,
+    pub name: Option<SmolStr>,
+    pub value: Option<SmolStr>,
     pub next: Option<Box<Flags>>,
 }
 
@@ -631,7 +631,7 @@ pub fn flag_get_type(string: &str) -> i32 {
 // [spec:foma:sem:flags.flag-get-name-fn]
 // [spec:foma:def:fomalibconf.flag-get-name-fn]
 // [spec:foma:sem:fomalibconf.flag-get-name-fn]
-pub fn flag_get_name(string: &str) -> Option<String> {
+pub fn flag_get_name(string: &str) -> Option<SmolStr> {
     let s = string.as_bytes();
     let mut start = 0usize;
     let mut end = 0usize;
@@ -652,7 +652,9 @@ pub fn flag_get_name(string: &str) -> Option<String> {
         i += utf8skip(&s[i..]) as usize + 1;
     }
     if start > 0 && end > 0 {
-        return Some(xxstrndup(&string[start..], end - start));
+        // start/end are byte indices the utf8skip walk landed on codepoint
+        // boundaries, so this slice is the flag name between the delimiters.
+        return Some(string[start..end].into());
     }
     None
 }
@@ -661,7 +663,7 @@ pub fn flag_get_name(string: &str) -> Option<String> {
 // [spec:foma:sem:flags.flag-get-value-fn]
 // [spec:foma:def:fomalibconf.flag-get-value-fn]
 // [spec:foma:sem:fomalibconf.flag-get-value-fn]
-pub fn flag_get_value(string: &str) -> Option<String> {
+pub fn flag_get_value(string: &str) -> Option<SmolStr> {
     let s = string.as_bytes();
     let mut first = 0usize;
     let mut start = 0usize;
@@ -688,7 +690,7 @@ pub fn flag_get_value(string: &str) -> Option<String> {
         i += utf8skip(&s[i..]) as usize + 1;
     }
     if start > 0 && end > 0 {
-        return Some(xxstrndup(&string[start..], end - start));
+        return Some(string[start..end].into());
     }
     None
 }
@@ -833,7 +835,11 @@ mod tests {
 
     /* All symbols in a net's sigma (excluding the -1 sentinel), by symbol text. */
     fn sigma_syms(net: &Fsm) -> Vec<String> {
-        let mut v: Vec<String> = net.sigma.iter().map(|node| node.symbol.clone()).collect();
+        let mut v: Vec<String> = net
+            .sigma
+            .iter()
+            .map(|node| node.symbol.to_string())
+            .collect();
         v.sort();
         v
     }
@@ -845,7 +851,7 @@ mod tests {
         }
         for node in &net.sigma {
             if node.number == n as i32 {
-                return node.symbol.clone();
+                return node.symbol.to_string();
             }
         }
         format!("#{}", n)
@@ -1075,7 +1081,11 @@ mod tests {
         let mut got: Vec<(i32, Option<String>, Option<String>)> = Vec::new();
         let mut f = flags.as_deref();
         while let Some(fl) = f {
-            got.push((fl.r#type, fl.name.clone(), fl.value.clone()));
+            got.push((
+                fl.r#type,
+                fl.name.as_deref().map(String::from),
+                fl.value.as_deref().map(String::from),
+            ));
             f = fl.next.as_deref();
         }
         got.sort();

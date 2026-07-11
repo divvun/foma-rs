@@ -100,7 +100,7 @@ pub fn apply_med_set_heap_max(medh: &mut ApplyMedHandle, max: i32) {
 // [spec:foma:def:fomalib.apply-med-set-align-symbol-fn]
 // [spec:foma:sem:fomalib.apply-med-set-align-symbol-fn]
 pub fn apply_med_set_align_symbol(medh: &mut ApplyMedHandle, align: &str) {
-    medh.align_symbol = Some(align.to_string()); /* C: strdup(align) */
+    medh.align_symbol = Some(align.into()); /* C: strdup(align) */
 }
 
 // [spec:foma:def:spelling.apply-med-set-med-limit-fn]
@@ -735,7 +735,7 @@ pub fn apply_med(medh: &mut ApplyMedHandle, word: Option<&str>) -> Option<String
         }
         Some(w) => {
             let wbytes = w.as_bytes();
-            medh.word = Some(w.to_string()); /* DEVIATION: owned copy (C: medh->word = word) */
+            medh.word = Some(w.into()); /* DEVIATION: owned copy (C: medh->word = word) */
 
             medh.nodes_expanded = 0;
             medh.astarcount = 1;
@@ -876,8 +876,7 @@ pub fn apply_med(medh: &mut ApplyMedHandle, word: Option<&str>) -> Option<String
                             r#in,
                             out,
                             medh.curr_agenda_offset,
-                        )
-                        {
+                        ) {
                             break 'outer; /* goto out */
                         }
                     }
@@ -909,8 +908,7 @@ pub fn apply_med(medh: &mut ApplyMedHandle, word: Option<&str>) -> Option<String
                             r#in,
                             out,
                             medh.curr_agenda_offset,
-                        )
-                        {
+                        ) {
                             break 'outer; /* goto out */
                         }
                     }
@@ -938,8 +936,7 @@ pub fn apply_med(medh: &mut ApplyMedHandle, word: Option<&str>) -> Option<String
                             r#in,
                             out,
                             medh.curr_agenda_offset,
-                        )
-                        {
+                        ) {
                             break 'outer; /* goto out */
                         }
                     }
@@ -1260,11 +1257,11 @@ mod tests {
         let sig = vec![
             Sigma {
                 number: 4,
-                symbol: "abc".to_string(),
+                symbol: "abc".into(),
             },
             Sigma {
                 number: 3,
-                symbol: "a".to_string(),
+                symbol: "a".into(),
             },
         ];
         assert_eq!(print_sym(4, &sig), Some("abc"));
@@ -1621,7 +1618,7 @@ mod tests {
         // interior epsilon contributes its align symbol.
         let net = parse_sorted("{cat}");
         let mut medh = apply_med_init(&net);
-        medh.align_symbol = Some("-".to_string());
+        medh.align_symbol = Some("-".into());
         medh.wordlen = 1;
         let c = 4; // 'c' has sigma number 4 (see calculate_h_heuristic).
         medh.agenda[1].r#in = 0;

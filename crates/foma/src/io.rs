@@ -917,7 +917,7 @@ pub fn save_defined(def: &mut DefinedNetworks, filename: &str) -> Result<(), Fom
         };
         /* C: strncpy(d->net->name, d->name, FSM_NAME_LEN) — the 40-byte cap was
         a struct-buffer size, gone now that names are heap Strings. */
-        net.name = name;
+        net.name = name.into();
         foma_net_print(net, &mut outfile)?;
         d = node.next.as_deref_mut();
     }
@@ -1071,7 +1071,7 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Result<Option<(Box<Fsm>, String)>,
         } else {
             String::new()
         };
-        net.name = name.clone();
+        net.name = name.clone().into();
         net_name = name;
     }
     io_gets(iobh, &mut buf);
@@ -1368,7 +1368,7 @@ pub fn net_print_att<W: std::io::Write + ?Sized>(
     let mut sl = sigma_to_list(&net.sigma);
     if sigma_max(&net.sigma) >= 0 {
         /* (sl+0)->symbol = g_att_epsilon */
-        sl[0].symbol = Some(opts.att_epsilon.clone());
+        sl[0].symbol = Some(opts.att_epsilon.clone().into());
     }
     let mut i = 0usize;
     while net.states[i].state_no != -1 {
@@ -1652,7 +1652,7 @@ mod tests {
     fn sigma_pairs(net: &Fsm) -> Vec<(i32, Option<String>)> {
         net.sigma
             .iter()
-            .map(|x| (x.number, Some(x.symbol.clone())))
+            .map(|x| (x.number, Some(x.symbol.to_string())))
             .collect()
     }
 
@@ -1942,7 +1942,7 @@ mod tests {
     fn binary_round_trip_acceptor_transducer_qmark() {
         for rx in ["[a b c]", "a:b", "?", "a:b|?"] {
             let mut net = parse(rx);
-            net.name = "rt".to_string();
+            net.name = "rt".into();
             let f = Scratch::new("bin");
             /* Ok = success */
             assert!(fsm_write_binary_file(&net, f.path()).is_ok());
@@ -1966,7 +1966,7 @@ mod tests {
     #[test]
     fn binary_round_trip_with_cmatrix() {
         let mut net = parse("[a b]");
-        net.name = "cm".to_string();
+        net.name = "cm".into();
         cmatrix_init(&mut net);
         net.medlookup.as_mut().unwrap().confusion_matrix[2] = 9;
         let f = Scratch::new("cm");
@@ -1986,7 +1986,7 @@ mod tests {
     fn stream_binary_round_trip() {
         let opts = &FomaOptions::default();
         let mut net = fsm_parse_regex(opts, "a:b;", None, None).expect("regex should compile");
-        net.name = "stream".to_string();
+        net.name = "stream".into();
         /* write the gzip-compressed image to an in-memory Vec */
         let mut buf: Vec<u8> = Vec::new();
         fsm_write_binary(&net, &mut buf).unwrap();
@@ -2161,7 +2161,7 @@ mod tests {
     #[test]
     fn prolog_round_trip() {
         let mut net = parse("a:b");
-        net.name = "rt".to_string();
+        net.name = "rt".into();
         let f = Scratch::new("prolog");
         assert!(foma_write_prolog(&mut net, Some(f.path())).is_ok());
         let back = fsm_read_prolog(f.path()).unwrap();
@@ -2450,7 +2450,7 @@ mod tests {
         // io_net_read reads 12 tokens. The name is then empty; C's sscanf left the
         // buffer holding the whole props line, which became the net name.
         let mut net = fsm_parse_regex(opts, "a b", None, None).unwrap();
-        net.name = String::new();
+        net.name = String::new().into();
         let mut text: Vec<u8> = Vec::new();
         foma_net_print(&net, &mut text).expect("writing net to in-memory buffer");
         let mut iobh = io_init();

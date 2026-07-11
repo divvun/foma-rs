@@ -1,6 +1,7 @@
 //! Wave-4 split of constructions.c (see mod.rs). Cross-module and
 //! external names come via `use super::*` (re-exported by mod.rs).
 use super::*;
+use smol_str::SmolStr;
 
 /* C: #define STACK_3_PUSH(a,b,c) / STACK_2_PUSH(a,b) — expanded inline at
 each use site below (int_stack_push calls in the same order) */
@@ -11,7 +12,7 @@ pub struct Mergesigma {
     /* C: char *symbol aliases the source sigma node's string (no copy);
     owned clone here — observably equivalent (copy_mergesigma deep-copies
     again and the C list is freed without freeing the symbols) */
-    pub symbol: Option<String>,
+    pub symbol: Option<SmolStr>,
     /// 1 = in net 1, 2 = in net 2, 3 = in both
     pub presence: u8,
     pub number: i32,
@@ -67,7 +68,7 @@ pub fn copy_mergesigma(mergesigma: Option<&Mergesigma>) -> Vec<Sigma> {
     while let Some(m) = mergesigma {
         new_sigma.push(Sigma {
             number: m.number,
-            symbol: m.symbol.clone().unwrap_or_default(),
+            symbol: m.symbol.clone().unwrap_or_default().into(),
         });
         mergesigma = m.next.as_deref();
     }

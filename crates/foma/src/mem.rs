@@ -5,22 +5,6 @@
 // the other translation units live in `crate::options::FomaOptions` now (one
 // value per `Session`, threaded by reference into the library) — nothing here.
 
-// [spec:foma:def:mem.xxstrndup-fn]
-// [spec:foma:sem:mem.xxstrndup-fn]
-// [spec:foma:def:fomalibconf.xxstrndup-fn]
-// [spec:foma:sem:fomalibconf.xxstrndup-fn]
-pub fn xxstrndup(s: &str, n: usize) -> String {
-    // C: p = s; while (*p++ && n--); n = p - s - 1; — the copied length is
-    // min(n, strlen(s)), where strlen stops at an interior NUL.
-    let bytes = s.as_bytes();
-    let strlen = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-    let end = strlen.min(n);
-    // DEVIATION from C (a cut inside a UTF-8 codepoint would yield an invalid
-    // byte string in C; String must be valid UTF-8, so lossy-decode — every
-    // foma call site cuts at symbol boundaries, where this is byte-identical).
-    String::from_utf8_lossy(&bytes[..end]).into_owned()
-}
-
 // [spec:foma:def:mem.next-power-of-two-fn]
 // [spec:foma:sem:mem.next-power-of-two-fn]
 // [spec:foma:def:fomalibconf.next-power-of-two-fn]
@@ -57,20 +41,6 @@ pub fn round_up_to_power_of_two(v: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // [spec:foma:sem:mem.xxstrndup-fn/test]
-    // [spec:foma:sem:fomalibconf.xxstrndup-fn/test]
-    #[test]
-    fn xxstrndup_copies_min_n_strlen_bytes() {
-        // Effective length = min(n, strlen(s)).
-        assert_eq!(xxstrndup("hello", 3), "hel"); // n < strlen → cut to n
-        assert_eq!(xxstrndup("hello", 5), "hello"); // n == strlen
-        assert_eq!(xxstrndup("hello", 10), "hello"); // n > strlen → whole string
-        // n == 0 or empty s yields an (allocated) empty string.
-        assert_eq!(xxstrndup("hello", 0), "");
-        assert_eq!(xxstrndup("", 5), "");
-        assert_eq!(xxstrndup("", 0), "");
-    }
 
     // [spec:foma:sem:mem.next-power-of-two-fn/test]
     // [spec:foma:sem:fomalibconf.next-power-of-two-fn/test]

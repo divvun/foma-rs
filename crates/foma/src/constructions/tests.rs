@@ -50,7 +50,7 @@ fn lines(net: &Fsm) -> Vec<(i32, i16, i16, i32, i8, i8)> {
 fn sigma_pairs(net: &Fsm) -> Vec<(i32, String)> {
     net.sigma
         .iter()
-        .map(|n| (n.number, n.symbol.clone()))
+        .map(|n| (n.number, n.symbol.to_string()))
         .collect()
 }
 
@@ -297,7 +297,11 @@ fn triplet_hash_insert_find_roundtrip_and_duplicate_quirk() {
     assert_eq!(triplet_hash_insert(&mut th, 8, 9, 10), 1);
     assert_eq!(triplet_hash_find(&th, 5, 6, 7), Some(0));
     assert_eq!(triplet_hash_find(&th, 8, 9, 10), Some(1));
-    assert_eq!(triplet_hash_find(&th, 100, 100, 100), None, "absent -> None");
+    assert_eq!(
+        triplet_hash_find(&th, 100, 100, 100),
+        None,
+        "absent -> None"
+    );
     // Duplicate insert silently creates a second entry with a fresh key,
     // but find still returns the first (home-slot) entry's key.
     assert_eq!(triplet_hash_insert(&mut th, 5, 6, 7), 2);
@@ -330,7 +334,11 @@ fn triplet_hash_rehash_doubles_at_half_occupancy_preserving_keys() {
     assert_eq!(th.tablesize, 256);
     assert_eq!(th.occupancy, 65);
     for i in 0..65 {
-        assert_eq!(triplet_hash_find(&th, i, 0, 0), Some(i), "keys survive rehash");
+        assert_eq!(
+            triplet_hash_find(&th, i, 0, 0),
+            Some(i),
+            "keys survive rehash"
+        );
     }
 }
 
@@ -356,15 +364,15 @@ fn add_to_mergesigma_dense_ordinary_numbering_and_special_passthrough() {
     };
     let s_id = Sigma {
         number: IDENTITY,
-        symbol: "@_IDENTITY_SYMBOL_@".to_string(),
+        symbol: "@_IDENTITY_SYMBOL_@".into(),
     };
     let s_a = Sigma {
         number: 3,
-        symbol: "a".to_string(),
+        symbol: "a".into(),
     };
     let s_b = Sigma {
         number: 9,
-        symbol: "b".to_string(),
+        symbol: "b".into(),
     };
     {
         let t1 = add_to_mergesigma(&mut head, &s_id, 1);
@@ -410,11 +418,11 @@ fn copy_mergesigma_deep_copies_number_and_symbol_dropping_presence() {
     // Multi-node list keeps number+symbol, in order.
     let m = Mergesigma {
         number: IDENTITY,
-        symbol: Some("@_IDENTITY_SYMBOL_@".to_string()),
+        symbol: Some("@_IDENTITY_SYMBOL_@".into()),
         presence: 3,
         next: Some(Box::new(Mergesigma {
             number: 3,
-            symbol: Some("a".to_string()),
+            symbol: Some("a".into()),
             presence: 1,
             next: None,
         })),
@@ -1359,7 +1367,7 @@ fn fsm_equal_substrings_keeps_only_consistent_delimited_x() {
 // [spec:foma:sem:fomalib.fsm-invert-fn/test]
 #[test]
 fn fsm_invert_swaps_sides_and_sort_flags() {
-    let mut n = re("a:b");
+    let n = re("a:b");
     let (si, so) = (n.arcs_sorted_in, n.arcs_sorted_out);
     let inv = fsm_invert(n);
     assert_eq!(inv.arcs_sorted_in, so);

@@ -211,7 +211,7 @@
 > char *flag_get_name(char *string)
 
 > [spec:foma:sem:fomalibconf.flag-get-name-fn]
-> Extracts the attribute name from a flag diacritic like `@U.name.value@`: returns a freshly malloc'd copy (via `xxstrndup`) of the substring strictly between the first `'.'` and the next `'.'` or `'@'` after it; returns NULL if that delimiter pair is not found. Caller owns the result.
+> Extracts the attribute name from a flag diacritic like `@U.name.value@`: returns a copy of the substring strictly between the first `'.'` and the next `'.'` or `'@'` after it; returns NULL if that delimiter pair is not found. Caller owns the result.
 > Algorithm: iterate byte positions over `strlen(string)` bytes, advancing by whole UTF-8 characters (`i += utf8skip(string+i)+1`). The first `'.'` sets `start = i+1` and continues; the first later `'.'` or `'@'` (with `start` already set) sets `end = i` and breaks. Returns the copy only when both `start > 0` and `end > 0`. An empty name (`@U..v@`) therefore yields a malloc'd empty string, not NULL. Implementation: foma/flags.c.
 
 > [spec:foma:def:fomalibconf.flag-get-type-fn]
@@ -224,7 +224,7 @@
 > char *flag_get_value(char *string)
 
 > [spec:foma:sem:fomalibconf.flag-get-value-fn]
-> Extracts the value part of a flag diacritic like `@U.name.value@`: returns a freshly malloc'd copy (via `xxstrndup`) of the substring between the last `'.'` preceding the closing `'@'` and that `'@'`; returns NULL when there is no value (one-argument flags like `@D.name@`, or malformed input). Caller owns the result.
+> Extracts the value part of a flag diacritic like `@U.name.value@`: returns a copy of the substring between the last `'.'` preceding the closing `'@'` and that `'@'`; returns NULL when there is no value (one-argument flags like `@D.name@`, or malformed input). Caller owns the result.
 > Algorithm: iterate byte positions over `strlen(string)` bytes, advancing by whole UTF-8 characters. The first `'.'` sets `first = i+1`; every subsequent `'.'` sets `start = i+1` (so `start` tracks the dot immediately before the value); an `'@'` encountered while `start != 0` sets `end = i` and breaks — the leading `'@'` at i=0 is ignored because `start` is still 0 there. Returns the copy only if `start > 0 && end > 0`. Implementation: foma/flags.c.
 
 > [spec:foma:def:fomalibconf.fsm-construct-handle]
@@ -622,10 +622,4 @@
 
 > [spec:foma:sem:fomalibconf.xstrrev-fn]
 > Reverses `str` byte-wise in place and returns the same pointer; NULL or empty input is returned unchanged. Two pointers start at the first and last byte (str + strlen - 1) and swap via the XOR trick (`*p1 ^= *p2; *p2 ^= *p1; *p1 ^= *p2;`), then move inward while p2 > p1 (strict, so they never alias — the XOR trick is safe, and the middle byte of an odd-length string is untouched). Byte-level reversal: multibyte UTF-8 sequences come out byte-reversed, i.e. invalid UTF-8; callers that need UTF-8 reversal handle that elsewhere. No allocation. Implementation: foma/utf8.c.
-
-> [spec:foma:def:fomalibconf.xxstrndup-fn]
-> char *xxstrndup(const char *s, size_t n)
-
-> [spec:foma:sem:fomalibconf.xxstrndup-fn]
-> Portable strndup: returns a freshly malloc'd, NUL-terminated copy of the first min(strlen(s), n) bytes of `s`; the caller owns it. Algorithm: scan `p` forward from `s` with `while (*p++ && n--)` — the short-circuit means `n--` is only evaluated for non-NUL bytes, and the loop stops either one past the NUL or one past the (n+1)th byte; then the copy length is recomputed as n = p - s - 1, exactly min(original strlen, original n). malloc(n+1); if malloc fails return NULL without copying; else memcpy n bytes and set r[n] = 0. `s` is never modified; bytes of `s` are read up to and including the first NUL or the (n+1)th byte, whichever comes first, so `s` need not be NUL-terminated if it has at least n+1 readable bytes. Implementation: foma/mem.c.
 
