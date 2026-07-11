@@ -970,7 +970,8 @@ pub fn iface_help_search(s: &str) {
             let nb = gh.name.as_bytes();
             let take = if nb.len() < 32 { nb.len() } else { 32 };
             let mut out = std::io::stdout();
-            let _ = out.write_all(&nb[..take]);
+            out.write_all(&nb[..take])
+                .expect("write help output to stdout");
             for _ in take..32 {
                 print!("{}", " ");
             }

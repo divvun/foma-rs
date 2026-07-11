@@ -83,12 +83,13 @@ thread_local! {
 
 fn out_str(s: &str) {
     OUT.with_borrow_mut(|o| {
-        let _ = o.write_all(s.as_bytes());
+        o.write_all(s.as_bytes())
+            .expect("write lookup output to stdout");
     });
 }
 fn out_flush() {
     OUT.with_borrow_mut(|o| {
-        let _ = o.flush();
+        o.flush().expect("flush lookup output");
     });
 }
 fn finish(code: i32) -> ! {

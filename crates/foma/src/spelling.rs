@@ -978,33 +978,36 @@ pub fn cmatrix_print_att<W: std::io::Write + ?Sized>(net: &Fsm, outfile: &mut W)
                 continue;
             }
             if i == 0 && j != 0 {
-                let _ = writeln!(
+                writeln!(
                     outfile,
                     "0\t0\t{}\t{}\t{}",
                     "@0@",
                     sigma_string(j, &net.sigma).expect("symbol number in matrix range resolves"),
                     cm[(i * maxsigma + j) as usize]
-                );
+                )
+                .expect("writing the confusion matrix");
             } else if j == 0 && i != 0 {
-                let _ = writeln!(
+                writeln!(
                     outfile,
                     "0\t0\t{}\t{}\t{}",
                     sigma_string(i, &net.sigma).expect("symbol number in matrix range resolves"),
                     "@0@",
                     cm[(i * maxsigma + j) as usize]
-                );
+                )
+                .expect("writing the confusion matrix");
             } else if j != 0 && i != 0 {
-                let _ = writeln!(
+                writeln!(
                     outfile,
                     "0\t0\t{}\t{}\t{}",
                     sigma_string(i, &net.sigma).expect("symbol number in matrix range resolves"),
                     sigma_string(j, &net.sigma).expect("symbol number in matrix range resolves"),
                     cm[(i * maxsigma + j) as usize]
-                );
+                )
+                .expect("writing the confusion matrix");
             }
         }
     }
-    let _ = writeln!(outfile, "0");
+    writeln!(outfile, "0").expect("writing the confusion matrix");
 }
 
 // [spec:foma:def:spelling.cmatrix-print-fn]

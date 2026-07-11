@@ -261,7 +261,7 @@ fn rl_gets(prompt: &str) -> Option<String> {
     if USE_READLINE.with(|u| u.get()) == 0 {
         // C use_readline == 0: printf the prompt, fgets, strip_newline.
         print!("{}", prompt);
-        let _ = io::stdout().flush();
+        io::stdout().flush().expect("flush stdout");
         let mut line = String::new();
         let n = io::stdin().read_line(&mut line).unwrap_or(0);
         if n == 0 {
@@ -277,7 +277,7 @@ fn rl_gets(prompt: &str) -> Option<String> {
         // the non-empty line to history. Here: print the prompt ourselves (no
         // readline to display it) and read from stdin.
         print!("{}", prompt);
-        let _ = io::stdout().flush();
+        io::stdout().flush().expect("flush stdout");
         let mut line = String::new();
         let n = io::stdin().read_line(&mut line).unwrap_or(0);
         if n == 0 {
@@ -499,7 +499,7 @@ fn main() {
             prompt = String::new();
         }
 
-        let _ = io::stdout().flush();
+        io::stdout().flush().expect("flush stdout");
 
         let command = rl_gets(&prompt);
         match command {
