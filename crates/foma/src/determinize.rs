@@ -467,10 +467,11 @@ pub(crate) fn init(s: &mut Subset, net: &mut Fsm) {
 }
 
 // [spec:foma:def:determinize.trans-sort-cmp-fn]
-// [spec:foma:sem:determinize.trans-sort-cmp-fn]
-/* C: qsort comparator over const void * — typed references here */
-pub(crate) fn trans_sort_cmp(a: &TransList, b: &TransList) -> i32 {
-    a.inout - b.inout
+// [spec:foma:sem:determinize.trans-sort-cmp-fn+1]
+/* C: qsort comparator over const void * — typed references here.
+Ascending on the composite `inout` symbol. */
+pub(crate) fn trans_sort_cmp(a: &TransList, b: &TransList) -> core::cmp::Ordering {
+    a.inout.cmp(&b.inout)
 }
 
 // [spec:foma:def:determinize.init-trans-array-fn]
@@ -527,7 +528,7 @@ pub(crate) fn init_trans_array(s: &mut Subset, net: &Fsm) {
         if size > 1 {
             /* unstable sort by symbol; equal keys keep an unspecified order */
             s.trans_list_determinize[arrptr..arrptr + size as usize]
-                .sort_unstable_by(|a, b| trans_sort_cmp(a, b).cmp(&0));
+                .sort_unstable_by(trans_sort_cmp);
             let mut lastsym = -1;
             /* Figure out if we're already deterministic */
             for j in 0..size as usize {
@@ -1533,10 +1534,11 @@ mod tests {
         nhash_free(table, 2);
     }
 
-    // trans_sort_cmp: ascending by composite symbol (a->inout - b->inout).
-    // [spec:foma:sem:determinize.trans-sort-cmp-fn/test]
+    // trans_sort_cmp: ascending by composite symbol (a->inout vs b->inout).
+    // [spec:foma:sem:determinize.trans-sort-cmp-fn+1/test]
     #[test]
     fn trans_sort_cmp_orders_by_inout() {
+        use core::cmp::Ordering;
         let a = TransList {
             inout: 5,
             target: 0,
@@ -1545,9 +1547,9 @@ mod tests {
             inout: 2,
             target: 9,
         };
-        assert_eq!(trans_sort_cmp(&a, &b), 3);
-        assert_eq!(trans_sort_cmp(&b, &a), -3);
-        assert_eq!(trans_sort_cmp(&a, &a), 0);
+        assert_eq!(trans_sort_cmp(&a, &b), Ordering::Greater);
+        assert_eq!(trans_sort_cmp(&b, &a), Ordering::Less);
+        assert_eq!(trans_sort_cmp(&a, &a), Ordering::Equal);
     }
 
     // The extern add_fsm_arc re-export writes one flat line and returns offset+1.

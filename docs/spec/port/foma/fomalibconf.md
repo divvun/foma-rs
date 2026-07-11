@@ -555,8 +555,8 @@
 > [spec:foma:def:fomalibconf.sort-cmp-fn]
 > int sort_cmp(const void *a, const void *b)
 
-> [spec:foma:sem:fomalibconf.sort-cmp-fn]
-> qsort comparator for arrays of `struct fsm_state` (transition lines): casts both arguments to `const struct fsm_state *` and returns a->state_no - b->state_no, ordering lines ascending by source state number. Comparison by raw subtraction (theoretical int overflow for state numbers of opposite sign of huge magnitude; never hit in practice). Lines within the same state compare equal, so their relative order after qsort is unspecified. Implementation: foma/constructions.c.
+> [spec:foma:sem:fomalibconf.sort-cmp-fn+1]
+> qsort comparator for arrays of `struct fsm_state` (transition lines): casts both arguments to `const struct fsm_state *` and orders by a->state_no - b->state_no, i.e. ascending by source state number. Lines within the same state compare equal, so their relative order after qsort is unspecified. Returns an Ordering (Less/Equal/Greater); the C `int` sign of the subtraction carries the same information. Implementation: foma/constructions.c.
 
 > [spec:foma:def:fomalibconf.state-array]
 > struct state_array {

@@ -87,17 +87,17 @@ pub fn fsm_get_option(opts: &FomaOptions, option: u64) -> Option<bool> {
 }
 
 // [spec:foma:def:structures.linesortcompin-fn]
-// [spec:foma:sem:structures.linesortcompin-fn]
-pub fn linesortcompin(a: &FsmState, b: &FsmState) -> i32 {
+// [spec:foma:sem:structures.linesortcompin-fn+1]
+pub fn linesortcompin(a: &FsmState, b: &FsmState) -> core::cmp::Ordering {
     /* C: qsort comparator over struct fsm_state; int subtraction of the
-    short `in` fields */
-    a.r#in as i32 - b.r#in as i32
+    short `in` fields — an ascending order on `in` */
+    a.r#in.cmp(&b.r#in)
 }
 
 // [spec:foma:def:structures.linesortcompout-fn]
-// [spec:foma:sem:structures.linesortcompout-fn]
-pub fn linesortcompout(a: &FsmState, b: &FsmState) -> i32 {
-    a.out as i32 - b.out as i32
+// [spec:foma:sem:structures.linesortcompout-fn+1]
+pub fn linesortcompout(a: &FsmState, b: &FsmState) -> core::cmp::Ordering {
+    a.out.cmp(&b.out)
 }
 
 // [spec:foma:def:structures.fsm-sort-arcs-fn]
@@ -106,8 +106,8 @@ pub fn linesortcompout(a: &FsmState, b: &FsmState) -> i32 {
 // [spec:foma:sem:fomalib.fsm-sort-arcs-fn]
 pub fn fsm_sort_arcs(net: &mut Fsm, direction: i32) {
     /* direction 1 = in, direction = 2, out */
-    let scin: fn(&FsmState, &FsmState) -> i32 = linesortcompin;
-    let scout: fn(&FsmState, &FsmState) -> i32 = linesortcompout;
+    let scin: fn(&FsmState, &FsmState) -> core::cmp::Ordering = linesortcompin;
+    let scout: fn(&FsmState, &FsmState) -> core::cmp::Ordering = linesortcompout;
     let fsm = &mut net.states;
     let mut numlines: i32 = 0;
     let mut lasthead: usize = 0;
@@ -123,9 +123,9 @@ pub fn fsm_sort_arcs(net: &mut Fsm, direction: i32) {
                 /* C: qsort (unstable); a stable slice sort is an admissible
                 qsort behavior */
                 if direction == 1 {
-                    fsm[lasthead..lasthead + numlines as usize].sort_by(|a, b| scin(a, b).cmp(&0));
+                    fsm[lasthead..lasthead + numlines as usize].sort_by(scin);
                 } else {
-                    fsm[lasthead..lasthead + numlines as usize].sort_by(|a, b| scout(a, b).cmp(&0));
+                    fsm[lasthead..lasthead + numlines as usize].sort_by(scout);
                 }
             }
             numlines = 0;
@@ -1566,18 +1566,19 @@ mod tests {
         assert_eq!(fsm_get_option(&opts, 9999), None);
     }
 
-    // [spec:foma:sem:structures.linesortcompin-fn/test]
-    // [spec:foma:sem:structures.linesortcompout-fn/test]
+    // [spec:foma:sem:structures.linesortcompin-fn+1/test]
+    // [spec:foma:sem:structures.linesortcompout-fn+1/test]
     #[test]
     fn line_comparators() {
+        use core::cmp::Ordering;
         let a = st(0, 5, 7, 1, 0, 1);
         let b = st(0, 2, 1, 1, 0, 1);
-        // int subtraction of the short fields
-        assert_eq!(linesortcompin(&a, &b), 3);
-        assert_eq!(linesortcompin(&b, &a), -3);
-        assert_eq!(linesortcompin(&a, &a), 0);
-        assert_eq!(linesortcompout(&a, &b), 6);
-        assert_eq!(linesortcompout(&b, &a), -6);
+        // ascending order on the short in/out fields
+        assert_eq!(linesortcompin(&a, &b), Ordering::Greater);
+        assert_eq!(linesortcompin(&b, &a), Ordering::Less);
+        assert_eq!(linesortcompin(&a, &a), Ordering::Equal);
+        assert_eq!(linesortcompout(&a, &b), Ordering::Greater);
+        assert_eq!(linesortcompout(&b, &a), Ordering::Less);
     }
 
     // [spec:foma:sem:structures.fsm-sort-arcs-fn/test]

@@ -3,11 +3,12 @@
 use super::*;
 
 // [spec:foma:def:constructions.sort-cmp-fn]
-// [spec:foma:sem:constructions.sort-cmp-fn]
+// [spec:foma:sem:constructions.sort-cmp-fn+1]
 // [spec:foma:def:fomalibconf.sort-cmp-fn]
-// [spec:foma:sem:fomalibconf.sort-cmp-fn]
-pub fn sort_cmp(a: &FsmState, b: &FsmState) -> i32 {
-    a.state_no - b.state_no
+// [spec:foma:sem:fomalibconf.sort-cmp-fn+1]
+pub fn sort_cmp(a: &FsmState, b: &FsmState) -> core::cmp::Ordering {
+    /* C: qsort comparator returning a->state_no - b->state_no (ascending) */
+    a.state_no.cmp(&b.state_no)
 }
 
 // [spec:foma:def:constructions.fsm-sort-lines-fn]
@@ -18,7 +19,7 @@ pub fn fsm_sort_lines(net: &mut Fsm) {
     let count = find_arccount(&net.states);
     /* C: qsort (unstable) over the lines before the sentinel; a slice
     sort_unstable is an admissible qsort behavior */
-    net.states[..count as usize].sort_unstable_by(|a, b| sort_cmp(a, b).cmp(&0));
+    net.states[..count as usize].sort_unstable_by(sort_cmp);
 }
 
 // [spec:foma:def:constructions.fsm-update-flags-fn]

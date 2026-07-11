@@ -131,14 +131,6 @@ pub fn iface_stack_check(session: &mut Session, size: i32) -> bool {
     true
 }
 
-// Full variable-name comparison: returns 0 iff the names are equal. Plumbing for
-// the variable-name lookup in iface_{set,show}_variable. C used strncmp(a, b, 8),
-// comparing only the first 8 bytes, so any name sharing an 8-char prefix with a
-// real variable collided (e.g. "hopcroft-XYZ" matched "hopcroft-min").
-fn namecmp(a: &str, b: &str) -> i32 {
-    if a == b { 0 } else { 1 }
-}
-
 // C strtol(value, &endptr, 10) semantics used by iface_set_variable's FVAR_INT
 // branch. Returns (result truncated to `long`=i64, endptr==value i.e. no digits
 // consumed, errno==ERANGE i.e. out of long range). Unannotated plumbing.
@@ -202,7 +194,10 @@ pub fn iface_show_variables(session: &mut Session) {
 // [spec:foma:sem:foma.iface-show-variable-fn+2]
 pub fn iface_show_variable(session: &mut Session, name: &str) {
     for gv in global_vars() {
-        if namecmp(name, gv.name) == 0 {
+        // Full variable-name equality. C used strncmp(a, b, 8), comparing only the
+        // first 8 bytes, so any name sharing an 8-char prefix with a real variable
+        // collided (e.g. "hopcroft-XYZ" matched "hopcroft-min").
+        if name == gv.name {
             // Wave 4 fix: the C printed ON/OFF from `*(int*)ptr == 1` for EVERY
             // type (INT variables only showed ON at value 1; STRING reinterpreted
             // the char* bytes as int). Print by declared type instead: BOOL as
@@ -228,7 +223,9 @@ pub fn iface_show_variable(session: &mut Session, name: &str) {
 // [spec:foma:sem:foma.iface-set-variable-fn+1]
 pub fn iface_set_variable(session: &mut Session, name: &str, value: &str) {
     for gv in global_vars() {
-        if namecmp(name, gv.name) == 0 {
+        // Full variable-name equality (C strncmp(a, b, 8) collided on 8-char
+        // prefixes; see iface_show_variable).
+        if name == gv.name {
             match gv.field {
                 GvField::Bool(f) => {
                     let j: bool;

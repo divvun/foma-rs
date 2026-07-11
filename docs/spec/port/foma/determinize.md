@@ -405,9 +405,9 @@
 > [spec:foma:def:determinize.trans-sort-cmp-fn]
 > static int trans_sort_cmp(const void *a, const void *b)
 
-> [spec:foma:sem:determinize.trans-sort-cmp-fn]
-> qsort comparator over struct trans_list: returns a->inout - b->inout, i.e. ascending
+> [spec:foma:sem:determinize.trans-sort-cmp-fn+1]
+> qsort comparator over struct trans_list: orders by a->inout - b->inout, i.e. ascending
 > order by composite symbol; entries with equal inout keep an unspecified relative order.
-> The subtraction idiom would overflow only for symbol values beyond INT_MAX/2, which
-> cannot occur since composite symbols are dense small nonnegative ints.
+> Returns an Ordering (Less/Equal/Greater); the C `int` sign of the subtraction carries the
+> same information.
 

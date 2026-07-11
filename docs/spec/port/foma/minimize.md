@@ -270,9 +270,9 @@
 > [spec:foma:def:minimize.trans-sort-cmp-fn]
 > static int trans_sort_cmp(const void *a, const void *b)
 
-> [spec:foma:sem:minimize.trans-sort-cmp-fn]
-> qsort comparator over struct trans_list: returns a->inout - b->inout, sorting inverse
+> [spec:foma:sem:minimize.trans-sort-cmp-fn+1]
+> qsort comparator over struct trans_list: orders by a->inout - b->inout, sorting inverse
 > transition entries ascending by composite symbol; equal-symbol entries keep an
-> unspecified relative order. Overflow-safe in practice because composite symbols are
-> dense small nonnegative ints.
+> unspecified relative order. Returns an Ordering (Less/Equal/Greater); the C `int` sign
+> of the subtraction carries the same information.
 

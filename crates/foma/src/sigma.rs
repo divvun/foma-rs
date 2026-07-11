@@ -299,14 +299,10 @@ pub struct Ssort {
 }
 
 // [spec:foma:def:sigma.ssortcmp-fn]
-// [spec:foma:sem:sigma.ssortcmp-fn]
-pub fn ssortcmp(a: &Ssort, b: &Ssort) -> i32 {
-    /* return(strcmp(a->symbol, b->symbol)) — bytewise order, sign only */
-    match a.symbol.as_bytes().cmp(b.symbol.as_bytes()) {
-        core::cmp::Ordering::Less => -1,
-        core::cmp::Ordering::Equal => 0,
-        core::cmp::Ordering::Greater => 1,
-    }
+// [spec:foma:sem:sigma.ssortcmp-fn+1]
+pub fn ssortcmp(a: &Ssort, b: &Ssort) -> core::cmp::Ordering {
+    /* return(strcmp(a->symbol, b->symbol)) — bytewise order */
+    a.symbol.as_bytes().cmp(b.symbol.as_bytes())
 }
 
 // [spec:foma:def:sigma.sigma-copy-fn]
@@ -345,7 +341,7 @@ pub fn sigma_sort(net: &mut Fsm) -> i32 {
     }
     let max = ssort.len() as i32;
     /* qsort(ssort, max, sizeof(struct ssort), comp) with comp = ssortcmp */
-    ssort.sort_by(|a, b| ssortcmp(a, b).cmp(&0));
+    ssort.sort_by(ssortcmp);
     // Wave 4 fix: the C read replacearray slots for numbers absent from sigma
     // while they were still uninitialized (garbage in C, collapsed to 0 by the
     // Wave-2 port), silently corrupting any arc carrying such a label. Seed the
@@ -926,9 +922,10 @@ mod tests {
 
     /* ---- ssortcmp ---- */
 
-    // [spec:foma:sem:sigma.ssortcmp-fn/test]
+    // [spec:foma:sem:sigma.ssortcmp-fn+1/test]
     #[test]
     fn ssortcmp_orders_bytewise_on_symbol_ignoring_number() {
+        use core::cmp::Ordering;
         let a = Ssort {
             symbol: "a".to_string(),
             number: 99,
@@ -937,20 +934,20 @@ mod tests {
             symbol: "b".to_string(),
             number: 1,
         };
-        assert_eq!(ssortcmp(&a, &b), -1);
-        assert_eq!(ssortcmp(&b, &a), 1);
-        /* equal strings → 0 even with different numbers */
+        assert_eq!(ssortcmp(&a, &b), Ordering::Less);
+        assert_eq!(ssortcmp(&b, &a), Ordering::Greater);
+        /* equal strings → Equal even with different numbers */
         let a2 = Ssort {
             symbol: "a".to_string(),
             number: 5,
         };
-        assert_eq!(ssortcmp(&a, &a2), 0);
+        assert_eq!(ssortcmp(&a, &a2), Ordering::Equal);
         /* byte order, not case-insensitive: 'B' (0x42) < 'a' (0x61) */
         let upper = Ssort {
             symbol: "B".to_string(),
             number: 0,
         };
-        assert_eq!(ssortcmp(&upper, &a), -1);
+        assert_eq!(ssortcmp(&upper, &a), Ordering::Less);
     }
 
     /* ---- sigma_sort ---- */

@@ -114,6 +114,6 @@
 > [spec:foma:def:sigma.ssortcmp-fn]
 > int ssortcmp(const void *_a, const void *_b)
 
-> [spec:foma:sem:sigma.ssortcmp-fn]
-> qsort comparator over struct ssort: returns strcmp(a->symbol, b->symbol) — plain byte-wise ordering of the symbol strings; the number field is ignored.
+> [spec:foma:sem:sigma.ssortcmp-fn+1]
+> qsort comparator over struct ssort: orders by strcmp(a->symbol, b->symbol) — plain byte-wise ordering of the symbol strings; the number field is ignored. Returns an Ordering (Less/Equal/Greater); the C `int` sign of the strcmp carries the same information.
 

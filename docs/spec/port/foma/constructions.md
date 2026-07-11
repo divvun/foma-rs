@@ -1385,14 +1385,15 @@
 > [spec:foma:def:constructions.sort-cmp-fn]
 > int sort_cmp(const void *a, const void *b)
 
-> [spec:foma:sem:constructions.sort-cmp-fn]
-> qsort comparator over struct fsm_state lines: returns the int difference
-> a->state_no - b->state_no, ordering lines by ascending state number. Lines of
+> [spec:foma:sem:constructions.sort-cmp-fn+1]
+> qsort comparator over struct fsm_state lines: orders by
+> a->state_no - b->state_no, i.e. ascending state number. Lines of
 > the same state compare equal, so qsort may permute them arbitrarily
 > (fsm_sort_lines guarantees grouping only, not intra-state order). state_no
 > values are small non-negative ints (or -1 for the sentinel, which
-> fsm_sort_lines excludes from the sorted range), so the subtraction cannot
-> overflow in practice.
+> fsm_sort_lines excludes from the sorted range). Returns an Ordering
+> (Less/Equal/Greater); the C `int` sign of the subtraction carries the same
+> information.
 
 > [spec:foma:def:constructions.state-arr]
 > struct state_arr {

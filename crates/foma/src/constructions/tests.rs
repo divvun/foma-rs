@@ -115,13 +115,23 @@ fn ws(items: &[&str]) -> Vec<String> {
 
 /* ---- infrastructure: comparators / renumbering -------------------- */
 
-// [spec:foma:sem:constructions.sort-cmp-fn/test]
-// [spec:foma:sem:fomalibconf.sort-cmp-fn/test]
+// [spec:foma:sem:constructions.sort-cmp-fn+1/test]
+// [spec:foma:sem:fomalibconf.sort-cmp-fn+1/test]
 #[test]
-fn sort_cmp_returns_state_no_difference() {
-    assert_eq!(sort_cmp(&st(5, 0, 0, 0, 0, 0), &st(2, 0, 0, 0, 0, 0)), 3);
-    assert_eq!(sort_cmp(&st(2, 0, 0, 0, 0, 0), &st(5, 0, 0, 0, 0, 0)), -3);
-    assert_eq!(sort_cmp(&st(4, 0, 0, 0, 0, 0), &st(4, 9, 9, 9, 1, 1)), 0);
+fn sort_cmp_orders_by_state_no() {
+    use core::cmp::Ordering;
+    assert_eq!(
+        sort_cmp(&st(5, 0, 0, 0, 0, 0), &st(2, 0, 0, 0, 0, 0)),
+        Ordering::Greater
+    );
+    assert_eq!(
+        sort_cmp(&st(2, 0, 0, 0, 0, 0), &st(5, 0, 0, 0, 0, 0)),
+        Ordering::Less
+    );
+    assert_eq!(
+        sort_cmp(&st(4, 0, 0, 0, 0, 0), &st(4, 9, 9, 9, 1, 1)),
+        Ordering::Equal
+    );
 }
 
 // [spec:foma:sem:constructions.fsm-sort-lines-fn/test]

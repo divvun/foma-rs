@@ -719,10 +719,11 @@ pub(crate) fn init_PE(m: &mut Minimizer) {
 }
 
 // [spec:foma:def:minimize.trans-sort-cmp-fn]
-// [spec:foma:sem:minimize.trans-sort-cmp-fn]
-/* C: qsort comparator over const void * — typed slice elements here */
-pub(crate) fn trans_sort_cmp(a: &TransList, b: &TransList) -> i32 {
-    a.inout - b.inout
+// [spec:foma:sem:minimize.trans-sort-cmp-fn+1]
+/* C: qsort comparator over const void * — typed slice elements here.
+Ascending on the composite `inout` symbol. */
+pub(crate) fn trans_sort_cmp(a: &TransList, b: &TransList) -> core::cmp::Ordering {
+    a.inout.cmp(&b.inout)
 }
 
 // [spec:foma:def:minimize.generate-inverse-fn]
@@ -776,7 +777,7 @@ pub(crate) fn generate_inverse(m: &mut Minimizer, net: &Fsm) {
         let size = m.trans_array_minimize[i].size as i32;
         if size > 1 {
             m.trans_list_minimize[listptr..listptr + size as usize]
-                .sort_unstable_by(|a, b| trans_sort_cmp(a, b).cmp(&0));
+                .sort_unstable_by(trans_sort_cmp);
         }
     }
 }
@@ -1209,9 +1210,10 @@ mod tests {
     }
 
     // trans_sort_cmp: ascending by composite symbol.
-    // [spec:foma:sem:minimize.trans-sort-cmp-fn/test]
+    // [spec:foma:sem:minimize.trans-sort-cmp-fn+1/test]
     #[test]
     fn trans_sort_cmp_orders_by_inout() {
+        use core::cmp::Ordering;
         let a = TransList {
             inout: 9,
             source: 0,
@@ -1220,8 +1222,8 @@ mod tests {
             inout: 4,
             source: 1,
         };
-        assert_eq!(trans_sort_cmp(&a, &b), 5);
-        assert_eq!(trans_sort_cmp(&b, &a), -5);
-        assert_eq!(trans_sort_cmp(&a, &a), 0);
+        assert_eq!(trans_sort_cmp(&a, &b), Ordering::Greater);
+        assert_eq!(trans_sort_cmp(&b, &a), Ordering::Less);
+        assert_eq!(trans_sort_cmp(&a, &a), Ordering::Equal);
     }
 }

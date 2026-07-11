@@ -307,14 +307,14 @@
 > [spec:foma:def:structures.linesortcompin-fn]
 > int linesortcompin(const void *_a, const void *_b)
 
-> [spec:foma:sem:structures.linesortcompin-fn]
-> qsort comparator over `struct fsm_state`: casts both const void pointers to const struct fsm_state * and returns `a->in - b->in` (int subtraction of the short `in` fields; negative/zero/positive gives ascending order of input symbol number).
+> [spec:foma:sem:structures.linesortcompin-fn+1]
+> qsort comparator over `struct fsm_state`: casts both const void pointers to const struct fsm_state * and orders by `a->in - b->in` (the short `in` fields), i.e. ascending order of input symbol number. Returns an Ordering (Less/Equal/Greater); the C `int` sign of the subtraction carries the same information.
 
 > [spec:foma:def:structures.linesortcompout-fn]
 > int linesortcompout(const void *_a, const void *_b)
 
-> [spec:foma:sem:structures.linesortcompout-fn]
-> Same as linesortcompin but compares the `out` fields: returns `a->out - b->out` (ascending order of output symbol number).
+> [spec:foma:sem:structures.linesortcompout-fn+1]
+> Same as linesortcompin but compares the `out` fields: ascending order of output symbol number by `a->out - b->out`. Returns an Ordering (Less/Equal/Greater); the C `int` sign of the subtraction carries the same information.
 
 > [spec:foma:def:structures.map-firstlines-fn]
 > struct state_array *map_firstlines(struct fsm *net)
