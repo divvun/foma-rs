@@ -36,6 +36,18 @@ use crate::spelling::{apply_med_clear, apply_med_init, apply_med_set_align_symbo
 use crate::structures::fsm_destroy;
 use crate::types::{ApplyHandle, ApplyMedHandle, Fsm, StackEntry};
 
+/// Outcome of an in-place stack reorder (`stack_turn` / `stack_rotate`):
+/// whether there was anything on the stack to reorder. Replaces C's status
+/// ints (`stack_turn` returned 0/1, `stack_rotate` -1/1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StackReorder {
+    /// The stack was empty — nothing to reorder.
+    Empty,
+    /// The stack was non-empty and the reorder applied (a single element is a
+    /// trivial no-op that still reports Reordered, as in C).
+    Reordered,
+}
+
 impl Session {
     /* -------------------------------------------------------------- */
     /* Arena / head helpers (pointer ops become index ops)            */
@@ -382,7 +394,7 @@ impl Session {
     // [spec:foma:sem:stack.stack-turn-fn+1]
     // [spec:foma:def:foma.stack-turn-fn]
     // [spec:foma:sem:foma.stack-turn-fn+1]
-    pub fn stack_turn(&mut self) -> i32 {
+    pub fn stack_turn(&mut self) -> StackReorder {
         // Wave 4 fix: the C reversal's final previous-link fix-up loop never
         // advanced its cursor, so on any stack of >= 2 entries it spun forever
         // (dead code — "turn stack" reaches iface_turn → stack_rotate, never here).
@@ -393,10 +405,10 @@ impl Session {
         // former top is the new bottom and the former bottom is the new top.
         if self.stack_isempty() {
             tracing::info!("Stack is empty.");
-            return 0;
+            return StackReorder::Empty;
         }
         if self.stack_size() == 1 {
-            return 1;
+            return StackReorder::Reordered;
         }
 
         // Collect the real entries bottom -> top, stopping at the sentinel.
@@ -423,7 +435,7 @@ impl Session {
             .expect("size >= 2 here, so entries is non-empty");
         self.set_next(new_top, Some(sentinel));
         self.set_previous(sentinel, Some(new_top));
-        1
+        StackReorder::Reordered
     }
 
     // [spec:foma:def:stack.stack-find-top-fn]
@@ -491,14 +503,14 @@ impl Session {
     // [spec:foma:sem:stack.stack-rotate-fn+1]
     // [spec:foma:def:foma.stack-rotate-fn]
     // [spec:foma:sem:foma.stack-rotate-fn+1]
-    pub fn stack_rotate(&mut self) -> i32 {
+    pub fn stack_rotate(&mut self) -> StackReorder {
         /* Top element of stack to bottom */
         if self.stack_isempty() {
             tracing::info!("Stack is empty.");
-            return -1;
+            return StackReorder::Empty;
         }
         if self.stack_size() == 1 {
-            return 1;
+            return StackReorder::Reordered;
         }
         let stack_ptr = self
             .stack_find_top()
@@ -517,7 +529,7 @@ impl Session {
         let temp_amedh = self.stack_arena[ms].amedh.take();
         self.stack_arena[ms].amedh = self.stack_arena[stack_ptr].amedh.take();
         self.stack_arena[stack_ptr].amedh = temp_amedh;
-        1
+        StackReorder::Reordered
     }
 
     // [spec:foma:def:stack.stack-print-fn]
@@ -746,17 +758,17 @@ mod tests {
     fn stack_rotate_swaps_top_and_bottom_fsms_with_their_handles() {
         let mut session = Session::new();
         // Empty: logs "Stack is empty." and returns -1.
-        assert_eq!(session.stack_rotate(), -1);
+        assert_eq!(session.stack_rotate(), StackReorder::Empty);
         add_named(&mut session, "a", "bottomnet");
         // Size 1: returns 1, no change.
-        assert_eq!(session.stack_rotate(), 1);
+        assert_eq!(session.stack_rotate(), StackReorder::Reordered);
         assert_eq!(top_fsm_name(&mut session), "bottomnet");
         add_named(&mut session, "b", "midnet");
         add_named(&mut session, "c", "topnet");
         // Cache an apply handle on the top entry (holding topnet) and mark it.
         let top = session.stack_get_ah().unwrap();
         session.stack_entry_ah(top, |ah| ah.ptr = 313_131);
-        assert_eq!(session.stack_rotate(), 1);
+        assert_eq!(session.stack_rotate(), StackReorder::Reordered);
         // The fsm pointers of bottom and top are exchanged; the middle entry is
         // untouched (for size > 2 this is a swap, not a rotate).
         assert_eq!(bottom_fsm_name(&mut session), "topnet");
@@ -812,10 +824,10 @@ mod tests {
     fn stack_turn_reverses_the_stack() {
         let mut session = Session::new();
         // Empty: logs "Stack is empty." and returns 0.
-        assert_eq!(session.stack_turn(), 0);
+        assert_eq!(session.stack_turn(), StackReorder::Empty);
         add_named(&mut session, "a", "solo");
         // Size 1: returns 1 with no change.
-        assert_eq!(session.stack_turn(), 1);
+        assert_eq!(session.stack_turn(), StackReorder::Reordered);
         assert_eq!(session.stack_size(), 1);
         assert_eq!(top_fsm_name(&mut session), "solo");
 
@@ -825,7 +837,7 @@ mod tests {
         add_named(&mut session, "a", "first");
         add_named(&mut session, "b", "second");
         add_named(&mut session, "c", "third");
-        assert_eq!(session.stack_turn(), 1);
+        assert_eq!(session.stack_turn(), StackReorder::Reordered);
         // Former top is now the bottom, former bottom is now the top, the
         // middle is unchanged; the stack keeps all three entries.
         assert_eq!(session.stack_size(), 3);
@@ -851,7 +863,7 @@ mod tests {
         assert_eq!(session.e_previous(mid), Some(bottom));
         assert_eq!(session.e_previous(top), Some(mid));
         // Reversal is an involution: turning again restores the original order.
-        assert_eq!(session.stack_turn(), 1);
+        assert_eq!(session.stack_turn(), StackReorder::Reordered);
         assert_eq!(bottom_fsm_name(&mut session), "first");
         assert_eq!(top_fsm_name(&mut session), "third");
     }
