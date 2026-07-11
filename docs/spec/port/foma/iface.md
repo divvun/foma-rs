@@ -724,11 +724,11 @@
 > separator='\003' into freshly allocated upper and lower strings. Allocates *upper and *lower with
 > calloc(strlen(result), 1) each — latent bug: no +1 for the NUL terminator, so if nothing is
 > filtered out (result contains no \001/\002/\003 bytes) the terminator writes one byte past the
-> allocation. Then: iface_split_string(result, *upper) extracts the upper side; xstrrev(result)
-> (in-place byte reversal); iface_split_string(result, *lower) — on the reversed string the same
+> allocation. Then: iface_split_string(result, *upper) extracts the upper side; the result bytes are
+> reversed in place; iface_split_string(result, *lower) — on the reversed bytes the same
 > upper-side filter extracts the lower symbols (in each reversed "u\003l" pair the lower symbol now
-> precedes the separator); xstrrev(*lower) restores its order; xstrrev(result) restores the caller's
-> buffer. Byte-wise reversal corrupts multi-byte UTF-8 symbols. Caller frees *upper/*lower.
+> precedes the separator); *lower is reversed back to restore its order, and result is reversed back to
+> restore the caller's buffer. The reversal round-trips (reverse → split → un-reverse). Caller frees *upper/*lower.
 
 > [spec:foma:def:iface.iface-split-string-fn]
 > void iface_split_string(char *result, char *string)

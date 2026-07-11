@@ -599,9 +599,4 @@
 > [spec:foma:sem:fomalibconf.xprintf-fn]
 > No-op. The only definition is in foma/foma.c (the interactive CLI's main file, not the library sources): the body is `return ; printf("%s",string);` — the unconditional `return` comes first, so the printf is unreachable dead code and calling `xprintf` does nothing and returns immediately. Presumably a debugging switch left disabled. Because it is defined in the CLI, not in libfoma proper, a library-only consumer that calls it gets a link error. A port should treat it as a no-op hook. Implementation: foma/foma.c.
 
-> [spec:foma:def:fomalibconf.xstrrev-fn]
-> char *xstrrev(char *str)
-
-> [spec:foma:sem:fomalibconf.xstrrev-fn]
-> Reverses `str` byte-wise in place and returns the same pointer; NULL or empty input is returned unchanged. Two pointers start at the first and last byte (str + strlen - 1) and swap via the XOR trick (`*p1 ^= *p2; *p2 ^= *p1; *p1 ^= *p2;`), then move inward while p2 > p1 (strict, so they never alias — the XOR trick is safe, and the middle byte of an odd-length string is untouched). Byte-level reversal: multibyte UTF-8 sequences come out byte-reversed, i.e. invalid UTF-8; callers that need UTF-8 reversal handle that elsewhere. No allocation. Implementation: foma/utf8.c.
 

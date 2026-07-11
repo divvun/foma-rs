@@ -56,7 +56,7 @@ pub(crate) use crate::types::{
     AP_D, AP_U, ApplyHandle, EPSILON, Fsm, IDENTITY, M_LOWER, M_UPPER, OP_IGNORE_ALL,
     PATHCOUNT_CYCLIC, Sigma, UNKNOWN, YES,
 };
-pub(crate) use crate::utf8::{dequote_string, escape_string, xstrrev};
+pub(crate) use crate::utf8::{dequote_string, escape_string};
 
 mod apply_cmds;
 mod binary;

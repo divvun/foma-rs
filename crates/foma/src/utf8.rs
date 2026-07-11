@@ -7,20 +7,6 @@
 //! `truncate(i)` on the buffer; reading the terminating NUL corresponds
 //! to reading an implicit 0 at index `len`.
 
-/* Reverses string in-place */
-// [spec:foma:def:utf8.xstrrev-fn]
-// [spec:foma:sem:utf8.xstrrev-fn]
-// [spec:foma:def:fomalibconf.xstrrev-fn]
-// [spec:foma:sem:fomalibconf.xstrrev-fn]
-// Byte-wise reversal: multi-byte UTF-8 characters are corrupted, exactly
-// as in C (see the utf8.xstrrev-fn sem rule). C returns `str`; None/empty
-// are no-ops.
-pub fn xstrrev(str: Option<&mut Vec<u8>>) {
-    if let Some(s) = str {
-        s.reverse();
-    }
-}
-
 // [spec:foma:def:utf8.escape-string-fn]
 // [spec:foma:sem:utf8.escape-string-fn]
 // [spec:foma:def:fomalibconf.escape-string-fn]
@@ -586,34 +572,5 @@ mod tests {
         assert_eq!(utf8code16tostr(b"FFFF"), Some(vec![0xef, 0xbf, 0xbf]));
         // surrogate half encoded as-is (CESU-8-like), not rejected
         assert_eq!(utf8code16tostr(b"D800"), Some(vec![0xed, 0xa0, 0x80]));
-    }
-
-    // xstrrev: byte-wise reversal; multi-byte UTF-8 is corrupted (assert the
-    // corrupted bytes); None/empty/single are no-ops.
-    // [spec:foma:sem:utf8.xstrrev-fn/test]
-    // [spec:foma:sem:fomalibconf.xstrrev-fn/test]
-    #[test]
-    fn test_xstrrev() {
-        xstrrev(None); // NULL → no-op, no panic
-        let mut s = Vec::<u8>::new();
-        xstrrev(Some(&mut s));
-        assert_eq!(s, Vec::<u8>::new());
-        let mut s = b"a".to_vec();
-        xstrrev(Some(&mut s));
-        assert_eq!(s, b"a".to_vec());
-        let mut s = b"abc".to_vec();
-        xstrrev(Some(&mut s));
-        assert_eq!(s, b"cba".to_vec());
-        let mut s = b"abcd".to_vec();
-        xstrrev(Some(&mut s));
-        assert_eq!(s, b"dcba".to_vec());
-        // é = [0xc3, 0xa9] → byte-reversed [0xa9, 0xc3] (corrupt UTF-8)
-        let mut s = vec![0xc3, 0xa9];
-        xstrrev(Some(&mut s));
-        assert_eq!(s, vec![0xa9, 0xc3]);
-        // 'a' + é → [0x61,0xc3,0xa9] → [0xa9,0xc3,0x61] (corrupt)
-        let mut s = vec![0x61, 0xc3, 0xa9];
-        xstrrev(Some(&mut s));
-        assert_eq!(s, vec![0xa9, 0xc3, 0x61]);
     }
 }

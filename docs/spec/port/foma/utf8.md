@@ -73,9 +73,4 @@
 > [spec:foma:sem:utf8.utf8strlen-fn+1]
 > Not ported: this is `str::chars().count()`. Every call site held a `&str` (or a `String`) and passed its `.as_bytes()` only to hand them here, so the byte-scan reimplementation was pointless — callers now count characters directly with `str::chars().count()` (cast to i32 only where a value flows into an existing i32). The C behaviour was: with len=strlen(str), walk i from 0 while str[i] != '\0' and i < len, advancing by utf8skip(str+i)+1 and incrementing a count; an invalid lead byte (utf8skip == -1) advanced 0 and looped forever, worked around by forcing a step of at least 1.
 
-> [spec:foma:def:utf8.xstrrev-fn]
-> char *xstrrev(char *str)
-
-> [spec:foma:sem:utf8.xstrrev-fn]
-> Reverses the BYTES of `str` in place (not UTF-8 aware — multibyte characters are corrupted by design; callers reverse again or operate on byte level). NULL or empty input returned unchanged. Implementation detail: two pointers from both ends swap via triple XOR while end > start (strict inequality, so a pointer never XOR-swaps with itself); returns `str`.
 

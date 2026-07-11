@@ -312,8 +312,11 @@ pub fn iface_split_result(result: &mut Vec<u8>, upper: &mut Vec<u8>, lower: &mut
     /* Split string into upper by filtering the input side, and lower by the */
     /* same filter but on the reversed string.                               */
     iface_split_string(result, upper);
-    xstrrev(Some(result));
+    // Extract the lower side by running the same "take the upper" filter over
+    // the reversed bytes, then reverse the extracted piece back. The reversal
+    // is symmetric (reverse → split → un-reverse), so it round-trips cleanly.
+    result.reverse();
     iface_split_string(result, lower);
-    xstrrev(Some(lower));
-    xstrrev(Some(result));
+    lower.reverse();
+    result.reverse();
 }
