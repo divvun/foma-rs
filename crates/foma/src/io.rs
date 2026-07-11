@@ -747,24 +747,18 @@ pub fn fsm_read_text_file(filename: &str) -> Option<Box<Fsm>> {
 // [spec:foma:sem:io.fsm-write-binary-file-fn]
 // [spec:foma:def:fomalib.fsm-write-binary-file-fn]
 // [spec:foma:sem:fomalib.fsm-write-binary-file-fn]
-pub fn fsm_write_binary_file(net: &Fsm, filename: &str) -> i32 {
-    /* gzopen(filename, "wb") — a GzEncoder over the output File */
-    let file = match File::create(filename) {
-        Ok(f) => f,
-        Err(_) => return 1,
-    };
+pub fn fsm_write_binary_file(net: &Fsm, filename: &str) -> std::io::Result<()> {
+    /* gzopen(filename, "wb") — a GzEncoder over the output File. C returned 1
+    on any failure and 0 on success; the same open/write/gzip-finish failures
+    (e.g. a missing directory or a full disk) now propagate as the io::Error
+    instead of collapsing to a sentinel — the named-file twin of
+    fsm_write_binary. */
+    let file = File::create(filename)?;
     let mut outfile = GzEncoder::new(file, Compression::default());
-    /* C returned 1 on any failure and 0 on success; a write or gzip-finish
-    error (e.g. disk full) is now surfaced through that same sentinel instead of
-    being silently dropped. */
-    if foma_net_print(net, &mut outfile).is_err() {
-        return 1;
-    }
+    foma_net_print(net, &mut outfile)?;
     /* gzclose(outfile) — finish the gzip stream */
-    if outfile.finish().is_err() {
-        return 1;
-    }
-    0
+    outfile.finish()?;
+    Ok(())
 }
 
 // [spec:foma:def:io.fsm-write-binary-fn]
@@ -1964,8 +1958,8 @@ mod tests {
             let mut net = parse(rx);
             net.name = "rt".to_string();
             let f = Scratch::new("bin");
-            /* 0 = success */
-            assert_eq!(fsm_write_binary_file(&net, f.path()), 0);
+            /* Ok = success */
+            assert!(fsm_write_binary_file(&net, f.path()).is_ok());
             /* gzip magic 1f 8b in the file */
             assert_eq!(read_first_bytes(f.path(), 2), vec![0x1f, 0x8b]);
             let back = fsm_read_binary_file(f.path()).unwrap();
@@ -1976,12 +1970,9 @@ mod tests {
     // [spec:foma:sem:io.fsm-write-binary-file-fn/test]
     // [spec:foma:sem:fomalib.fsm-write-binary-file-fn/test]
     #[test]
-    fn fsm_write_binary_file_open_failure_returns_1() {
+    fn fsm_write_binary_file_open_failure_is_err() {
         let net = craft_ab_net("x");
-        assert_eq!(
-            fsm_write_binary_file(&net, "/nonexistent_dir_zzz/deep/file.foma"),
-            1
-        );
+        assert!(fsm_write_binary_file(&net, "/nonexistent_dir_zzz/deep/file.foma").is_err());
     }
 
     // [spec:foma:sem:io.fsm-write-binary-file-fn/test]
@@ -1993,7 +1984,7 @@ mod tests {
         cmatrix_init(&mut net);
         net.medlookup.as_mut().unwrap().confusion_matrix[2] = 9;
         let f = Scratch::new("cm");
-        assert_eq!(fsm_write_binary_file(&net, f.path()), 0);
+        assert!(fsm_write_binary_file(&net, f.path()).is_ok());
         let back = fsm_read_binary_file(f.path()).unwrap();
         assert_net_eq(&net, &back);
         assert_eq!(
