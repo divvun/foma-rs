@@ -132,44 +132,6 @@ pub fn iface_stack_check(session: &mut Session, size: i32) -> bool {
     true
 }
 
-// C strtol(value, &endptr, 10) semantics used by iface_set_variable's FVAR_INT
-// branch. Returns (result truncated to `long`=i64, endptr==value i.e. no digits
-// consumed, errno==ERANGE i.e. out of long range). Unannotated plumbing.
-fn c_strtol_base10(value: &str) -> (i64, bool, bool) {
-    let bytes = value.as_bytes();
-    let mut i = 0usize;
-    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c) {
-        i += 1;
-    }
-    let mut neg = false;
-    if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
-        neg = bytes[i] == b'-';
-        i += 1;
-    }
-    let mut any = false;
-    let mut acc: i64 = 0;
-    let mut range = false;
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
-        any = true;
-        let d = (bytes[i] - b'0') as i64;
-        if !range {
-            match acc.checked_mul(10).and_then(|v| v.checked_add(d)) {
-                Some(v) => acc = v,
-                None => range = true,
-            }
-        }
-        i += 1;
-    }
-    let result = if range {
-        if neg { i64::MIN } else { i64::MAX }
-    } else if neg {
-        -acc
-    } else {
-        acc
-    };
-    (result, !any, range)
-}
-
 // [spec:foma:def:iface.iface-show-variables-fn]
 // [spec:foma:sem:iface.iface-show-variables-fn]
 // [spec:foma:def:foma.iface-show-variables-fn]
@@ -251,10 +213,10 @@ pub fn iface_set_variable(session: &mut Session, name: &str, value: &str) {
                     print!("variable {} = {}\n", gv.name, value);
                 }
                 GvField::Int(f) => {
-                    let (result, no_digits, range) = c_strtol_base10(value);
+                    let parsed = crate::io::parse_leading_decimal(value);
                     // j = (int)strtol(...) — truncation to int.
-                    let j = result as i32;
-                    if range || no_digits || j < 0 {
+                    let j = parsed.value as i32;
+                    if parsed.out_of_range || parsed.no_digits || j < 0 {
                         print!("invalid value {} for variable {}\n", value, gv.name);
                     } else {
                         print!("variable {} = {}\n", gv.name, j);

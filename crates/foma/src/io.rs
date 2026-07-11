@@ -112,31 +112,64 @@ impl std::io::Write for Output {
 /* C library twins (no spec ids — these are libc, not io.c functions)  */
 /* ------------------------------------------------------------------ */
 
-/* C `atoll`: skip leading whitespace, optional sign, base-10 digits. Overflow
-is UB in C; reproduced here with wrapping arithmetic. */
-fn parse_leading_i64(s: &str) -> i64 {
-    let b = s.as_bytes();
+/* C `strtol(s, &endptr, 10)`: skip leading whitespace, optional sign, base-10
+digits, saturating to i64::MIN/MAX when the value is out of range (errno
+ERANGE). glibc's atoi/atoll are strtol/strtoll with the reporting dropped, so
+the parse_leading_* wrappers below share this walk. */
+pub struct ParsedDecimal {
+    pub value: i64,
+    /* endptr == s in C: no digits were consumed */
+    pub no_digits: bool,
+    /* errno == ERANGE */
+    pub out_of_range: bool,
+}
+
+pub fn parse_leading_decimal(s: &str) -> ParsedDecimal {
+    let bytes = s.as_bytes();
     let mut i = 0usize;
-    while i < b.len() && matches!(b[i], b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r') {
+    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c) {
         i += 1;
     }
-    let mut sign: i64 = 1;
-    if i < b.len() && (b[i] == b'+' || b[i] == b'-') {
-        if b[i] == b'-' {
-            sign = -1;
+    let mut neg = false;
+    if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+        neg = bytes[i] == b'-';
+        i += 1;
+    }
+    let mut any = false;
+    let mut acc: i64 = 0;
+    let mut range = false;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        any = true;
+        let d = (bytes[i] - b'0') as i64;
+        if !range {
+            match acc.checked_mul(10).and_then(|v| v.checked_add(d)) {
+                Some(v) => acc = v,
+                None => range = true,
+            }
         }
         i += 1;
     }
-    let mut n: i64 = 0;
-    while i < b.len() && b[i].is_ascii_digit() {
-        n = n.wrapping_mul(10).wrapping_add((b[i] - b'0') as i64);
-        i += 1;
+    let value = if range {
+        if neg { i64::MIN } else { i64::MAX }
+    } else if neg {
+        -acc
+    } else {
+        acc
+    };
+    ParsedDecimal {
+        value,
+        no_digits: !any,
+        out_of_range: range,
     }
-    sign.wrapping_mul(n)
+}
+
+/* C `atoll`: strtoll with endptr/ERANGE ignored. */
+pub fn parse_leading_i64(s: &str) -> i64 {
+    parse_leading_decimal(s).value
 }
 
 /* C `atoi`: like atoll truncated to int. */
-fn parse_leading_i32(s: &str) -> i32 {
+pub fn parse_leading_i32(s: &str) -> i32 {
     parse_leading_i64(s) as i32
 }
 

@@ -11,7 +11,9 @@ use std::cell::{Cell, RefCell};
 use std::io::{self, BufRead, BufReader, BufWriter, Stdin, Stdout, Write};
 
 use foma::apply::{apply_clear, apply_down, apply_index, apply_init, apply_up};
-use foma::io::{fsm_read_binary_file_multiple, fsm_read_binary_file_multiple_init};
+use foma::io::{
+    fsm_read_binary_file_multiple, fsm_read_binary_file_multiple_init, parse_leading_i32,
+};
 use foma::structures::{fsm_destroy, fsm_get_library_version_string, fsm_sort_arcs};
 use foma::types::{APPLY_INDEX_INPUT, APPLY_INDEX_OUTPUT, ApplyHandle, Fsm};
 
@@ -96,35 +98,6 @@ fn finish(code: i32) -> ! {
 }
 fn perror(prefix: &str) {
     eprintln!("{}: {}", prefix, io::Error::last_os_error());
-}
-
-fn parse_leading_i32(s: &str) -> i32 {
-    let b = s.as_bytes();
-    let mut i = 0usize;
-    while i < b.len() && (b[i] == b' ' || b[i] == b'\t') {
-        i += 1;
-    }
-    let mut neg = false;
-    if i < b.len() && (b[i] == b'+' || b[i] == b'-') {
-        neg = b[i] == b'-';
-        i += 1;
-    }
-    let mut val: i64 = 0;
-    while i < b.len() && b[i].is_ascii_digit() {
-        val = val * 10 + (b[i] - b'0') as i64;
-        i += 1;
-    }
-    if neg {
-        val = -val;
-    }
-    val as i32
-}
-
-fn first_is_digit(s: &str) -> bool {
-    s.as_bytes()
-        .first()
-        .map(|b| b.is_ascii_digit())
-        .unwrap_or(false)
 }
 
 /* Minimal getopt(3) twin: clustered flags, attached/separate option
@@ -291,7 +264,7 @@ fn main() {
                     /* m limit: "-I 4m" / "-I 4M" → 4 * 1024 * 1024 bytes */
                     index_mem_limit = 1024 * 1024 * parse_leading_i32(&optarg);
                     index_arcs = 1;
-                } else if first_is_digit(&optarg) {
+                } else if optarg.starts_with(|c: char| c.is_ascii_digit()) {
                     // Plain "-I 4" is an arc-count cutoff. (C required BOTH letter
                     // cases in the arg for the k/m branches, so "-I 4k"/"-I 4M"
                     // fell through here — the k/m suffix was silently ignored.)

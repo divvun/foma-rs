@@ -114,30 +114,6 @@ pub fn iface_extract_unambiguous(session: &mut Session) {
     }
 }
 
-// C atoi: skip leading whitespace, optional +/-, then decimal digits until a
-// non-digit; empty/no-digit → 0. Overflow is UB in C; wrapping here. Unannotated
-// plumbing used by iface_extract_number.
-fn parse_leading_i32(s: &str) -> i32 {
-    let bytes = s.as_bytes();
-    let mut i = 0usize;
-    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c) {
-        i += 1;
-    }
-    let mut sign: i32 = 1;
-    if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
-        if bytes[i] == b'-' {
-            sign = -1;
-        }
-        i += 1;
-    }
-    let mut n: i32 = 0;
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
-        n = n.wrapping_mul(10).wrapping_add((bytes[i] - b'0') as i32);
-        i += 1;
-    }
-    sign.wrapping_mul(n)
-}
-
 // [spec:foma:def:iface.iface-extract-number-fn]
 // [spec:foma:sem:iface.iface-extract-number-fn+1]
 // [spec:foma:def:foma.iface-extract-number-fn]
@@ -155,7 +131,7 @@ pub fn iface_extract_number(s: &str) -> i32 {
     if i > 0 && i < bytes.len() && bytes[i - 1] == b'-' {
         i -= 1;
     }
-    parse_leading_i32(&s[i..])
+    crate::io::parse_leading_i32(&s[i..])
 }
 
 // [spec:foma:def:iface.iface-eliminate-flag-fn]
