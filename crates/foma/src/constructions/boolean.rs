@@ -111,7 +111,7 @@ pub fn fsm_concat(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm
     /* free(net1->states) */
     fsm_destroy(net2);
     net1.states = new_fsm;
-    if sigma_find_number(EPSILON, &net1.sigma) == -1 {
+    if sigma_find_number(EPSILON, &net1.sigma).is_none() {
         sigma_add_special(EPSILON, &mut net1.sigma);
     }
     fsm_count(&mut net1);
@@ -225,7 +225,7 @@ pub fn fsm_union(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm>
     net1.finalcount = net1.finalcount + net2.finalcount;
     fsm_destroy(net2);
     fsm_update_flags(&mut net1, NO, NO, NO, NO, UNK, NO);
-    if sigma_find_number(EPSILON, &net1.sigma) == -1 {
+    if sigma_find_number(EPSILON, &net1.sigma).is_none() {
         sigma_add_special(EPSILON, &mut net1.sigma);
     }
     net1
@@ -245,13 +245,13 @@ pub fn fsm_completes(opts: &FomaOptions, net: Box<Fsm>, operation: i32) -> Box<F
     }
 
     let mut incomplete = 0;
-    if sigma_find_number(UNKNOWN, &net.sigma) != -1 {
+    if sigma_find_number(UNKNOWN, &net.sigma).is_some() {
         /* C: sigma_remove's returned new head is discarded (harmless
         unless UNKNOWN were the head node); the owned list here must be
         reassigned */
         sigma_remove("@_UNKNOWN_SYMBOL_@", &mut net.sigma);
     }
-    if sigma_find_number(IDENTITY, &net.sigma) == -1 {
+    if sigma_find_number(IDENTITY, &net.sigma).is_none() {
         sigma_add_special(IDENTITY, &mut net.sigma);
         incomplete = 1;
     }
@@ -259,7 +259,7 @@ pub fn fsm_completes(opts: &FomaOptions, net: Box<Fsm>, operation: i32) -> Box<F
     let mut sigsize = sigma_size(&net.sigma);
     let last_sigma = sigma_max(&net.sigma);
 
-    if sigma_find_number(EPSILON, &net.sigma) != -1 {
+    if sigma_find_number(EPSILON, &net.sigma).is_some() {
         sigsize -= 1;
     }
 
@@ -497,7 +497,8 @@ pub fn fsm_minus(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm>
         let mut a = int_stack.pop();
         let mut b = int_stack.pop();
 
-        let current_state = triplet_hash_find(&th, a, b, 0);
+        let current_state = triplet_hash_find(&th, a, b, 0)
+            .expect("state pair popped off the work stack was inserted into the triplet hash");
         a -= 1;
         b -= 1;
 
@@ -526,15 +527,15 @@ pub fn fsm_minus(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm>
             if b == -1 {
                 /* b is dead */
                 let atarget = net1.states[ai].target;
-                let found = triplet_hash_find(&th, atarget + 1, 0, 0);
-                if found == -1 {
-                    /* STACK_2_PUSH(0, (machine_a->target)+1) */
-                    int_stack.push(0);
-                    int_stack.push(atarget + 1);
-                    target_number = triplet_hash_insert(&mut th, atarget + 1, 0, 0);
-                } else {
-                    target_number = found;
-                }
+                target_number = match triplet_hash_find(&th, atarget + 1, 0, 0) {
+                    Some(found) => found,
+                    None => {
+                        /* STACK_2_PUSH(0, (machine_a->target)+1) */
+                        int_stack.push(0);
+                        int_stack.push(atarget + 1);
+                        triplet_hash_insert(&mut th, atarget + 1, 0, 0)
+                    }
+                };
             } else {
                 /* b is alive */
                 let mut b_has_trans = 0;
@@ -552,30 +553,30 @@ pub fn fsm_minus(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm>
                 }
                 if b_has_trans != 0 {
                     let atarget = net1.states[ai].target;
-                    let found = triplet_hash_find(&th, atarget + 1, btarget + 1, 0);
-                    if found == -1 {
-                        /* STACK_2_PUSH(btarget+1, (machine_a->target)+1) */
-                        int_stack.push(btarget + 1);
-                        int_stack.push(atarget + 1);
-                        /* C inserts (machine_b->target)+1, which equals
-                        btarget+1 (the scan broke at the matching line) */
-                        let mbtarget = net2.states[bi].target;
-                        target_number = triplet_hash_insert(&mut th, atarget + 1, mbtarget + 1, 0);
-                    } else {
-                        target_number = found;
-                    }
+                    target_number = match triplet_hash_find(&th, atarget + 1, btarget + 1, 0) {
+                        Some(found) => found,
+                        None => {
+                            /* STACK_2_PUSH(btarget+1, (machine_a->target)+1) */
+                            int_stack.push(btarget + 1);
+                            int_stack.push(atarget + 1);
+                            /* C inserts (machine_b->target)+1, which equals
+                            btarget+1 (the scan broke at the matching line) */
+                            let mbtarget = net2.states[bi].target;
+                            triplet_hash_insert(&mut th, atarget + 1, mbtarget + 1, 0)
+                        }
+                    };
                 } else {
                     /* b is dead */
                     let atarget = net1.states[ai].target;
-                    let found = triplet_hash_find(&th, atarget + 1, 0, 0);
-                    if found == -1 {
-                        /* STACK_2_PUSH(0, (machine_a->target)+1) */
-                        int_stack.push(0);
-                        int_stack.push(atarget + 1);
-                        target_number = triplet_hash_insert(&mut th, atarget + 1, 0, 0);
-                    } else {
-                        target_number = found;
-                    }
+                    target_number = match triplet_hash_find(&th, atarget + 1, 0, 0) {
+                        Some(found) => found,
+                        None => {
+                            /* STACK_2_PUSH(0, (machine_a->target)+1) */
+                            int_stack.push(0);
+                            int_stack.push(atarget + 1);
+                            triplet_hash_insert(&mut th, atarget + 1, 0, 0)
+                        }
+                    };
                 }
             }
             let (line_in, line_out) = (net1.states[ai].r#in as i32, net1.states[ai].out as i32);

@@ -87,13 +87,13 @@ pub fn fsm_merge_sigma(opts: &FomaOptions, net1: &mut Fsm, net2: &mut Fsm) {
     let mut net_unk = 0;
 
     if !opts.skip_word_boundary_marker {
-        let i = sigma_find(".#.", &net1.sigma);
-        let j = sigma_find(".#.", &net2.sigma);
-        if i != -1 && j == -1 {
+        let in_1 = sigma_find(".#.", &net1.sigma).is_some();
+        let in_2 = sigma_find(".#.", &net2.sigma).is_some();
+        if in_1 && !in_2 {
             sigma_add(".#.", &mut net2.sigma);
             sigma_sort(net2);
         }
-        if j != -1 && i == -1 {
+        if in_2 && !in_1 {
             sigma_add(".#.", &mut net1.sigma);
             sigma_sort(net1);
         }

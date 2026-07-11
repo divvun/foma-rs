@@ -62,7 +62,8 @@ pub fn fsm_intersect(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<
         let a = int_stack.pop();
         let b = int_stack.pop();
 
-        let current_state = triplet_hash_find(&th, a, b, 0);
+        let current_state = triplet_hash_find(&th, a, b, 0)
+            .expect("state pair popped off the work stack was inserted into the triplet hash");
         let current_start = if point_a[a as usize].start == 1 && point_b[b as usize].start == 1 {
             1
         } else {
@@ -117,13 +118,15 @@ pub fn fsm_intersect(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<
 
             let atarget = net1.states[ai].target;
             let btarget = array[bptr].target;
-            let mut target_number = triplet_hash_find(&th, atarget, btarget, 0);
-            if target_number == -1 {
-                /* STACK_2_PUSH(bptr->target, machine_a->target) */
-                int_stack.push(btarget);
-                int_stack.push(atarget);
-                target_number = triplet_hash_insert(&mut th, atarget, btarget, 0);
-            }
+            let target_number = match triplet_hash_find(&th, atarget, btarget, 0) {
+                Some(n) => n,
+                None => {
+                    /* STACK_2_PUSH(bptr->target, machine_a->target) */
+                    int_stack.push(btarget);
+                    int_stack.push(atarget);
+                    triplet_hash_insert(&mut th, atarget, btarget, 0)
+                }
+            };
 
             let (ain, aout) = (net1.states[ai].r#in as i32, net1.states[ai].out as i32);
             fsm_state_add_arc(
@@ -230,7 +233,7 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
             let sym = net1.sigma[idx].symbol.clone();
             if flag_check(&sym) {
                 flags1 = 1;
-                if sigma_find(&sym, &net2.sigma) == -1 {
+                if sigma_find(&sym, &net2.sigma).is_none() {
                     sigma_add(&sym, &mut net2.sigma);
                 }
             }
@@ -243,7 +246,7 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
                 if s2num <= max2sigma {
                     flags2 = 1;
                 }
-                if sigma_find(&sym, &net1.sigma) == -1 {
+                if sigma_find(&sym, &net1.sigma).is_none() {
                     sigma_add(&sym, &mut net1.sigma);
                 }
             }
@@ -320,7 +323,8 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
         let b = int_stack.pop();
         let mode = int_stack.pop();
 
-        let current_state = triplet_hash_find(&th, a, b, mode);
+        let current_state = triplet_hash_find(&th, a, b, mode)
+            .expect("state triple popped off the work stack was inserted into the triplet hash");
         let current_start =
             if point_a[a as usize].start == 1 && point_b[b as usize].start == 1 && mode == 0 {
                 1
@@ -400,14 +404,16 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
                     /* mode -> 0 */
                     let atarget = net1.states[ai].target;
                     let btarget = outarray[iptr].target;
-                    let mut target_number = triplet_hash_find(&th, atarget, btarget, 0);
-                    if target_number == -1 {
-                        /* STACK_3_PUSH(0, iptr->target, machine_a->target) */
-                        int_stack.push(0);
-                        int_stack.push(btarget);
-                        int_stack.push(atarget);
-                        target_number = triplet_hash_insert(&mut th, atarget, btarget, 0);
-                    }
+                    let target_number = match triplet_hash_find(&th, atarget, btarget, 0) {
+                        Some(n) => n,
+                        None => {
+                            /* STACK_3_PUSH(0, iptr->target, machine_a->target) */
+                            int_stack.push(0);
+                            int_stack.push(btarget);
+                            int_stack.push(atarget);
+                            triplet_hash_insert(&mut th, atarget, btarget, 0)
+                        }
+                    };
 
                     fsm_state_add_arc(
                         &mut builder,
@@ -437,14 +443,16 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
 
             if g_flag_is_epsilon && aout != -1 && mode == 0 && is_flag[aout as usize] {
                 let atarget = net1.states[ai].target;
-                let mut target_number = triplet_hash_find(&th, atarget, b, 0);
-                if target_number == -1 {
-                    /* STACK_3_PUSH(0, b, machine_a->target) */
-                    int_stack.push(0);
-                    int_stack.push(b);
-                    int_stack.push(atarget);
-                    target_number = triplet_hash_insert(&mut th, atarget, b, 0);
-                }
+                let target_number = match triplet_hash_find(&th, atarget, b, 0) {
+                    Some(n) => n,
+                    None => {
+                        /* STACK_3_PUSH(0, b, machine_a->target) */
+                        int_stack.push(0);
+                        int_stack.push(b);
+                        int_stack.push(atarget);
+                        triplet_hash_insert(&mut th, atarget, b, 0)
+                    }
+                };
                 fsm_state_add_arc(
                     &mut builder,
                     current_state,
@@ -461,14 +469,16 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
                 if aout == EPSILON && mode == 0 {
                     /* mode -> 0 */
                     let atarget = net1.states[ai].target;
-                    let mut target_number = triplet_hash_find(&th, atarget, b, 0);
-                    if target_number == -1 {
-                        /* STACK_3_PUSH(0, b, machine_a->target) */
-                        int_stack.push(0);
-                        int_stack.push(b);
-                        int_stack.push(atarget);
-                        target_number = triplet_hash_insert(&mut th, atarget, b, 0);
-                    }
+                    let target_number = match triplet_hash_find(&th, atarget, b, 0) {
+                        Some(n) => n,
+                        None => {
+                            /* STACK_3_PUSH(0, b, machine_a->target) */
+                            int_stack.push(0);
+                            int_stack.push(b);
+                            int_stack.push(atarget);
+                            triplet_hash_insert(&mut th, atarget, b, 0)
+                        }
+                    };
 
                     fsm_state_add_arc(
                         &mut builder,
@@ -484,14 +494,16 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
                 if aout == EPSILON && mode != 2 {
                     /* mode -> 1 */
                     let atarget = net1.states[ai].target;
-                    let mut target_number = triplet_hash_find(&th, atarget, b, 1);
-                    if target_number == -1 {
-                        /* STACK_3_PUSH(1, b, machine_a->target) */
-                        int_stack.push(1);
-                        int_stack.push(b);
-                        int_stack.push(atarget);
-                        target_number = triplet_hash_insert(&mut th, atarget, b, 1);
-                    }
+                    let target_number = match triplet_hash_find(&th, atarget, b, 1) {
+                        Some(n) => n,
+                        None => {
+                            /* STACK_3_PUSH(1, b, machine_a->target) */
+                            int_stack.push(1);
+                            int_stack.push(b);
+                            int_stack.push(atarget);
+                            triplet_hash_insert(&mut th, atarget, b, 1)
+                        }
+                    };
 
                     fsm_state_add_arc(
                         &mut builder,
@@ -520,14 +532,16 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
 
             if g_flag_is_epsilon && bin != -1 && is_flag[bin as usize] {
                 let btarget = net2.states[bi].target;
-                let mut target_number = triplet_hash_find(&th, a, btarget, 1);
-                if target_number == -1 {
-                    /* STACK_3_PUSH(1, machine_b->target, a) */
-                    int_stack.push(1);
-                    int_stack.push(btarget);
-                    int_stack.push(a);
-                    target_number = triplet_hash_insert(&mut th, a, btarget, 1);
-                }
+                let target_number = match triplet_hash_find(&th, a, btarget, 1) {
+                    Some(n) => n,
+                    None => {
+                        /* STACK_3_PUSH(1, machine_b->target, a) */
+                        int_stack.push(1);
+                        int_stack.push(btarget);
+                        int_stack.push(a);
+                        triplet_hash_insert(&mut th, a, btarget, 1)
+                    }
+                };
                 fsm_state_add_arc(
                     &mut builder,
                     current_state,
@@ -544,14 +558,16 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
                 if bin == EPSILON {
                     /* mode -> 1 */
                     let btarget = net2.states[bi].target;
-                    let mut target_number = triplet_hash_find(&th, a, btarget, 1);
-                    if target_number == -1 {
-                        /* STACK_3_PUSH(1, machine_b->target, a) */
-                        int_stack.push(1);
-                        int_stack.push(btarget);
-                        int_stack.push(a);
-                        target_number = triplet_hash_insert(&mut th, a, btarget, 1);
-                    }
+                    let target_number = match triplet_hash_find(&th, a, btarget, 1) {
+                        Some(n) => n,
+                        None => {
+                            /* STACK_3_PUSH(1, machine_b->target, a) */
+                            int_stack.push(1);
+                            int_stack.push(btarget);
+                            int_stack.push(a);
+                            triplet_hash_insert(&mut th, a, btarget, 1)
+                        }
+                    };
 
                     fsm_state_add_arc(
                         &mut builder,
@@ -568,14 +584,16 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
                 if bin == EPSILON && mode != 1 {
                     /* mode -> 1 */
                     let btarget = net2.states[bi].target;
-                    let mut target_number = triplet_hash_find(&th, a, btarget, 2);
-                    if target_number == -1 {
-                        /* STACK_3_PUSH(2, machine_b->target, a) */
-                        int_stack.push(2);
-                        int_stack.push(btarget);
-                        int_stack.push(a);
-                        target_number = triplet_hash_insert(&mut th, a, btarget, 2);
-                    }
+                    let target_number = match triplet_hash_find(&th, a, btarget, 2) {
+                        Some(n) => n,
+                        None => {
+                            /* STACK_3_PUSH(2, machine_b->target, a) */
+                            int_stack.push(2);
+                            int_stack.push(btarget);
+                            int_stack.push(a);
+                            triplet_hash_insert(&mut th, a, btarget, 2)
+                        }
+                    };
 
                     fsm_state_add_arc(
                         &mut builder,
@@ -667,7 +685,8 @@ pub fn fsm_cross_product(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> 
 
         /* printf("Treating pair: {%i,%i}\n",a,b); */
 
-        let current_state = triplet_hash_find(&th, a, b, 0);
+        let current_state = triplet_hash_find(&th, a, b, 0)
+            .expect("state pair popped off the work stack was inserted into the triplet hash");
         let current_start = if point_a[a as usize].start == 1 && point_b[b as usize].start == 1 {
             1
         } else {
@@ -703,12 +722,13 @@ pub fn fsm_cross_product(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> 
                     let atarget = net1.states[ai].target;
                     let btarget = net2.states[bi].target;
                     let mut target_number = triplet_hash_find(&th, atarget, btarget, 0);
-                    if target_number == -1 {
+                    if target_number.is_none() {
                         /* STACK_2_PUSH(machine_b->target, machine_a->target) */
                         int_stack.push(btarget);
                         int_stack.push(atarget);
-                        target_number = triplet_hash_insert(&mut th, atarget, btarget, 0);
+                        target_number = Some(triplet_hash_insert(&mut th, atarget, btarget, 0));
                     }
+                    let target_number = target_number.expect("found or just inserted");
                     let mut symbol1 = net1.states[ai].r#in as i32;
                     let mut symbol2 = net2.states[bi].r#in as i32;
                     if symbol1 == IDENTITY && symbol2 != IDENTITY {
@@ -747,12 +767,13 @@ pub fn fsm_cross_product(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> 
                     let astate = net1.states[ai].state_no;
                     let btarget = net2.states[bi].target;
                     let mut target_number = triplet_hash_find(&th, astate, btarget, 0);
-                    if target_number == -1 {
+                    if target_number.is_none() {
                         /* STACK_2_PUSH(machine_b->target, machine_a->state_no) */
                         int_stack.push(btarget);
                         int_stack.push(astate);
-                        target_number = triplet_hash_insert(&mut th, astate, btarget, 0);
+                        target_number = Some(triplet_hash_insert(&mut th, astate, btarget, 0));
                     }
+                    let target_number = target_number.expect("found or just inserted");
                     /* @:0 becomes ?:0 */
                     let symbol2 = if net2.states[bi].r#in as i32 == IDENTITY {
                         UNKNOWN
@@ -775,12 +796,13 @@ pub fn fsm_cross_product(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> 
                     let atarget = net1.states[ai].target;
                     let bstate = net2.states[bi].state_no;
                     let mut target_number = triplet_hash_find(&th, atarget, bstate, 0);
-                    if target_number == -1 {
+                    if target_number.is_none() {
                         /* STACK_2_PUSH(machine_b->state_no, machine_a->target) */
                         int_stack.push(bstate);
                         int_stack.push(atarget);
-                        target_number = triplet_hash_insert(&mut th, atarget, bstate, 0);
+                        target_number = Some(triplet_hash_insert(&mut th, atarget, bstate, 0));
                     }
+                    let target_number = target_number.expect("found or just inserted");
                     /* @:0 becomes ?:0 */
                     let symbol1 = if net1.states[ai].r#in as i32 == IDENTITY {
                         UNKNOWN
@@ -822,12 +844,12 @@ pub fn fsm_cross_product(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> 
         i += 1;
     }
     if epsilon == 1 {
-        if sigma_find_number(EPSILON, &net1.sigma) == -1 {
+        if sigma_find_number(EPSILON, &net1.sigma).is_none() {
             sigma_add_special(EPSILON, &mut net1.sigma);
         }
     }
     if unknown == 1 {
-        if sigma_find_number(UNKNOWN, &net1.sigma) == -1 {
+        if sigma_find_number(UNKNOWN, &net1.sigma).is_none() {
             sigma_add_special(UNKNOWN, &mut net1.sigma);
         }
     }

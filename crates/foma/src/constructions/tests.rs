@@ -295,13 +295,13 @@ fn triplet_hash_insert_find_roundtrip_and_duplicate_quirk() {
         "keys are consecutive from 0"
     );
     assert_eq!(triplet_hash_insert(&mut th, 8, 9, 10), 1);
-    assert_eq!(triplet_hash_find(&th, 5, 6, 7), 0);
-    assert_eq!(triplet_hash_find(&th, 8, 9, 10), 1);
-    assert_eq!(triplet_hash_find(&th, 100, 100, 100), -1, "absent -> -1");
+    assert_eq!(triplet_hash_find(&th, 5, 6, 7), Some(0));
+    assert_eq!(triplet_hash_find(&th, 8, 9, 10), Some(1));
+    assert_eq!(triplet_hash_find(&th, 100, 100, 100), None, "absent -> None");
     // Duplicate insert silently creates a second entry with a fresh key,
     // but find still returns the first (home-slot) entry's key.
     assert_eq!(triplet_hash_insert(&mut th, 5, 6, 7), 2);
-    assert_eq!(triplet_hash_find(&th, 5, 6, 7), 0);
+    assert_eq!(triplet_hash_find(&th, 5, 6, 7), Some(0));
 }
 
 // [spec:foma:sem:constructions.triplet-hash-insert-with-key-fn/test]
@@ -309,7 +309,7 @@ fn triplet_hash_insert_find_roundtrip_and_duplicate_quirk() {
 fn triplet_hash_insert_with_key_stores_caller_key_without_occupancy() {
     let mut th = triplet_hash_init();
     triplet_hash_insert_with_key(&mut th, 1, 2, 3, 42);
-    assert_eq!(triplet_hash_find(&th, 1, 2, 3), 42);
+    assert_eq!(triplet_hash_find(&th, 1, 2, 3), Some(42));
     assert_eq!(th.occupancy, 0, "occupancy untouched");
 }
 
@@ -330,7 +330,7 @@ fn triplet_hash_rehash_doubles_at_half_occupancy_preserving_keys() {
     assert_eq!(th.tablesize, 256);
     assert_eq!(th.occupancy, 65);
     for i in 0..65 {
-        assert_eq!(triplet_hash_find(&th, i, 0, 0), i, "keys survive rehash");
+        assert_eq!(triplet_hash_find(&th, i, 0, 0), Some(i), "keys survive rehash");
     }
 }
 
@@ -726,7 +726,7 @@ fn fsm_optionality_short_circuits_to_union_with_empty_string() {
     assert_eq!(words(&o), ws(&["", "a"]));
     // Built by the union construction, so nondeterministic with an epsilon start.
     assert_eq!(o.is_deterministic, NO);
-    assert_ne!(sigma_find_number(EPSILON, &o.sigma), -1);
+    assert!(sigma_find_number(EPSILON, &o.sigma).is_some());
 }
 
 /* ---- rule-compilation helper -------------------------------------- */

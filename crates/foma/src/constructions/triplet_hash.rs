@@ -133,19 +133,19 @@ pub fn triplet_hash_rehash(th: &mut Triplethash) {
 }
 
 // [spec:foma:def:constructions.triplet-hash-find-fn]
-// [spec:foma:sem:constructions.triplet-hash-find-fn]
-pub fn triplet_hash_find(th: &Triplethash, a: i32, b: i32, c: i32) -> i32 {
+// [spec:foma:sem:constructions.triplet-hash-find-fn+1]
+pub fn triplet_hash_find(th: &Triplethash, a: i32, b: i32, c: i32) -> Option<i32> {
     let mut hash = triplethash_hashf(a, b, c) % th.tablesize;
     let mut j: u32 = 0;
     while j < th.tablesize {
         if th.triplets[hash as usize].key == -1 {
-            return -1;
+            return None;
         }
         if th.triplets[hash as usize].a == a
             && th.triplets[hash as usize].b == b
             && th.triplets[hash as usize].c == c
         {
-            return th.triplets[hash as usize].key;
+            return Some(th.triplets[hash as usize].key);
         }
         hash += 1;
         if hash >= th.tablesize {
@@ -153,5 +153,5 @@ pub fn triplet_hash_find(th: &Triplethash, a: i32, b: i32, c: i32) -> i32 {
         }
         j += 1;
     }
-    -1
+    None
 }

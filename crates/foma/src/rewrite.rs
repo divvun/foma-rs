@@ -1563,14 +1563,16 @@ pub fn rewrite_add_special_syms(rb: &RewriteBatch, net: Option<&mut Fsm>) {
         Some(net) => net,
         None => return,
     };
-    sigma_substitute(".#.", "@#@", &mut net.sigma); /* We convert boundaries to our interal rep.                          */
-    /* This is because sigma merging (fsm_merge_sigma(opts, )) is handled       */
-    /* in a special way for .#., which we don't want here.                */
+    /* We convert boundaries to our internal rep; the substituted number is
+    unused (C discarded the int too). This is because sigma merging
+    (fsm_merge_sigma(opts, )) is handled in a special way for .#., which we
+    don't want here. */
+    let _ = sigma_substitute(".#.", "@#@", &mut net.sigma);
 
     /* C: for (i = 0; specialsymbols[i] != NULL; i++) */
     let mut i: usize = 0;
     while i < SPECIALSYMBOLS.len() {
-        if sigma_find(SPECIALSYMBOLS[i], &net.sigma) == -1 {
+        if sigma_find(SPECIALSYMBOLS[i], &net.sigma).is_none() {
             sigma_add(SPECIALSYMBOLS[i], &mut net.sigma);
         }
         i += 1;
@@ -1629,7 +1631,7 @@ pub fn rewr_context_restrict(
     /* which would cause extra nondeterminism */
 
     let mut newx = fsm_copy(x);
-    if sigma_find("@VARX@", &newx.sigma) == -1 {
+    if sigma_find("@VARX@", &newx.sigma).is_none() {
         sigma_add("@VARX@", &mut newx.sigma);
         sigma_sort(&mut newx);
     }
@@ -1705,7 +1707,7 @@ pub fn rewr_context_restrict(
         ),
     );
 
-    if sigma_find("@VARX@", &result.sigma) != -1 {
+    if sigma_find("@VARX@", &result.sigma).is_some() {
         result = fsm_complement(
             opts,
             fsm_substitute_symbol(result, "@VARX@", "@_EPSILON_SYMBOL_@"),

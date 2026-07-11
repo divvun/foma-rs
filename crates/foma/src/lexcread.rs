@@ -254,25 +254,25 @@ fn lexc_symbol_hash(s: &str) -> u32 {
 }
 
 // [spec:foma:def:lexcread.lexc-find-sigma-hash-fn]
-// [spec:foma:sem:lexcread.lexc-find-sigma-hash-fn]
-fn lexc_find_sigma_hash(lx: &LexcCompiler, symbol: &str) -> i32 {
+// [spec:foma:sem:lexcread.lexc-find-sigma-hash-fn+1]
+fn lexc_find_sigma_hash(lx: &LexcCompiler, symbol: &str) -> Option<i32> {
     let ptr = lexc_symbol_hash(symbol) as usize;
 
     if lx.hashtable[ptr].symbol.is_none() {
-        return -1;
+        return None;
     }
     /* for (h = head; h != NULL; h = h->next) */
     if lx.hashtable[ptr].symbol.as_deref() == Some(symbol) {
-        return lx.hashtable[ptr].sigma_number;
+        return Some(lx.hashtable[ptr].sigma_number);
     }
     let mut h = lx.hashtable[ptr].next.as_deref();
     while let Some(node) = h {
         if node.symbol.as_deref() == Some(symbol) {
-            return node.sigma_number;
+            return Some(node.sigma_number);
         }
         h = node.next.as_deref();
     }
-    -1
+    None
 }
 
 // [spec:foma:def:lexcread.lexc-add-sigma-hash-fn]
@@ -430,20 +430,22 @@ fn lexc_add_network(lx: &mut LexcCompiler) {
     for idx in 0..net.sigma.len() {
         let s_number = net.sigma[idx].number;
         let sym = net.sigma[idx].symbol.clone();
-        let signumber = lexc_find_sigma_hash(lx, &sym);
-        if signumber == -1 {
-            /* Add to existing lexc sigma */
-            let signumber = sigma_add(&sym, &mut lx.lexsigma);
-            first_new_sigma = if first_new_sigma > 0 {
-                first_new_sigma
-            } else {
-                signumber
-            };
-            lexc_add_sigma_hash(lx, &sym, signumber);
-            sigreplace[s_number as usize] = signumber;
-        } else {
-            /* We already have it, add to conversion table */
-            sigreplace[s_number as usize] = signumber;
+        match lexc_find_sigma_hash(lx, &sym) {
+            None => {
+                /* Add to existing lexc sigma */
+                let signumber = sigma_add(&sym, &mut lx.lexsigma);
+                first_new_sigma = if first_new_sigma > 0 {
+                    first_new_sigma
+                } else {
+                    signumber
+                };
+                lexc_add_sigma_hash(lx, &sym, signumber);
+                sigreplace[s_number as usize] = signumber;
+            }
+            Some(signumber) => {
+                /* We already have it, add to conversion table */
+                sigreplace[s_number as usize] = signumber;
+            }
         }
     }
 
@@ -478,7 +480,7 @@ fn lexc_add_network(lx: &mut LexcCompiler) {
         unk = vec![0; (sigma_max(&lx.lexsigma) + 2) as usize];
         let mut i = 0usize;
         for s in &lx.lexsigma {
-            if s.number > 2 && sigma_find(&s.symbol, &net.sigma) == -1 {
+            if s.number > 2 && sigma_find(&s.symbol, &net.sigma).is_none() {
                 unk[i] = s.number;
                 i += 1;
             }
@@ -937,8 +939,7 @@ fn lexc_string_to_tokens(lx: &mut LexcCompiler, string: &str, intarr: &mut Vec<i
 /// on a miss; returns the sigma number. Mirrors the C find -> sigma_add ->
 /// add_sigma_hash order exactly, so symbol numbering is preserved.
 fn intern_symbol(lx: &mut LexcCompiler, sym: &str) -> i32 {
-    let n = lexc_find_sigma_hash(lx, sym);
-    if n != -1 {
+    if let Some(n) = lexc_find_sigma_hash(lx, sym) {
         return n;
     }
     let n = sigma_add(sym, &mut lx.lexsigma);
@@ -975,7 +976,7 @@ fn lexc_add_mc(lx: &mut LexcCompiler, raw: &str) {
     // nfst-lexc already de-escaped %X; decode the remaining conventions the way
     // the C mode-0 de-escape did: @ZERO@ -> the literal "0"; a bare '0' dropped.
     let symbol = normalize_mc_symbol(raw);
-    if lexc_find_mc(lx, &symbol) == 0 {
+    if !lexc_find_mc(lx, &symbol) {
         let len = symbol.chars().count();
         let mut mcprev: Option<usize> = None;
         /* for (mcs = mc; mcs != NULL && utf8strlen(mcs->symbol) > len; ...) */
@@ -1033,18 +1034,20 @@ fn normalize_mc_symbol(raw: &str) -> String {
 }
 
 // [spec:foma:def:lexcread.lexc-find-mc-fn]
-// [spec:foma:sem:lexcread.lexc-find-mc-fn]
+// [spec:foma:sem:lexcread.lexc-find-mc-fn+1]
 // [spec:foma:def:lexc.lexc-find-mc-fn]
-// [spec:foma:sem:lexc.lexc-find-mc-fn]
-fn lexc_find_mc(lx: &LexcCompiler, symbol: &str) -> i32 {
+// [spec:foma:sem:lexc.lexc-find-mc-fn+1]
+fn lexc_find_mc(lx: &LexcCompiler, symbol: &str) -> bool {
+    /* Membership test over the multichar-symbol chain: true iff `symbol` is
+    already registered (C returned 1/0). */
     let mut mcs = lx.mc;
     while let Some(m) = mcs {
         if lx.mc_arena[m].symbol.as_deref() == Some(symbol) {
-            return 1;
+            return true;
         }
         mcs = lx.mc_arena[m].next;
     }
-    0
+    false
 }
 
 // [spec:foma:def:lexcread.lexc-find-lex-state-fn]
@@ -1597,7 +1600,7 @@ fn lexc_to_fsm(lx: &mut LexcCompiler) -> Box<Fsm> {
     net.statecount = lx.lexc_statecount;
     fsm_update_flags(&mut net, UNK, UNK, UNK, UNK, UNK, UNK);
     /* lexsigma is now net.sigma (aliased in C); operate on net.sigma */
-    if sigma_find_number(EPSILON, &net.sigma) == -1 {
+    if sigma_find_number(EPSILON, &net.sigma).is_none() {
         sigma_add_special(EPSILON, &mut net.sigma);
     }
     /* free(s): C frees the sa array here (s == sa after the build loop);
@@ -2079,22 +2082,22 @@ mod tests {
     }
 
     // Add/find in the sigma hashtable: head fill, chain append (no dedup ->
-    // shadowed entry), find returns the head match, miss -> -1.
+    // shadowed entry), find returns the head match, miss -> None.
     // [spec:foma:sem:lexcread.lexc-add-sigma-hash-fn/test]
-    // [spec:foma:sem:lexcread.lexc-find-sigma-hash-fn/test]
+    // [spec:foma:sem:lexcread.lexc-find-sigma-hash-fn+1/test]
     #[test]
     fn sigma_hash_add_find_shadow() {
         let mut lx = LexcCompiler::new_empty();
         lexc_init(&mut lx);
-        assert_eq!(lexc_find_sigma_hash(&lx, "a"), -1);
+        assert_eq!(lexc_find_sigma_hash(&lx, "a"), None);
         lexc_add_sigma_hash(&mut lx, "a", 7);
         lexc_add_sigma_hash(&mut lx, "a", 99); // shadow appended to tail
         let bucket = lexc_symbol_hash("a") as usize;
         assert_eq!(lx.hashtable[bucket].symbol.as_deref(), Some("a"));
         assert_eq!(lx.hashtable[bucket].sigma_number, 7);
         assert!(lx.hashtable[bucket].next.is_some());
-        assert_eq!(lexc_find_sigma_hash(&lx, "a"), 7); // head wins
-        assert_eq!(lexc_find_sigma_hash(&lx, "zzz"), -1);
+        assert_eq!(lexc_find_sigma_hash(&lx, "a"), Some(7)); // head wins
+        assert_eq!(lexc_find_sigma_hash(&lx, "zzz"), None);
     }
 
     /* ---- direct API: string helpers ------------------------------------- */
@@ -2114,8 +2117,8 @@ mod tests {
     // Multichar longest-first, a bare '0' -> alignment EPSILON, and fresh-sigma
     // numbering (first regular symbol = 3).
     // [spec:foma:sem:lexcread.lexc-string-to-tokens-fn+1/test]
-    // [spec:foma:sem:lexcread.lexc-find-mc-fn/test]
-    // [spec:foma:sem:lexc.lexc-find-mc-fn/test]
+    // [spec:foma:sem:lexcread.lexc-find-mc-fn+1/test]
+    // [spec:foma:sem:lexc.lexc-find-mc-fn+1/test]
     #[test]
     fn string_to_tokens_multichar_and_epsilon() {
         let mut lx = LexcCompiler::new_empty();
@@ -2123,8 +2126,8 @@ mod tests {
         // register +Pl (len 3) then +PlPoss (len 7): mc list -> longest first
         lexc_add_mc(&mut lx, "+Pl"); // sigma 3
         lexc_add_mc(&mut lx, "+PlPoss"); // sigma 4
-        assert_eq!(lexc_find_mc(&lx, "+Pl"), 1);
-        assert_eq!(lexc_find_mc(&lx, "+Nope"), 0);
+        assert!(lexc_find_mc(&lx, "+Pl"));
+        assert!(!lexc_find_mc(&lx, "+Nope"));
         // mc list head is the longest symbol
         let head = lx.mc.unwrap();
         assert_eq!(lx.mc_arena[head].symbol.as_deref(), Some("+PlPoss"));

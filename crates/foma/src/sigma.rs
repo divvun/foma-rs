@@ -131,10 +131,10 @@ pub fn sigma_add(symbol: &str, sigma: &mut Vec<Sigma>) -> i32 {
 // [spec:foma:sem:fomalibconf.sigma-cleanup-fn+1]
 pub fn sigma_cleanup(net: &mut Fsm, force: i32) {
     if force == 0 {
-        if sigma_find_number(IDENTITY, &net.sigma) != -1 {
+        if sigma_find_number(IDENTITY, &net.sigma).is_some() {
             return;
         }
-        if sigma_find_number(UNKNOWN, &net.sigma) != -1 {
+        if sigma_find_number(UNKNOWN, &net.sigma).is_some() {
             return;
         }
     }
@@ -236,15 +236,13 @@ pub fn sigma_add_number(sigma: &mut Vec<Sigma>, symbol: &str, number: i32) -> i3
 }
 
 // [spec:foma:def:sigma.sigma-find-number-fn]
-// [spec:foma:sem:sigma.sigma-find-number-fn]
+// [spec:foma:sem:sigma.sigma-find-number-fn+1]
 // [spec:foma:def:fomalibconf.sigma-find-number-fn]
-// [spec:foma:sem:fomalibconf.sigma-find-number-fn]
-pub fn sigma_find_number(number: i32, sigma: &[Sigma]) -> i32 {
-    if sigma.iter().any(|s| s.number == number) {
-        number
-    } else {
-        -1
-    }
+// [spec:foma:sem:fomalibconf.sigma-find-number-fn+1]
+pub fn sigma_find_number(number: i32, sigma: &[Sigma]) -> Option<i32> {
+    /* Presence query: Some(number) if `number` labels a sigma entry, else None
+    (C returned the number itself, or -1 when absent). */
+    sigma.iter().any(|s| s.number == number).then_some(number)
 }
 
 // [spec:foma:def:sigma.sigma-string-fn]
@@ -262,30 +260,27 @@ pub fn sigma_string(number: i32, sigma: &[Sigma]) -> Option<&str> {
 /* Substitutes string symbol for sub in sigma */
 /* no check for duplicates                    */
 // [spec:foma:def:sigma.sigma-substitute-fn]
-// [spec:foma:sem:sigma.sigma-substitute-fn]
+// [spec:foma:sem:sigma.sigma-substitute-fn+1]
 // [spec:foma:def:fomalibconf.sigma-substitute-fn]
-// [spec:foma:sem:fomalibconf.sigma-substitute-fn]
-pub fn sigma_substitute(symbol: &str, sub: &str, sigma: &mut [Sigma]) -> i32 {
+// [spec:foma:sem:fomalibconf.sigma-substitute-fn+1]
+pub fn sigma_substitute(symbol: &str, sub: &str, sigma: &mut [Sigma]) -> Option<i32> {
     for s in sigma.iter_mut() {
         if s.symbol == symbol {
             /* free(sigma->symbol); sigma->symbol = strdup(sub) */
             s.symbol = sub.to_string();
-            return s.number;
+            return Some(s.number);
         }
     }
-    -1
+    None
 }
 
 // [spec:foma:def:sigma.sigma-find-fn]
-// [spec:foma:sem:sigma.sigma-find-fn]
+// [spec:foma:sem:sigma.sigma-find-fn+1]
 // [spec:foma:def:fomalibconf.sigma-find-fn]
-// [spec:foma:sem:fomalibconf.sigma-find-fn]
-pub fn sigma_find(symbol: &str, sigma: &[Sigma]) -> i32 {
-    sigma
-        .iter()
-        .find(|s| s.symbol == symbol)
-        .map(|s| s.number)
-        .unwrap_or(-1)
+// [spec:foma:sem:fomalibconf.sigma-find-fn+1]
+pub fn sigma_find(symbol: &str, sigma: &[Sigma]) -> Option<i32> {
+    /* Some(number) for the first entry whose symbol matches, else None (C -1). */
+    sigma.iter().find(|s| s.symbol == symbol).map(|s| s.number)
 }
 
 // [spec:foma:def:sigma.ssort]
@@ -657,49 +652,49 @@ mod tests {
 
     /* ---- sigma_find ---- */
 
-    // [spec:foma:sem:sigma.sigma-find-fn/test]
-    // [spec:foma:sem:fomalibconf.sigma-find-fn/test]
+    // [spec:foma:sem:sigma.sigma-find-fn+1/test]
+    // [spec:foma:sem:fomalibconf.sigma-find-fn+1/test]
     #[test]
-    fn sigma_find_returns_number_of_first_match_or_minus_one() {
+    fn sigma_find_returns_number_of_first_match_or_none() {
         let mut s = sigma_create();
         sigma_add("a", &mut s);
         sigma_add("b", &mut s);
         sigma_add("a", &mut s); /* duplicate: first wins */
-        assert_eq!(sigma_find("a", &s), 3);
-        assert_eq!(sigma_find("b", &s), 4);
-        assert_eq!(sigma_find("z", &s), -1);
+        assert_eq!(sigma_find("a", &s), Some(3));
+        assert_eq!(sigma_find("b", &s), Some(4));
+        assert_eq!(sigma_find("z", &s), None);
     }
 
-    // [spec:foma:sem:sigma.sigma-find-fn/test]
-    // [spec:foma:sem:fomalibconf.sigma-find-fn/test]
+    // [spec:foma:sem:sigma.sigma-find-fn+1/test]
+    // [spec:foma:sem:fomalibconf.sigma-find-fn+1/test]
     #[test]
-    fn sigma_find_empty_alphabet_gives_minus_one() {
+    fn sigma_find_empty_alphabet_gives_none() {
         let s = sigma_create();
-        assert_eq!(sigma_find("a", &s), -1);
+        assert_eq!(sigma_find("a", &s), None);
     }
 
     /* ---- sigma_find_number ---- */
 
-    // [spec:foma:sem:sigma.sigma-find-number-fn/test]
-    // [spec:foma:sem:fomalibconf.sigma-find-number-fn/test]
+    // [spec:foma:sem:sigma.sigma-find-number-fn+1/test]
+    // [spec:foma:sem:fomalibconf.sigma-find-number-fn+1/test]
     #[test]
-    fn sigma_find_number_returns_number_if_present_else_minus_one() {
+    fn sigma_find_number_returns_number_if_present_else_none() {
         let mut s = sigma_create();
         sigma_add("@_EPSILON_SYMBOL_@", &mut s);
         sigma_add("a", &mut s);
         sigma_add("b", &mut s);
-        assert_eq!(sigma_find_number(0, &s), 0);
-        assert_eq!(sigma_find_number(4, &s), 4);
-        assert_eq!(sigma_find_number(1, &s), -1);
-        assert_eq!(sigma_find_number(9, &s), -1);
+        assert_eq!(sigma_find_number(0, &s), Some(0));
+        assert_eq!(sigma_find_number(4, &s), Some(4));
+        assert_eq!(sigma_find_number(1, &s), None);
+        assert_eq!(sigma_find_number(9, &s), None);
     }
 
-    // [spec:foma:sem:sigma.sigma-find-number-fn/test]
-    // [spec:foma:sem:fomalibconf.sigma-find-number-fn/test]
+    // [spec:foma:sem:sigma.sigma-find-number-fn+1/test]
+    // [spec:foma:sem:fomalibconf.sigma-find-number-fn+1/test]
     #[test]
-    fn sigma_find_number_empty_alphabet_gives_minus_one() {
+    fn sigma_find_number_empty_alphabet_gives_none() {
         let s = sigma_create();
-        assert_eq!(sigma_find_number(3, &s), -1);
+        assert_eq!(sigma_find_number(3, &s), None);
     }
 
     /* ---- sigma_string ---- */
@@ -726,37 +721,37 @@ mod tests {
 
     /* ---- sigma_substitute ---- */
 
-    // [spec:foma:sem:sigma.sigma-substitute-fn/test]
-    // [spec:foma:sem:fomalibconf.sigma-substitute-fn/test]
+    // [spec:foma:sem:sigma.sigma-substitute-fn+1/test]
+    // [spec:foma:sem:fomalibconf.sigma-substitute-fn+1/test]
     #[test]
     fn sigma_substitute_renames_first_match_and_returns_number() {
         let mut s = sigma_create();
         sigma_add("a", &mut s);
         sigma_add("a", &mut s);
-        assert_eq!(sigma_substitute("a", "z", &mut s), 3);
+        assert_eq!(sigma_substitute("a", "z", &mut s), Some(3));
         /* only the first duplicate is renamed */
         assert_eq!(syms(&s), vec![pair(3, "z"), pair(4, "a")]);
     }
 
-    // [spec:foma:sem:sigma.sigma-substitute-fn/test]
-    // [spec:foma:sem:fomalibconf.sigma-substitute-fn/test]
+    // [spec:foma:sem:sigma.sigma-substitute-fn+1/test]
+    // [spec:foma:sem:fomalibconf.sigma-substitute-fn+1/test]
     #[test]
     fn sigma_substitute_no_duplicate_check_can_create_same_string_twice() {
         let mut s = sigma_create();
         sigma_add("a", &mut s);
         sigma_add("b", &mut s);
-        assert_eq!(sigma_substitute("a", "b", &mut s), 3);
+        assert_eq!(sigma_substitute("a", "b", &mut s), Some(3));
         assert_eq!(syms(&s), vec![pair(3, "b"), pair(4, "b")]);
     }
 
-    // [spec:foma:sem:sigma.sigma-substitute-fn/test]
-    // [spec:foma:sem:fomalibconf.sigma-substitute-fn/test]
+    // [spec:foma:sem:sigma.sigma-substitute-fn+1/test]
+    // [spec:foma:sem:fomalibconf.sigma-substitute-fn+1/test]
     #[test]
-    fn sigma_substitute_empty_or_miss_returns_minus_one() {
+    fn sigma_substitute_empty_or_miss_returns_none() {
         let mut s = sigma_create();
-        assert_eq!(sigma_substitute("a", "b", &mut s), -1);
+        assert_eq!(sigma_substitute("a", "b", &mut s), None);
         sigma_add("a", &mut s);
-        assert_eq!(sigma_substitute("z", "b", &mut s), -1);
+        assert_eq!(sigma_substitute("z", "b", &mut s), None);
         assert_eq!(syms(&s), vec![pair(3, "a")]);
     }
 

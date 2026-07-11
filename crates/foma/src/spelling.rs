@@ -1198,25 +1198,23 @@ pub fn cmatrix_set_cost(net: &mut Fsm, r#in: Option<&str>, out: Option<&str>, co
     // maps to 0, so the -1 case always carries the offending symbol.
     let i: i32 = match r#in {
         None => 0,
-        Some(s) => {
-            let found = sigma_find(s, &net.sigma);
-            if found == -1 {
+        Some(s) => match sigma_find(s, &net.sigma) {
+            Some(found) => found,
+            None => {
                 tracing::warn!("symbol '{}' not in alphabet", s);
                 return;
             }
-            found
-        }
+        },
     };
     let o: i32 = match out {
         None => 0,
-        Some(s) => {
-            let found = sigma_find(s, &net.sigma);
-            if found == -1 {
+        Some(s) => match sigma_find(s, &net.sigma) {
+            Some(found) => found,
+            None => {
                 tracing::warn!("symbol '{}' not in alphabet", s);
                 return;
             }
-            found
-        }
+        },
     };
     let cm = &mut net
         .medlookup
