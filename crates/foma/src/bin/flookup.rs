@@ -19,7 +19,6 @@ use foma::io::{fsm_read_binary_file_multiple, fsm_read_binary_file_multiple_init
 use foma::structures::{fsm_destroy, fsm_get_library_version_string, fsm_sort_arcs};
 use foma::types::{APPLY_INDEX_INPUT, APPLY_INDEX_OUTPUT, ApplyHandle, Fsm};
 
-const LINE_LIMIT: usize = 262144;
 const UDP_MAX: usize = 65535;
 const FLOOKUP_PORT: i32 = 6062;
 
@@ -564,7 +563,6 @@ fn main() {
         chain_pos = CHAIN_HEAD.get();
     }
     // serverstring/line dropped automatically.
-    let _ = LINE_LIMIT; // (kept as documentation of fgets chunk size)
     finish(0);
 }
 

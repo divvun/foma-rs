@@ -15,8 +15,6 @@ use foma::io::{fsm_read_binary_file_multiple, fsm_read_binary_file_multiple_init
 use foma::structures::{fsm_destroy, fsm_get_library_version_string, fsm_sort_arcs};
 use foma::types::{APPLY_INDEX_INPUT, APPLY_INDEX_OUTPUT, ApplyHandle, Fsm};
 
-const LINE_LIMIT: usize = 262144;
-
 const DIR_DOWN: i32 = 0;
 const DIR_UP: i32 = 1;
 
@@ -451,7 +449,6 @@ fn main() {
         }
         chain_pos = CHAIN_HEAD.get();
     }
-    let _ = LINE_LIMIT; // (documents fgets chunk size)
     finish(0);
 }
 

@@ -1557,26 +1557,26 @@ pub fn fsm_compact(net: &mut Fsm) {
 // [spec:foma:sem:constructions.fsm-symbol-occurs-fn]
 // [spec:foma:def:fomalib.fsm-symbol-occurs-fn]
 // [spec:foma:sem:fomalib.fsm-symbol-occurs-fn]
-pub fn fsm_symbol_occurs(net: &Fsm, symbol: &str, side: i32) -> i32 {
+pub fn fsm_symbol_occurs(net: &Fsm, symbol: &str, side: i32) -> bool {
     let Some(sym) = sigma_find(symbol, &net.sigma) else {
-        return 0;
+        return false;
     };
     let mut i = 0usize;
     while net.states[i].state_no != -1 {
         if side == M_UPPER && net.states[i].r#in as i32 == sym {
-            return 1;
+            return true;
         }
         if side == M_LOWER && net.states[i].out as i32 == sym {
-            return 1;
+            return true;
         }
         if side == (M_UPPER + M_LOWER)
             && (net.states[i].r#in as i32 == sym || net.states[i].out as i32 == sym)
         {
-            return 1;
+            return true;
         }
         i += 1;
     }
-    0
+    false
 }
 
 // [spec:foma:def:constructions.fsm-equal-substrings-fn]
@@ -1836,7 +1836,7 @@ pub fn fsm_equal_substrings(
     loop {
         //printf("Zapping\n");
         leq = fsm_compose(opts, leq, fsm_copy(&mut cleanup));
-        if fsm_symbol_occurs(&leq, "@<eq<@", M_LOWER) == 0 {
+        if !fsm_symbol_occurs(&leq, "@<eq<@", M_LOWER) {
             break;
         }
         leq = fsm_compose(opts, leq, fsm_copy(&mut r#move));

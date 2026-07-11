@@ -226,13 +226,12 @@ pub fn sigma_to_list(sigma: &[Sigma]) -> Vec<FsmSigmaList> {
 // [spec:foma:sem:sigma.sigma-add-number-fn+1]
 // [spec:foma:def:fomalibconf.sigma-add-number-fn]
 // [spec:foma:sem:fomalibconf.sigma-add-number-fn+1]
-pub fn sigma_add_number(sigma: &mut Vec<Sigma>, symbol: &str, number: i32) -> i32 {
+pub fn sigma_add_number(sigma: &mut Vec<Sigma>, symbol: &str, number: i32) {
     /* append with the caller's explicit (possibly out-of-order) number */
     sigma.push(Sigma {
         number,
         symbol: symbol.to_string(),
     });
-    1
 }
 
 // [spec:foma:def:sigma.sigma-find-number-fn]
@@ -546,7 +545,7 @@ mod tests {
     #[test]
     fn sigma_add_number_on_empty_alphabet() {
         let mut s = sigma_create();
-        assert_eq!(sigma_add_number(&mut s, "a", 7), 1);
+        sigma_add_number(&mut s, "a", 7);
         assert_eq!(syms(&s), vec![pair(7, "a")]);
     }
 
@@ -555,9 +554,9 @@ mod tests {
     #[test]
     fn sigma_add_number_appends_unsorted_no_dedup() {
         let mut s = sigma_create();
-        assert_eq!(sigma_add_number(&mut s, "a", 9), 1);
-        assert_eq!(sigma_add_number(&mut s, "b", 4), 1);
-        assert_eq!(sigma_add_number(&mut s, "a", 9), 1);
+        sigma_add_number(&mut s, "a", 9);
+        sigma_add_number(&mut s, "b", 4);
+        sigma_add_number(&mut s, "a", 9);
         assert_eq!(syms(&s), vec![pair(9, "a"), pair(4, "b"), pair(9, "a")]);
     }
 

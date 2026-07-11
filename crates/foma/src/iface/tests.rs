@@ -183,22 +183,28 @@ fn apply_file_direction_stack_and_roundtrip() {
 
     let mut session = Session::new();
     // Invalid direction: rejected before the stack/file checks.
-    assert_eq!(
-        iface_apply_file(&mut session, inpath.to_str().unwrap(), None, 0),
-        1
-    );
-    // Valid direction, empty stack: iface_stack_check(1) fails → 0.
-    assert_eq!(
-        iface_apply_file(&mut session, inpath.to_str().unwrap(), None, AP_D),
+    assert!(!iface_apply_file(
+        &mut session,
+        inpath.to_str().unwrap(),
+        None,
         0
-    );
+    ));
+    // Valid direction, empty stack: iface_stack_check(1) fails → handled (true).
+    assert!(iface_apply_file(
+        &mut session,
+        inpath.to_str().unwrap(),
+        None,
+        AP_D
+    ));
 
     push(&mut session, "c a t"); // acceptor for "cat" over sigma {c,a,t}
-    // Bad input path with a populated stack: open failure → 1.
-    assert_eq!(
-        iface_apply_file(&mut session, "/no/such/foma/path", None, AP_D),
-        1
-    );
+    // Bad input path with a populated stack: open failure → false.
+    assert!(!iface_apply_file(
+        &mut session,
+        "/no/such/foma/path",
+        None,
+        AP_D
+    ));
     // Good run writing to a file.
     let rc = iface_apply_file(
         &mut session,
@@ -206,7 +212,7 @@ fn apply_file_direction_stack_and_roundtrip() {
         Some(outpath.to_str().unwrap()),
         AP_D,
     );
-    assert_eq!(rc, 0);
+    assert!(rc);
     assert_eq!(session.stack_size(), 1); // net not consumed
     let out = std::fs::read_to_string(&outpath).unwrap();
     assert!(out.contains("cat"), "output was: {:?}", out);

@@ -343,14 +343,14 @@ fn node_insert(
     r#in: i32,
     out: i32,
     parent: i32,
-) -> i32 {
+) -> bool {
     let mut j: i32;
     let f: i32;
     /* We add the node in the array */
     let i = medh.astarcount;
     if i >= medh.agenda_size - 1 {
         if medh.agenda_size * 2 >= medh.med_max_heap_size {
-            return 0;
+            return false;
         }
         medh.agenda_size *= 2;
         /* Grow the agenda pool (every new slot is written before it is read). */
@@ -396,7 +396,7 @@ fn node_insert(
         j >>= 1;
     }
     medh.heap[j as usize] = i;
-    1
+    true
 }
 
 // [spec:foma:def:spelling.letterbits-union-fn]
@@ -767,7 +767,7 @@ pub fn apply_med(medh: &mut ApplyMedHandle, word: Option<&str>) -> Option<String
             h = calculate_h(medh, &medh.intword, 0, 0);
 
             /* Root node */
-            if node_insert(medh, 0, 0, 0, h, 0, 0, -1) == 0 {
+            if !node_insert(medh, 0, 0, 0, h, 0, 0, -1) {
                 return None; /* goto out */
             }
             medh.nummatches = 0;
@@ -867,7 +867,7 @@ pub fn apply_med(medh: &mut ApplyMedHandle, word: Option<&str>) -> Option<String
                     }
 
                     if g + h <= medh.med_cutoff {
-                        if node_insert(
+                        if !node_insert(
                             medh,
                             medh.curr_pos,
                             target,
@@ -876,7 +876,7 @@ pub fn apply_med(medh: &mut ApplyMedHandle, word: Option<&str>) -> Option<String
                             r#in,
                             out,
                             medh.curr_agenda_offset,
-                        ) == 0
+                        )
                         {
                             break 'outer; /* goto out */
                         }
@@ -900,7 +900,7 @@ pub fn apply_med(medh: &mut ApplyMedHandle, word: Option<&str>) -> Option<String
 
                     h = calculate_h(medh, &medh.intword, medh.curr_pos + 1, cur_target(medh));
                     if (g + h) <= medh.med_cutoff {
-                        if node_insert(
+                        if !node_insert(
                             medh,
                             medh.curr_pos + 1,
                             target,
@@ -909,7 +909,7 @@ pub fn apply_med(medh: &mut ApplyMedHandle, word: Option<&str>) -> Option<String
                             r#in,
                             out,
                             medh.curr_agenda_offset,
-                        ) == 0
+                        )
                         {
                             break 'outer; /* goto out */
                         }
@@ -929,7 +929,7 @@ pub fn apply_med(medh: &mut ApplyMedHandle, word: Option<&str>) -> Option<String
                     h = calculate_h(medh, &medh.intword, medh.curr_pos + 1, medh.curr_state);
 
                     if g + h <= medh.med_cutoff {
-                        if node_insert(
+                        if !node_insert(
                             medh,
                             medh.curr_pos + 1,
                             medh.curr_state,
@@ -938,7 +938,7 @@ pub fn apply_med(medh: &mut ApplyMedHandle, word: Option<&str>) -> Option<String
                             r#in,
                             out,
                             medh.curr_agenda_offset,
-                        ) == 0
+                        )
                         {
                             break 'outer; /* goto out */
                         }
@@ -1350,9 +1350,9 @@ mod tests {
         let net = parse_sorted("{cat}");
         let mut medh = apply_med_init(&net);
         // Insert three nodes: (f=2,wp=0), (f=1,wp=1), (f=1,wp=3).
-        assert_eq!(node_insert(&mut medh, 0, 0, 2, 0, 0, 0, -1), 1); // agenda idx 1
-        assert_eq!(node_insert(&mut medh, 1, 0, 1, 0, 0, 0, -1), 1); // agenda idx 2
-        assert_eq!(node_insert(&mut medh, 3, 0, 1, 0, 0, 0, -1), 1); // agenda idx 3
+        assert!(node_insert(&mut medh, 0, 0, 2, 0, 0, 0, -1)); // agenda idx 1
+        assert!(node_insert(&mut medh, 1, 0, 1, 0, 0, 0, -1)); // agenda idx 2
+        assert!(node_insert(&mut medh, 3, 0, 1, 0, 0, 0, -1)); // agenda idx 3
         // Priority: smaller f first; ties prefer larger wordpos.
         assert_eq!(node_delete_min(&mut medh), Some(3)); // f1,wp3
         assert_eq!(node_delete_min(&mut medh), Some(2)); // f1,wp1

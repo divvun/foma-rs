@@ -297,7 +297,7 @@ pub(crate) fn fsm_minimize_hop(net: Box<Fsm>) -> Box<Fsm> {
                         break 'cont; /* continue */
                     }
                     m.mainloop += 1;
-                    if refine_states(&mut m, j) == 1 {
+                    if refine_states(&mut m, j) {
                         break 'symloop; /* break loop if we split current_w */
                     }
                 }
@@ -417,14 +417,14 @@ pub(crate) fn rebuild_machine(m: &mut Minimizer, net: Box<Fsm>) -> Box<Fsm> {
 // [spec:foma:def:minimize.refine-states-fn]
 // [spec:foma:sem:minimize.refine-states-fn]
 #[allow(non_snake_case)]
-pub(crate) fn refine_states(m: &mut Minimizer, invstates: i32) -> i32 {
+pub(crate) fn refine_states(m: &mut Minimizer, invstates: i32) -> bool {
     /*
        1. add inverse(P,a) to table of inverses, disallowing duplicates
        2. first pass on S, touch each state once, increasing P->t_count
        3. for each P where counter != count, split and add to agenda
     */
     /* Inverse to table of inverses */
-    let mut selfsplit: i32 = 0;
+    let mut selfsplit = false;
 
     /* touch and increase P->counter */
     for i in 0..invstates as usize {
@@ -461,7 +461,7 @@ pub(crate) fn refine_states(m: &mut Minimizer, invstates: i32) -> i32 {
                 /* Create new group newP */
                 m.total_states += 1;
                 if m.total_states == m.num_states {
-                    return 1; /* Abort now, machine is already minimal */
+                    return true; /* Abort now, machine is already minimal */
                 }
                 /* tP->current_split = Pnext++; */
                 let np = m.pnext;
@@ -515,7 +515,7 @@ pub(crate) fn refine_states(m: &mut Minimizer, invstates: i32) -> i32 {
                     };
                     agenda_add(m, smaller, 0);
                     agenda_add(m, larger, 1);
-                    selfsplit = 1;
+                    selfsplit = true;
                 } else {
                     /* If the block is not on the agenda, we add */
                     /* the smaller of tP, newP and start the symloop from 0 */
@@ -1192,7 +1192,7 @@ mod tests {
         m.mainloop = 1;
 
         let selfsplit = refine_states(&mut m, 2);
-        assert_eq!(selfsplit, 0, "tP is not current_w");
+        assert!(!selfsplit, "tP is not current_w");
         assert_eq!(m.total_states, 4, "one new block created");
         /* touched states 0,1 moved to newP (block 3); state 2 stays in tP */
         assert_eq!((m.e[0].group, m.e[1].group, m.e[2].group), (3, 3, 1));

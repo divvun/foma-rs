@@ -2,9 +2,6 @@
 //! file, random-*, words, pairs, shortest-string). See iface/mod.rs.
 use super::*;
 
-/// C: `#define LINE_LIMIT 8192` — fgets buffer size in iface_apply_file.
-const LINE_LIMIT: usize = 8192;
-
 // [spec:foma:def:iface.iface-apply-set-params-fn]
 // [spec:foma:sem:iface.iface-apply-set-params-fn]
 // [spec:foma:def:foma.iface-apply-set-params-fn]
@@ -75,21 +72,22 @@ pub fn iface_apply_file(
     infilename: &str,
     outfilename: Option<&str>,
     direction: i32,
-) -> i32 {
-    let _ = LINE_LIMIT; // fgets buffer size; read_line reads whole lines here.
+) -> bool {
+    // C read input with fgets(line, 8192, INFILE); read_line below reads whole
+    // logical lines instead, so there is no fixed buffer size to honor.
     if direction != AP_D && direction != AP_U {
         perror("Invalid direction in iface_apply_file().\n");
-        return 1;
+        return false;
     }
     if !iface_stack_check(session, 1) {
-        return 0;
+        return true;
     }
     let infile = match File::open(infilename) {
         Ok(f) => f,
         Err(_) => {
             eprint!("{}: ", infilename);
             perror("Error opening file");
-            return 1;
+            return false;
         }
     };
 
@@ -106,14 +104,14 @@ pub fn iface_apply_file(
                 Err(_) => {
                     eprint!("{}: ", name);
                     perror("Error opening output file.");
-                    return 1;
+                    return false;
                 }
             }
         }
     };
 
     let Some(ah) = session.stack_get_ah() else {
-        return 0;
+        return true;
     };
     session.stack_entry_ah_with_opts(ah, |opts, h| iface_apply_set_params(opts, h));
 
@@ -167,7 +165,7 @@ pub fn iface_apply_file(
     // C: fclose(OUTFILE) only when outfilename != NULL; the input file is never
     // fclose'd (latent leak). Rust drops (closes) both at scope end; stdout is not
     // closed. The observable difference (leak vs. drop) is unrepresentable safely.
-    0
+    true
 }
 
 // [spec:foma:def:iface.iface-apply-down-fn]
