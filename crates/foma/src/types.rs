@@ -35,12 +35,20 @@ pub const IDENTITY: i32 = 2;
 pub const OP_IGNORE_ALL: i32 = 1;
 pub const OP_IGNORE_INTERNAL: i32 = 2;
 
-/* Replacement direction */
-pub const OP_UPWARD_REPLACE: i32 = 1;
-pub const OP_RIGHTWARD_REPLACE: i32 = 2;
-pub const OP_LEFTWARD_REPLACE: i32 = 3;
-pub const OP_DOWNWARD_REPLACE: i32 = 4;
-pub const OP_TWO_LEVEL_REPLACE: i32 = 5;
+/// Replacement direction of a rewrite rule's context (C: OP_*_REPLACE 1..5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplaceDir {
+    /// OP_UPWARD_REPLACE
+    Upward,
+    /// OP_RIGHTWARD_REPLACE
+    Rightward,
+    /// OP_LEFTWARD_REPLACE
+    Leftward,
+    /// OP_DOWNWARD_REPLACE
+    Downward,
+    /// OP_TWO_LEVEL_REPLACE
+    TwoLevel,
+}
 
 /* Arrow types in fsmrules */
 pub const ARROW_RIGHT: i32 = 1;
@@ -245,7 +253,7 @@ pub struct RewriteSet {
     pub rewrite_contexts: Option<Box<Fsmcontexts>>,
     pub next: Option<Box<RewriteSet>>,
     /// || \\ // \/
-    pub rule_direction: i32,
+    pub rule_direction: Option<ReplaceDir>,
 }
 
 /// One sigma alphabet entry; number < IDENTITY is reserved for special

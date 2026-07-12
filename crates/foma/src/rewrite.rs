@@ -23,8 +23,7 @@ use crate::sigma::{
 use crate::structures::{fsm_copy, fsm_destroy, fsm_empty_set, fsm_empty_string, fsm_identity};
 use crate::types::{
     ARROW_DOTTED, ARROW_LEFT, ARROW_LONGEST_MATCH, ARROW_OPTIONAL, ARROW_RIGHT,
-    ARROW_SHORTEST_MATCH, Fsm, Fsmcontexts, OP_DOWNWARD_REPLACE, OP_LEFTWARD_REPLACE,
-    OP_RIGHTWARD_REPLACE, OP_TWO_LEVEL_REPLACE, OP_UPWARD_REPLACE, RewriteSet,
+    ARROW_SHORTEST_MATCH, Fsm, Fsmcontexts, ReplaceDir, RewriteSet,
 };
 
 // Lower(X) puts X on output tape (may also be represented by @ID@ on input tape)
@@ -91,7 +90,7 @@ pub static SPECIALSYMBOLS: [&str; 8] =
 pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
     let mut num_rules: i32;
     let mut rule_number: i32;
-    let mut dir: i32;
+    let mut dir: Option<ReplaceDir>;
     let mut i: i32;
     /* Count parallel rules */
     num_rules = 0;
@@ -305,7 +304,7 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
             let mut contexts = rewrite_contexts.as_deref_mut();
             while let Some(c) = contexts {
                 match dir {
-                    OP_UPWARD_REPLACE => {
+                    Some(ReplaceDir::Upward) => {
                         let left_copy = fsm_copy(
                             c.left
                                 .as_deref_mut()
@@ -319,7 +318,7 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
                         );
                         c.cpright = Some(rewrite_upper(opts, &mut rb, right_copy));
                     }
-                    OP_RIGHTWARD_REPLACE => {
+                    Some(ReplaceDir::Rightward) => {
                         let left_copy = fsm_copy(
                             c.left
                                 .as_deref_mut()
@@ -333,7 +332,7 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
                         );
                         c.cpright = Some(rewrite_upper(opts, &mut rb, right_copy));
                     }
-                    OP_LEFTWARD_REPLACE => {
+                    Some(ReplaceDir::Leftward) => {
                         let left_copy = fsm_copy(
                             c.left
                                 .as_deref_mut()
@@ -347,7 +346,7 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
                         );
                         c.cpright = Some(rewrite_lower(opts, &mut rb, right_copy));
                     }
-                    OP_DOWNWARD_REPLACE => {
+                    Some(ReplaceDir::Downward) => {
                         let left_copy = fsm_copy(
                             c.left
                                 .as_deref_mut()
@@ -361,7 +360,7 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
                         );
                         c.cpright = Some(rewrite_lower(opts, &mut rb, right_copy));
                     }
-                    OP_TWO_LEVEL_REPLACE => {
+                    Some(ReplaceDir::TwoLevel) => {
                         let left_copy = fsm_copy(
                             c.left
                                 .as_deref_mut()
@@ -375,7 +374,7 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
                         );
                         c.cpright = Some(rewrite_two_level(opts, &mut rb, right_copy, 1));
                     }
-                    _ => {} /* C: switch has no default */
+                    None => {} /* no context-direction rewrite */
                 }
                 contexts = c.next.as_deref_mut();
             }
@@ -1945,7 +1944,7 @@ mod tests {
     use crate::options::FomaOptions;
     use crate::regex::fsm_parse_regex;
     use crate::structures::{fsm_copy, fsm_empty_set, fsm_empty_string, fsm_identity, fsm_isempty};
-    use crate::types::{ARROW_RIGHT, Fsm, Fsmcontexts, Fsmrules, OP_TWO_LEVEL_REPLACE, RewriteSet};
+    use crate::types::{ARROW_RIGHT, Fsm, Fsmcontexts, Fsmrules, ReplaceDir, RewriteSet};
 
     /* All lower-side outputs of `word` (apply down), sorted+deduped. */
     fn down_all(net: &Fsm, word: &str) -> Vec<String> {
@@ -2152,7 +2151,7 @@ mod tests {
             rewrite_rules: Some(rule),
             rewrite_contexts: None,
             next: None,
-            rule_direction: 0,
+            rule_direction: None,
         };
         let net = fsm_rewrite(opts, &mut rs);
         assert_eq!(down_all(&net, "a"), vec!["b"]);
@@ -2189,7 +2188,7 @@ mod tests {
             rewrite_rules: Some(rule),
             rewrite_contexts: Some(ctx),
             next: None,
-            rule_direction: OP_TWO_LEVEL_REPLACE,
+            rule_direction: Some(ReplaceDir::TwoLevel),
         };
         let net = fsm_rewrite(opts, &mut rs);
         assert_eq!(down_all(&net, "lar"), vec!["lbr"]);

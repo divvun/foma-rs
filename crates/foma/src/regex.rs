@@ -41,8 +41,7 @@ use crate::structures::{fsm_copy, fsm_destroy, fsm_empty_string, fsm_identity, f
 use crate::types::{
     ARROW_DOTTED, ARROW_LEFT, ARROW_LEFT_TO_RIGHT, ARROW_LONGEST_MATCH, ARROW_OPTIONAL,
     ARROW_RIGHT, ARROW_RIGHT_TO_LEFT, ARROW_SHORTEST_MATCH, DefinedFunctions, DefinedNetworks, Fsm,
-    Fsmcontexts, Fsmrules, OP_DOWNWARD_REPLACE, OP_IGNORE_ALL, OP_IGNORE_INTERNAL,
-    OP_LEFTWARD_REPLACE, OP_RIGHTWARD_REPLACE, OP_UPWARD_REPLACE, RewriteSet,
+    Fsmcontexts, Fsmrules, OP_IGNORE_ALL, OP_IGNORE_INTERNAL, ReplaceDir, RewriteSet,
 };
 use crate::utf8::replace_equal_len;
 
@@ -514,12 +513,12 @@ fn arrow_to_type(arrow: ReplaceArrow) -> i32 {
     }
 }
 
-fn mark_to_dir(mark: ContextMark) -> i32 {
+fn mark_to_dir(mark: ContextMark) -> ReplaceDir {
     match mark {
-        ContextMark::UpperUpper => OP_UPWARD_REPLACE,
-        ContextMark::LowerUpper => OP_RIGHTWARD_REPLACE,
-        ContextMark::UpperLower => OP_LEFTWARD_REPLACE,
-        ContextMark::LowerLower => OP_DOWNWARD_REPLACE,
+        ContextMark::UpperUpper => ReplaceDir::Upward,
+        ContextMark::LowerUpper => ReplaceDir::Rightward,
+        ContextMark::UpperLower => ReplaceDir::Leftward,
+        ContextMark::LowerLower => ReplaceDir::Downward,
     }
 }
 
@@ -587,9 +586,9 @@ fn build_replace(
                         cpright: None,
                     });
                 }
-                (link_fsmcontexts(ctx_nodes), dir)
+                (link_fsmcontexts(ctx_nodes), Some(dir))
             }
-            None => (None, 0),
+            None => (None, None),
         };
         set_nodes.push(RewriteSet {
             rewrite_rules: link_fsmrules(rule_nodes),

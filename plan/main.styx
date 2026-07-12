@@ -1254,6 +1254,14 @@ children (
                 id w10-i32-enums-plain
                 title "Magic-i32 → plain enums (mutually-exclusive, no wire impact): ReplaceDir (rewrite rule_direction), SubsetOp (determinize), ApplyDir (iface AP_D/U/M), WordSide (words-file 0/1/2), FlagBuildResult (flags FAIL/SUCCEED/NONE), FlagCheck (apply FAIL/SUCCEED)"
                 priority 1
+                log (
+                    {
+                        at 2026-07-12T23:36:14.203463Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Progress: 3/6 done in commit abec21a — SubsetOp (determinize), ApplyDir (types+iface+bin; APPLY_DIRECTION thread_local became Option<ApplyDir>, None = old 0), WordSide (iface_words_file). Remaining: ReplaceDir (rule_direction — must be Option<ReplaceDir> since 0 = \"no contexts\"; 5 variants incl. TwoLevel; touches types.rs field + regex.rs mark_to_dir/setter + rewrite.rs 5-arm match + 2 tests) and the two flag-result enums FlagCheck (apply_check_flag, ~40 return sites in apply.rs, FAIL=0/SUCCEED=1) + FlagBuildResult (flag_build FAIL=1/SUCCEED=2/NONE=3 + its Row decision table) — the two flag ones are best done together as their own commit."
+                    }
+                )
             }
 
             {
