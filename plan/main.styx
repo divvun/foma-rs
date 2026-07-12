@@ -2,7 +2,7 @@ name foma
 
 source {
     url "git@github.com:mhulden/foma.git"
-    ref master
+    ref main
 }
 
 children (
