@@ -915,7 +915,7 @@ pub(crate) fn explode_line(buf: &str, values: &mut Vec<i32>) -> i32 {
 /* / ##states## / ...TRANSITIONS... / ##end## (see foma/io.c for the full note) */
 
 // [spec:foma:def:io.io-net-read-fn]
-// [spec:foma:sem:io.io-net-read-fn+4]
+// [spec:foma:sem:io.io-net-read-fn+5]
 // C signature: struct fsm *io_net_read(io_buf_handle *iobh, char **net_name).
 // The name rides on net.name (C's *net_name out-param was always identical to
 // it). `Ok(None)` is a clean end of the buffer (no more nets); `Err` is a
@@ -989,7 +989,7 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Result<Option<Box<Fsm>>, FomaError
         if toks.len() > 11 {
             extras = parse_leading_i32(toks[11]);
         }
-        // [spec:foma:sem:io.io-net-read-fn+4] a missing name field yields an empty
+        // [spec:foma:sem:io.io-net-read-fn+5] a missing name field yields an empty
         // name. C's sscanf left the buffer holding the whole props line, so that
         // line became the net name.
         net.name = toks.get(12).copied().unwrap_or("").into();
@@ -1019,7 +1019,7 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Result<Option<Box<Fsm>>, FomaError
             break;
         }
         if buf.is_empty() {
-            // [spec:foma:sem:io.io-net-read-fn+3] a truly empty line is skipped,
+            // [spec:foma:sem:io.io-net-read-fn+5] a truly empty line is skipped,
             // but at end-of-buffer io_gets yields empty lines without advancing
             // the cursor; if no progress was made the file is truncated inside the
             // sigma section, so fail instead of looping forever (C hung here).
@@ -1058,11 +1058,20 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Result<Option<Box<Fsm>>, FomaError
         /* C leaks net here */
         return Err(FomaError::Format("File format error!".to_string()));
     }
-    /* malloc(linecount * sizeof(struct fsm_state)).
-    DEVIATION from C (more lines than linecount OOB-write in C; Rust panics on
-    the index; a negative/zero linecount likewise mis-sizes the buffer) */
-    net.states = vec![
-        FsmState {
+    /* C malloc'd linecount rows and indexed them, OOB-writing when the states
+    section held more lines than the (file-supplied, untrusted) linecount. Push
+    each row instead: a well-formed file yields exactly linecount rows, a
+    malformed one can't overrun a fixed buffer, and a negative/huge linecount no
+    longer mis-sizes anything. */
+    net.states = Vec::new();
+    let mut laststate: i32 = -1;
+    loop {
+        io_gets(iobh, &mut buf);
+        if buf.as_bytes().first() == Some(&b'#') {
+            break;
+        }
+        let items = explode_line(&buf, &mut lineint);
+        let mut st = FsmState {
             state_no: 0,
             r#in: 0,
             out: 0,
@@ -1070,46 +1079,36 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Result<Option<Box<Fsm>>, FomaError
             final_state: 0,
             start_state: 0,
         };
-        net.linecount as usize
-    ];
-    let mut laststate: i32 = -1;
-    let mut i = 0usize;
-    loop {
-        io_gets(iobh, &mut buf);
-        if buf.as_bytes().first() == Some(&b'#') {
-            break;
-        }
-        let items = explode_line(&buf, &mut lineint);
         match items {
             2 => {
-                net.states[i].state_no = laststate;
-                net.states[i].r#in = lineint[0] as i16;
-                net.states[i].out = lineint[0] as i16;
-                net.states[i].target = lineint[1];
-                net.states[i].final_state = last_final;
+                st.state_no = laststate;
+                st.r#in = lineint[0] as i16;
+                st.out = lineint[0] as i16;
+                st.target = lineint[1];
+                st.final_state = last_final;
             }
             3 => {
-                net.states[i].state_no = laststate;
-                net.states[i].r#in = lineint[0] as i16;
-                net.states[i].out = lineint[1] as i16;
-                net.states[i].target = lineint[2];
-                net.states[i].final_state = last_final;
+                st.state_no = laststate;
+                st.r#in = lineint[0] as i16;
+                st.out = lineint[1] as i16;
+                st.target = lineint[2];
+                st.final_state = last_final;
             }
             4 => {
-                net.states[i].state_no = lineint[0];
-                net.states[i].r#in = lineint[1] as i16;
-                net.states[i].out = lineint[1] as i16;
-                net.states[i].target = lineint[2];
-                net.states[i].final_state = lineint[3] as i8;
+                st.state_no = lineint[0];
+                st.r#in = lineint[1] as i16;
+                st.out = lineint[1] as i16;
+                st.target = lineint[2];
+                st.final_state = lineint[3] as i8;
                 laststate = lineint[0];
                 last_final = lineint[3] as i8;
             }
             5 => {
-                net.states[i].state_no = lineint[0];
-                net.states[i].r#in = lineint[1] as i16;
-                net.states[i].out = lineint[2] as i16;
-                net.states[i].target = lineint[3];
-                net.states[i].final_state = lineint[4] as i8;
+                st.state_no = lineint[0];
+                st.r#in = lineint[1] as i16;
+                st.out = lineint[2] as i16;
+                st.target = lineint[3];
+                st.final_state = lineint[4] as i8;
                 laststate = lineint[0];
                 last_final = lineint[4] as i8;
             }
@@ -1118,14 +1117,14 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Result<Option<Box<Fsm>>, FomaError
                 return Err(FomaError::Format("File format error".to_string()));
             }
         }
-        if laststate > 0 {
-            net.states[i].start_state = 0;
+        st.start_state = if laststate > 0 {
+            0
         } else if laststate == -1 {
-            net.states[i].start_state = -1;
+            -1
         } else {
-            net.states[i].start_state = 1;
-        }
-        i += 1;
+            1
+        };
+        net.states.push(st);
     }
 
     if buf == "##cmatrix##" {
@@ -1137,12 +1136,22 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Result<Option<Box<Fsm>>, FomaError
                 break;
             }
             let val: i32 = buf.trim().parse().unwrap_or(0);
-            /* DEVIATION from C (no bounds check on cm; a matrix overrun writes
-            OOB — Rust panics on the index instead) */
-            net.medlookup
+            /* C indexed confusion_matrix[cm] unchecked, OOB-writing when the
+            section held more entries than cmatrix_init sized for. Bounds-check
+            and report a format error instead of panicking. */
+            let matrix = &mut net
+                .medlookup
                 .as_mut()
                 .expect("cmatrix_init set up medlookup above")
-                .confusion_matrix[cm] = val;
+                .confusion_matrix;
+            match matrix.get_mut(cm) {
+                Some(slot) => *slot = val,
+                None => {
+                    return Err(FomaError::Format(
+                        "confusion matrix section exceeds its declared size".to_string(),
+                    ));
+                }
+            }
             cm += 1;
         }
     }
@@ -1811,6 +1820,33 @@ mod tests {
 
     // [spec:foma:sem:io.io-net-read-fn/test]
     #[test]
+    fn io_net_read_survives_understated_linecount() {
+        /* props claims linecount 1 but the states section has 3 lines — the C
+        malloc(linecount) buffer OOB-wrote at states[1]; the port must read every
+        line and return the net, not panic. */
+        let text = AB_FOMA_TEXT.replace("2 1 2 3 1 1", "2 1 2 1 1 1");
+        assert!(text.contains("2 1 2 1 1 1"), "linecount edit landed");
+        let mut buf = text.into_bytes();
+        buf.push(0);
+        let mut h = IoBufHandle {
+            io_buf: Some(buf),
+            io_buf_ptr: 0,
+        };
+        let net = io_net_read(&mut h)
+            .expect("understated linecount must not panic or error")
+            .expect("a net, not clean EOF");
+        /* every states line was read despite the header claiming only one (the
+        header linecount is stored verbatim and recomputed downstream, so it is
+        not what we assert on here) */
+        assert_eq!(
+            state_lines(&net),
+            state_lines(&craft_ab_net("test")),
+            "all states parsed"
+        );
+    }
+
+    // [spec:foma:sem:io.io-net-read-fn/test]
+    #[test]
     fn io_net_read_header_error_returns_none() {
         let mut h = IoBufHandle {
             io_buf: Some(b"garbage\0".to_vec()),
@@ -2352,7 +2388,7 @@ mod tests {
         assert_eq!(io_gz_file_to_mem(&mut hm, "/no/such/file/zzz"), 0);
     }
 
-    // [spec:foma:sem:io.io-net-read-fn+3/test]
+    // [spec:foma:sem:io.io-net-read-fn+5/test]
     #[test]
     fn io_net_read_bails_on_truncated_sigma_section() {
         let opts = &FomaOptions::default();
@@ -2371,7 +2407,7 @@ mod tests {
         assert!(matches!(io_net_read(&mut iobh), Err(FomaError::Format(_))));
     }
 
-    // [spec:foma:sem:io.io-net-read-fn+3/test]
+    // [spec:foma:sem:io.io-net-read-fn+5/test]
     #[test]
     fn io_net_read_empty_name_when_field_absent() {
         let opts = &FomaOptions::default();
@@ -2393,7 +2429,7 @@ mod tests {
 
     // A sigma line with no separating space returns a Format error instead of
     // crashing (C's strstr(buf, " ") NULL-derefs on a spaceless line).
-    // [spec:foma:sem:io.io-net-read-fn+3/test]
+    // [spec:foma:sem:io.io-net-read-fn+5/test]
     #[test]
     fn io_net_read_bails_on_spaceless_sigma_line() {
         let opts = &FomaOptions::default();

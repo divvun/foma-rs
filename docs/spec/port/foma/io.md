@@ -354,7 +354,7 @@
 > [spec:foma:def:io.io-net-read-fn]
 > struct fsm *io_net_read(struct io_buf_handle *iobh, char **net_name)
 
-> [spec:foma:sem:io.io-net-read-fn+4]
+> [spec:foma:sem:io.io-net-read-fn+5]
 > Parses one network in the foma text format from the handle's in-memory buffer (format
 > as written by `[spec:foma:sem:io.foma-net-print-fn]`). All lines are read with
 > `[spec:foma:sem:io.io-gets-fn]` into a stack buffer of READ_BUF_SIZE (4096) bytes.
@@ -388,8 +388,8 @@
 > advancing, so a file truncated inside the sigma section is detected ("File format error in
 > sigma section!"), the net destroyed and NULL returned. The C source had no such check and
 > looped forever on a truncated sigma section.
-> 5. The '#' line must be "##states##" (else message + NULL). malloc linecount *
-> sizeof(struct fsm_state) entries. Read lines until one starts with '#', parsing each
+> 5. The '#' line must be "##states##" (else message + NULL). Read lines until one starts
+> with '#', appending one fsm_state per line parsed
 > with `[spec:foma:sem:io.explode-line-fn]` into 2–5 ints, maintaining laststate (init
 > -1) and last_final (a char, init '1' i.e. 49 — only consumed if the first line has 2 or
 > 3 fields, which well-formed files never produce). Field meanings:
@@ -400,9 +400,14 @@
 > any other count: "File format error\n", return NULL. Per entry, start_state is 1 if
 > laststate == 0, 0 if laststate > 0, and -1 if laststate == -1; the writer's sentinel
 > line "-1 -1 -1 -1 -1" flows through the 5-field path and becomes the terminating
-> state_no == -1 entry.
+> state_no == -1 entry. C malloc'd exactly linecount entries and indexed them, so a
+> states section longer than the (file-supplied, untrusted) linecount OOB-wrote; appending
+> each row instead means an over- or under-stated linecount cannot overrun a buffer, and
+> net->linecount keeps the header value verbatim (recomputed downstream by fsm_count).
 > 6. If the '#' line is "##cmatrix##": cmatrix_init(net), then read one integer per line
-> into net->medlookup->confusion_matrix (sequentially, no bounds check) until a '#' line.
+> into net->medlookup->confusion_matrix (sequentially) until a '#' line; an entry past the
+> matrix's cmatrix_init-sized length is Err(FomaError::Format) rather than C's unchecked
+> OOB write.
 > 7. The final line must be "##end##" (else message + NULL). Return the net.
 
 > [spec:foma:def:io.load-defined-fn]

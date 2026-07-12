@@ -1219,6 +1219,13 @@ children (
                         kind @note
                         text "Both sites carry honest DEVIATION comments already admitting \"Rust panics on the index\" — known but unfixed, and exactly the Wave-6 panic-hardening class (malformed-file panics → graceful FomaError) that these two slipped through. io.rs:1064 sizes net.states to net.linecount (parse_leading_i32 of the props line, untrusted): a file with more state lines than declared panics at states[i]; a negative linecount becomes a huge `as usize` → allocation abort; zero panics on the first line. io.rs:1142 writes confusion_matrix[cm] with cm unbounded by the cmatrix section's real size. Reachable from real untrusted input: regex @\"file\", and flookup/cgflookup reading a user-supplied .foma. Fix: bound-check i/cm against the allocated length (or push into a Vec instead of pre-sizing to the declared count) and return FomaError::Format, matching the sigma-section error path at io.rs:1036-1043. Add a test with a truncated/over-long binary."
                     }
+
+                    {
+                        at 2026-07-12T23:21:37.230931Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Done (nplan_complete)"
+                    }
                 )
             }
 
