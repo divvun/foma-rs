@@ -1203,4 +1203,117 @@ children (
             }
         )
     }
+
+    {
+        id wave-10-hardening
+        title "Wave 10: post-port hardening — kill file-reachable panics, guard-then-unwrap smells, and magic i32s (bool/enum/bitflags/Tern), preserving byte-identical wire format"
+        children (
+            {
+                id w10-io-panics
+                title "Fix io_net_read OOB panics on malformed binary files (states loop sized to untrusted linecount io.rs:1064; cmatrix confusion_matrix[cm] io.rs:1142) — bound-check and return FomaError::Format like the sibling sigma-section errors"
+                priority 0
+                log (
+                    {
+                        at 2026-07-12T22:51:53.041157Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Both sites carry honest DEVIATION comments already admitting \"Rust panics on the index\" — known but unfixed, and exactly the Wave-6 panic-hardening class (malformed-file panics → graceful FomaError) that these two slipped through. io.rs:1064 sizes net.states to net.linecount (parse_leading_i32 of the props line, untrusted): a file with more state lines than declared panics at states[i]; a negative linecount becomes a huge `as usize` → allocation abort; zero panics on the first line. io.rs:1142 writes confusion_matrix[cm] with cm unbounded by the cmatrix section's real size. Reachable from real untrusted input: regex @\"file\", and flookup/cgflookup reading a user-supplied .foma. Fix: bound-check i/cm against the allocated length (or push into a Vec instead of pre-sizing to the declared count) and return FomaError::Format, matching the sigma-section error path at io.rs:1036-1043. Add a test with a truncated/over-long binary."
+                    }
+                )
+            }
+
+            {
+                id w10-unwrap-sweep
+                title "Guard-then-unwrap sweep: kill the 2 bare non-test unwraps (flags.rs:638/659) by binding start in the pattern; drop/bind 8 redundant is_some guards (products.rs:723/768/797, derived.rs:503, stack.rs:372/480, flookup.rs:602, cgflookup.rs:499)"
+                priority 1
+                log (
+                    {
+                        at 2026-07-12T22:52:33.655258Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Scope is exactly the 10 sites in the title — do NOT churn the ~103 other is_some/is_none uses, which are legitimate: borrow-checker-forced linked-list walks that already carry explanatory .expect messages (structures.rs:1283/1284/1376/1379/1385/1388, define.rs:150), fill-if-empty into arena-indexed Option slots where if-let can't bind (lexcread), value-selection `let n = if x.is_some() {..} else {..}`, and pure predicate reads. Neither flags.rs unwrap can actually fire (guarded by start.is_some() in the same arm, start always <= i) — this is a style/consistency fix to hit the stated zero-bare-unwrap bar, not a live panic. Rewrites: flags.rs 638/659 bind Some in the arm; products.rs 723/768/797 + derived.rs:503 collapse get-or-insert to a match (products keeps the int_stack.push side-effect in the None arm); stack.rs 372/480 just delete the guard (apply_med_clear already no-ops on None); flookup.rs:602 / cgflookup.rs:499 use an edition-2024 let-chain `if !is_tail && let Some(r) = result.take()`."
+                    }
+                )
+            }
+
+            {
+                id w10-i32-enums-plain
+                title "Magic-i32 → plain enums (mutually-exclusive, no wire impact): ReplaceDir (rewrite rule_direction), SubsetOp (determinize), ApplyDir (iface AP_D/U/M), WordSide (words-file 0/1/2), FlagBuildResult (flags FAIL/SUCCEED/NONE), FlagCheck (apply FAIL/SUCCEED)"
+                priority 1
+            }
+
+            {
+                id w10-i32-bitflags
+                title "Magic-i32 → bitflags (set semantics, +→| and &-tests preserved): ApplyMode (mode UP/DOWN/LOWER/UPPER/ENUMERATE/RANDOM/…), ArrowType (rewrite arrow_type), Sides (M_UPPER/M_LOWER)"
+                priority 1
+            }
+
+            {
+                id w10-i32-flagtype
+                title "Magic-i32 → FlagType bitflags: FLAG_* type domain (Flags.type, FlagLookup.type, flag_get_type/flag_type_to_char/flag_create_symbol/flag_build/apply_check_flag). Must stay bitflags to keep the set-membership &-test at flags.rs:104 and apply.rs:997/1119"
+                priority 2
+                log (
+                    {
+                        at 2026-07-12T22:52:19.976958Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "The one legitimate integer use that forces bitflags (not a plain enum): the set-membership test `(fl.type & (FLAG_UNIFY|FLAG_REQUIRE|FLAG_DISALLOW|FLAG_EQUAL)) != 0` at flags.rs:104 and the twin `(flag_lookup[sym].type & (FLAG_UNIFY|FLAG_CLEAR|FLAG_POSITIVE|FLAG_NEGATIVE)) != 0` at apply.rs:997/1119. FLAG_* are already power-of-two (types.rs:57-63: UNIFY=1,CLEAR=2,DISALLOW=4,NEGATIVE=8,POSITIVE=16,REQUIRE=32,EQUAL=64). Model as bitflags FlagType so `.intersects(...)` reproduces the &-test verbatim; flag_get_type returns Option<FlagType> (its 0 = \"not a flag\" case, keyed on at apply.rs:1377 etc.) or a FlagType with a distinguished empty/none. Thread through Flags.type, FlagLookup.type, flag_type_to_char/flag_create_symbol/flag_build/apply_check_flag params, and flag_build's Row decision-table columns."
+                    }
+                )
+            }
+
+            {
+                id w10-i32-bool-block
+                title "Magic-i32 → bool: ApplyHandle has_flags/obey_flags/show_flags/print_space/print_pairs/binsearch/indexed/state_has_index/iterate_old + Searchstack mirrors + FlagState.neg/oldflagneg; flags/determinize locals (found/flag/change/has_trans/fs, isflag/ftable→Vec<bool>). Keep C-ABI setter params value:i32 (do !=0 inside)"
+                priority 2
+            }
+
+            {
+                id w10-i32-tern
+                title "Magic-i32 → Tern{No,Yes,Unk} #[repr(i32)]: the tri-state Fsm property flags is_deterministic/is_pruned/is_minimized/is_epsilon_free/is_loop_free (NOT bool — they carry UNK=2). Props-line read/write shim keeps the wire byte-identical; gated by the io round-trip test + a golden-file check"
+                priority 2
+                log (
+                    {
+                        at 2026-07-12T22:52:06.247013Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Proven tri-state (something assigns UNK=2), so bool would silently collapse Unk→Yes and change both the props line and the minimize/determinize fast-path decisions: is_deterministic (flags.rs:712/790, determinize.rs:1242/1267 set UNK), is_pruned (dynarray.rs:245, flags.rs:714), is_minimized (dynarray.rs:246, flags.rs:713/791), is_epsilon_free (extract.rs:164/189 assert UNK), is_loop_free (dynarray.rs:248). Shared enum Tern{No=0,Yes=1,Unk=2} #[repr(i32)]; from_i32 handles 0/1/2 and defensively maps other ints as C stored them raw. Wire shim: props-line read Tern::from_i32(parse_leading_i32(tok)), write writeln!(\"{}\", flag as i32) — fields is_deterministic/is_pruned/is_minimized/is_epsilon_free are props fields 7-10, is_loop_free is field 11. Natural conversion seam is the FsmBuilder widening at dynarray.rs:244-249 (builder holds native bools/UNK, widens to net i32). GATE: the existing round-trip test at io.rs:1591-1660 asserts all eight property flags survive write/read; add a byte-identical golden-file check before landing."
+                    }
+                )
+            }
+
+            {
+                id w10-i32-extras-props
+                title "Magic-i32 → Props newtype for the 2-bit-packed extras byte: is_completed (quad-state 0..3) + arcs_sorted_in/out, owning pack/unpack that reproduces io.rs:999-1001/:1203 bit math exactly (extras = is_completed | in<<2 | out<<4)"
+                priority 2
+                deps (w10-i32-tern)
+            }
+
+            {
+                id w10-structural-smells
+                title "Structural smells: decompose fsm_merge_sigma (extract expand_unknowns(net,mergesigma,presence) to collapse the two ~110-line copy-paste blocks, halving CC-123); guard fsm_left_rewr against a degenerate rewr net (derived.rs:1849 reads states[0].in/out with no first-arc guard → silent wrong machine)"
+                priority 2
+            }
+
+            {
+                id w10-dead-cruft
+                title "Delete dead C-residue + trim hot-path allocs: FsmBuilder.current_fsm_size (Vec self-grows), determinize::Subset write-only mirror fields, RewriteBatch always-None iopen/iclose/rewrite_set, int_stack is_full()/find(); apply_append astring/bstring borrow instead of to_string; fsm_substitute_label needless net clones; drop the \"Wave 4\" comment tag + honest the io.rs last_final=49 magic int"
+                priority 3
+            }
+
+            {
+                id w10-i32-option-sentinels
+                title "Optional: local -1 sentinels → Option (iface shortest_acyclic_length start/dist apply_cmds.rs:496/515, print_net previous_state common.rs:111). Low value, purely local; the Fsm line-table state_no/target -1 sentinel stays (kept design)"
+                priority 3
+            }
+        )
+        log (
+            {
+                at 2026-07-12T22:51:40.581352Z
+                author "brendan@necessary.nu"
+                kind @decision
+                text "Keep-i32 boundary (explicitly NOT magic, do not convert): genuine counts/sizes/positions (arity, arccount, statecount, linecount, finalcount, ipos/opos/ptr, sigma numbers, hashes); the fsm_get_* hfst C-ABI extraction family (i32 returns mirror exported C prototypes) and the -1-terminated finals_head/initials_head arrays; the fomalib setter param convention apply_set_*(h, value: i32) — the FIELD becomes bool but the published param stays i32 doing !=0; arithmetic sentinels that participate in math not just presence (apply_match_length/str -1, statemap unset -1); and the deliberately-kept Fsm line-table row sentinel (state_no/target == -1 terminating states Vec). Out of the i32 mandate but noted: pathcount's -1/-2/-3 overload is i64 (PATHCOUNT_CYCLIC/OVERFLOW/UNKNOWN) — a future enum PathCount candidate if the sweep ever extends past i32."
+            }
+        )
+    }
 )
