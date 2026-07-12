@@ -16,10 +16,14 @@ use crate::types::{
 };
 use smol_str::SmolStr;
 
-/* File-local constants (C #defines; distinct from apply.c's FAIL/SUCCEED) */
-const FAIL: i32 = 1;
-const SUCCEED: i32 = 2;
-const NONE: i32 = 3;
+/// Pairwise flag-compatibility verdict from `flag_build` (C #defines FAIL=1 /
+/// SUCCEED=2 / NONE=3; distinct from apply.c's FAIL/SUCCEED).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlagBuildResult {
+    Fail,
+    Succeed,
+    None,
+}
 
 // [spec:foma:def:flags.flags]
 pub struct Flags {
@@ -122,7 +126,7 @@ pub fn flag_eliminate(opts: &FomaOptions, net: Box<Fsm>, name: Option<&str>) -> 
                     ffl.name.as_deref().expect("flag list node has a name"),
                     ffl.value.as_deref(),
                 );
-                if fstatus == FAIL {
+                if fstatus == FlagBuildResult::Fail {
                     fail_flags = Some(fsm_minimize(
                         opts,
                         fsm_union(
@@ -139,7 +143,7 @@ pub fn flag_eliminate(opts: &FomaOptions, net: Box<Fsm>, name: Option<&str>) -> 
                     ));
                     flag = 1;
                 }
-                if fstatus == SUCCEED {
+                if fstatus == FlagBuildResult::Succeed {
                     succeed_flags = Some(fsm_minimize(
                         opts,
                         fsm_union(
@@ -310,9 +314,9 @@ pub fn flag_build(
     fftype: i32,
     ffname: &str,
     ffvalue: Option<&str>,
-) -> i32 {
+) -> FlagBuildResult {
     if fname != ffname {
-        return NONE;
+        return FlagBuildResult::None;
     }
     /* selfnull: the eliminated flag is valueless, e.g. @R.A@ or @D.A@ */
     let selfnull = fvalue.is_none();
@@ -322,41 +326,41 @@ pub fn flag_build(
     let eq = fvalue == ffvalue;
 
     /* Pairwise compatibility decision table (see the sem rule); first matching
-    row wins, anything unlisted is NONE. Columns: eliminated flag type, other
+    row wins, anything unlisted is FlagBuildResult::None. Columns: eliminated flag type, other
     flag type, required `eq` (None = don't care), required `selfnull`, result. */
-    type Row = (i32, i32, Option<bool>, Option<bool>, i32);
+    type Row = (i32, i32, Option<bool>, Option<bool>, FlagBuildResult);
     #[rustfmt::skip]
     let rows: [Row; 25] = [
         /* U flags */
-        (FLAG_UNIFY,    FLAG_POSITIVE, Some(true),  None,        SUCCEED),
-        (FLAG_UNIFY,    FLAG_CLEAR,    None,        None,        SUCCEED),
-        (FLAG_UNIFY,    FLAG_UNIFY,    Some(false), None,        FAIL),
-        (FLAG_UNIFY,    FLAG_POSITIVE, Some(false), None,        FAIL),
-        (FLAG_UNIFY,    FLAG_NEGATIVE, Some(true),  None,        FAIL),
+        (FLAG_UNIFY,    FLAG_POSITIVE, Some(true),  None,        FlagBuildResult::Succeed),
+        (FLAG_UNIFY,    FLAG_CLEAR,    None,        None,        FlagBuildResult::Succeed),
+        (FLAG_UNIFY,    FLAG_UNIFY,    Some(false), None,        FlagBuildResult::Fail),
+        (FLAG_UNIFY,    FLAG_POSITIVE, Some(false), None,        FlagBuildResult::Fail),
+        (FLAG_UNIFY,    FLAG_NEGATIVE, Some(true),  None,        FlagBuildResult::Fail),
         /* R flag, valueless */
-        (FLAG_REQUIRE,  FLAG_UNIFY,    None,        Some(true),  SUCCEED),
-        (FLAG_REQUIRE,  FLAG_POSITIVE, None,        Some(true),  SUCCEED),
-        (FLAG_REQUIRE,  FLAG_NEGATIVE, None,        Some(true),  SUCCEED),
-        (FLAG_REQUIRE,  FLAG_CLEAR,    None,        Some(true),  FAIL),
+        (FLAG_REQUIRE,  FLAG_UNIFY,    None,        Some(true),  FlagBuildResult::Succeed),
+        (FLAG_REQUIRE,  FLAG_POSITIVE, None,        Some(true),  FlagBuildResult::Succeed),
+        (FLAG_REQUIRE,  FLAG_NEGATIVE, None,        Some(true),  FlagBuildResult::Succeed),
+        (FLAG_REQUIRE,  FLAG_CLEAR,    None,        Some(true),  FlagBuildResult::Fail),
         /* R flag, with value */
-        (FLAG_REQUIRE,  FLAG_POSITIVE, Some(true),  Some(false), SUCCEED),
-        (FLAG_REQUIRE,  FLAG_UNIFY,    Some(true),  Some(false), SUCCEED),
-        (FLAG_REQUIRE,  FLAG_POSITIVE, Some(false), Some(false), FAIL),
-        (FLAG_REQUIRE,  FLAG_UNIFY,    Some(false), Some(false), FAIL),
-        (FLAG_REQUIRE,  FLAG_NEGATIVE, None,        Some(false), FAIL),
-        (FLAG_REQUIRE,  FLAG_CLEAR,    None,        Some(false), FAIL),
+        (FLAG_REQUIRE,  FLAG_POSITIVE, Some(true),  Some(false), FlagBuildResult::Succeed),
+        (FLAG_REQUIRE,  FLAG_UNIFY,    Some(true),  Some(false), FlagBuildResult::Succeed),
+        (FLAG_REQUIRE,  FLAG_POSITIVE, Some(false), Some(false), FlagBuildResult::Fail),
+        (FLAG_REQUIRE,  FLAG_UNIFY,    Some(false), Some(false), FlagBuildResult::Fail),
+        (FLAG_REQUIRE,  FLAG_NEGATIVE, None,        Some(false), FlagBuildResult::Fail),
+        (FLAG_REQUIRE,  FLAG_CLEAR,    None,        Some(false), FlagBuildResult::Fail),
         /* D flag, valueless */
-        (FLAG_DISALLOW, FLAG_CLEAR,    None,        Some(true),  SUCCEED),
-        (FLAG_DISALLOW, FLAG_POSITIVE, None,        Some(true),  FAIL),
-        (FLAG_DISALLOW, FLAG_UNIFY,    None,        Some(true),  FAIL),
-        (FLAG_DISALLOW, FLAG_NEGATIVE, None,        Some(true),  FAIL),
+        (FLAG_DISALLOW, FLAG_CLEAR,    None,        Some(true),  FlagBuildResult::Succeed),
+        (FLAG_DISALLOW, FLAG_POSITIVE, None,        Some(true),  FlagBuildResult::Fail),
+        (FLAG_DISALLOW, FLAG_UNIFY,    None,        Some(true),  FlagBuildResult::Fail),
+        (FLAG_DISALLOW, FLAG_NEGATIVE, None,        Some(true),  FlagBuildResult::Fail),
         /* D flag, with value */
-        (FLAG_DISALLOW, FLAG_POSITIVE, Some(false), Some(false), SUCCEED),
-        (FLAG_DISALLOW, FLAG_CLEAR,    None,        Some(false), SUCCEED),
-        (FLAG_DISALLOW, FLAG_NEGATIVE, Some(true),  Some(false), SUCCEED),
-        (FLAG_DISALLOW, FLAG_POSITIVE, Some(true),  Some(false), FAIL),
-        (FLAG_DISALLOW, FLAG_UNIFY,    Some(true),  Some(false), FAIL),
-        (FLAG_DISALLOW, FLAG_NEGATIVE, Some(false), Some(false), FAIL),
+        (FLAG_DISALLOW, FLAG_POSITIVE, Some(false), Some(false), FlagBuildResult::Succeed),
+        (FLAG_DISALLOW, FLAG_CLEAR,    None,        Some(false), FlagBuildResult::Succeed),
+        (FLAG_DISALLOW, FLAG_NEGATIVE, Some(true),  Some(false), FlagBuildResult::Succeed),
+        (FLAG_DISALLOW, FLAG_POSITIVE, Some(true),  Some(false), FlagBuildResult::Fail),
+        (FLAG_DISALLOW, FLAG_UNIFY,    Some(true),  Some(false), FlagBuildResult::Fail),
+        (FLAG_DISALLOW, FLAG_NEGATIVE, Some(false), Some(false), FlagBuildResult::Fail),
     ];
     for &(ft, fft, eq_req, null_req, result) in &rows {
         if ftype == ft
@@ -367,7 +371,7 @@ pub fn flag_build(
             return result;
         }
     }
-    NONE
+    FlagBuildResult::None
 }
 
 /* Remove flags that are being eliminated from arcs and sigma */
@@ -941,102 +945,102 @@ mod tests {
         /* Different attribute names -> NONE immediately */
         assert_eq!(
             flag_build(FLAG_UNIFY, "F", Some("1"), FLAG_UNIFY, "G", Some("1")),
-            NONE
+            FlagBuildResult::None
         );
 
         /* U rows (first matching row wins) */
         assert_eq!(
             flag_build(FLAG_UNIFY, "F", Some("1"), FLAG_POSITIVE, "F", Some("1")),
-            SUCCEED
+            FlagBuildResult::Succeed
         );
         assert_eq!(
             flag_build(FLAG_UNIFY, "F", Some("1"), FLAG_CLEAR, "F", None),
-            SUCCEED
+            FlagBuildResult::Succeed
         );
         assert_eq!(
             flag_build(FLAG_UNIFY, "F", Some("1"), FLAG_UNIFY, "F", Some("2")),
-            FAIL
+            FlagBuildResult::Fail
         );
         assert_eq!(
             flag_build(FLAG_UNIFY, "F", Some("1"), FLAG_POSITIVE, "F", Some("2")),
-            FAIL
+            FlagBuildResult::Fail
         );
         assert_eq!(
             flag_build(FLAG_UNIFY, "F", Some("1"), FLAG_NEGATIVE, "F", Some("1")),
-            FAIL
+            FlagBuildResult::Fail
         );
         /* U vs U equal value is explicitly NONE */
         assert_eq!(
             flag_build(FLAG_UNIFY, "F", Some("1"), FLAG_UNIFY, "F", Some("1")),
-            NONE
+            FlagBuildResult::None
         );
 
         /* R valueless */
         assert_eq!(
             flag_build(FLAG_REQUIRE, "F", None, FLAG_UNIFY, "F", Some("1")),
-            SUCCEED
+            FlagBuildResult::Succeed
         );
         assert_eq!(
             flag_build(FLAG_REQUIRE, "F", None, FLAG_POSITIVE, "F", Some("1")),
-            SUCCEED
+            FlagBuildResult::Succeed
         );
         assert_eq!(
             flag_build(FLAG_REQUIRE, "F", None, FLAG_NEGATIVE, "F", Some("1")),
-            SUCCEED
+            FlagBuildResult::Succeed
         );
         assert_eq!(
             flag_build(FLAG_REQUIRE, "F", None, FLAG_CLEAR, "F", None),
-            FAIL
+            FlagBuildResult::Fail
         );
         /* R with value */
         assert_eq!(
             flag_build(FLAG_REQUIRE, "F", Some("1"), FLAG_POSITIVE, "F", Some("1")),
-            SUCCEED
+            FlagBuildResult::Succeed
         );
         assert_eq!(
             flag_build(FLAG_REQUIRE, "F", Some("1"), FLAG_POSITIVE, "F", Some("2")),
-            FAIL
+            FlagBuildResult::Fail
         );
 
         /* D valueless */
         assert_eq!(
             flag_build(FLAG_DISALLOW, "F", None, FLAG_CLEAR, "F", None),
-            SUCCEED
+            FlagBuildResult::Succeed
         );
         assert_eq!(
             flag_build(FLAG_DISALLOW, "F", None, FLAG_POSITIVE, "F", Some("1")),
-            FAIL
+            FlagBuildResult::Fail
         );
         /* D with value */
         assert_eq!(
             flag_build(FLAG_DISALLOW, "F", Some("1"), FLAG_POSITIVE, "F", Some("2")),
-            SUCCEED
+            FlagBuildResult::Succeed
         );
         assert_eq!(
             flag_build(FLAG_DISALLOW, "F", Some("1"), FLAG_NEGATIVE, "F", Some("1")),
-            SUCCEED
+            FlagBuildResult::Succeed
         );
         assert_eq!(
             flag_build(FLAG_DISALLOW, "F", Some("1"), FLAG_POSITIVE, "F", Some("1")),
-            FAIL
+            FlagBuildResult::Fail
         );
 
         /* Any ftype of C/N/P/E yields NONE (masks the flag_eliminate `|` bug) */
         assert_eq!(
             flag_build(FLAG_POSITIVE, "F", Some("1"), FLAG_UNIFY, "F", Some("1")),
-            NONE
+            FlagBuildResult::None
         );
         assert_eq!(
             flag_build(FLAG_NEGATIVE, "F", Some("1"), FLAG_UNIFY, "F", Some("1")),
-            NONE
+            FlagBuildResult::None
         );
         assert_eq!(
             flag_build(FLAG_EQUAL, "F", Some("1"), FLAG_UNIFY, "F", Some("1")),
-            NONE
+            FlagBuildResult::None
         );
         assert_eq!(
             flag_build(FLAG_CLEAR, "F", None, FLAG_UNIFY, "F", Some("1")),
-            NONE
+            FlagBuildResult::None
         );
     }
 

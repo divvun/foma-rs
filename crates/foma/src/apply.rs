@@ -38,9 +38,9 @@ use crate::options::FomaOptions;
 use crate::sigma::sigma_max;
 use crate::types::{
     APPLY_BINSEARCH_THRESHOLD, APPLY_INDEX_INPUT, ApplyHandle, ApplyStateIndex, DEFAULT_STACK_SIZE,
-    DOWN, ENUMERATE, EPSILON, FAIL, FLAG_CLEAR, FLAG_DISALLOW, FLAG_EQUAL, FLAG_NEGATIVE,
-    FLAG_POSITIVE, FLAG_REQUIRE, FLAG_UNIFY, FlagLookup, Fsm, IDENTITY, LOWER, PairSegment, RANDOM,
-    SUCCEED, Searchstack, SigmaTrie, SigmaTrieArrays, SigmatchArray, Sigs, UNKNOWN, UP, UPPER,
+    DOWN, ENUMERATE, EPSILON, FLAG_CLEAR, FLAG_DISALLOW, FLAG_EQUAL, FLAG_NEGATIVE, FLAG_POSITIVE,
+    FLAG_REQUIRE, FLAG_UNIFY, FlagLookup, Fsm, IDENTITY, LOWER, PairSegment, RANDOM, Searchstack,
+    SigmaTrie, SigmaTrieArrays, SigmatchArray, Sigs, UNKNOWN, UP, UPPER,
 };
 use crate::utf8::{is_combining, utf8skip};
 use smol_str::SmolStr;
@@ -1548,7 +1548,8 @@ pub fn apply_match_str(h: &mut ApplyHandle, symbol: i32, position: i32) -> i32 {
             let ftype = h.flag_lookup[symbol as usize].r#type;
             let fname = h.flag_lookup[symbol as usize].name.clone();
             let fvalue = h.flag_lookup[symbol as usize].value.clone();
-            if apply_check_flag(h, ftype, fname.as_deref(), fvalue.as_deref()) == SUCCEED {
+            if apply_check_flag(h, ftype, fname.as_deref(), fvalue.as_deref()) == FlagCheck::Succeed
+            {
                 return 0;
             } else {
                 return -1;
@@ -1569,7 +1570,7 @@ pub fn apply_match_str(h: &mut ApplyHandle, symbol: i32, position: i32) -> i32 {
         let ftype = h.flag_lookup[symbol as usize].r#type;
         let fname = h.flag_lookup[symbol as usize].name.clone();
         let fvalue = h.flag_lookup[symbol as usize].value.clone();
-        if apply_check_flag(h, ftype, fname.as_deref(), fvalue.as_deref()) == SUCCEED {
+        if apply_check_flag(h, ftype, fname.as_deref(), fvalue.as_deref()) == FlagCheck::Succeed {
             return 0;
         } else {
             return -1;
@@ -1860,6 +1861,14 @@ pub fn apply_clear_flags(h: &mut ApplyHandle) {
     }
 }
 
+/// Whether a flag-diacritic operation is consistent with the current flag
+/// state (C: apply_check_flag returned FAIL=0 / SUCCEED=1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlagCheck {
+    Fail,
+    Succeed,
+}
+
 /* Check for flag consistency by looking at the current states of flags */
 // [spec:foma:def:apply.apply-check-flag-fn]
 // [spec:foma:sem:apply.apply-check-flag-fn]
@@ -1868,7 +1877,7 @@ pub fn apply_check_flag(
     r#type: i32,
     name: Option<&str>,
     value: Option<&str>,
-) -> i32 {
+) -> FlagCheck {
     // Find flist by name. C dereferences NULL if not found (unreachable).
     let name = name.unwrap_or("");
     // Save current value/neg into oldflagvalue/oldflagneg.
@@ -1882,77 +1891,77 @@ pub fn apply_check_flag(
         let flist = h.flag_state.get_mut(name).expect("flag not registered");
         if flist.value.is_none() {
             flist.value = value.map(SmolStr::from);
-            return SUCCEED;
+            return FlagCheck::Succeed;
         } else if value == flist.value.as_deref() && flist.neg == 0 {
-            return SUCCEED;
+            return FlagCheck::Succeed;
         } else if value != flist.value.as_deref() && flist.neg == 1 {
             flist.value = value.map(SmolStr::from);
             flist.neg = 0;
-            return SUCCEED;
+            return FlagCheck::Succeed;
         }
-        return FAIL;
+        return FlagCheck::Fail;
     }
 
     if r#type == FLAG_CLEAR {
         let flist = h.flag_state.get_mut(name).expect("flag not registered");
         flist.value = None;
         flist.neg = 0;
-        return SUCCEED;
+        return FlagCheck::Succeed;
     }
 
     if r#type == FLAG_DISALLOW {
         let flist = h.flag_state.get_mut(name).expect("flag not registered");
         if flist.value.is_none() {
-            return SUCCEED;
+            return FlagCheck::Succeed;
         }
         if value.is_none() && flist.value.is_some() {
-            return FAIL;
+            return FlagCheck::Fail;
         }
         if value != flist.value.as_deref() {
             if flist.neg == 1 {
-                return FAIL;
+                return FlagCheck::Fail;
             }
-            return SUCCEED;
+            return FlagCheck::Succeed;
         }
         if value == flist.value.as_deref() && flist.neg == 1 {
-            return SUCCEED;
+            return FlagCheck::Succeed;
         }
-        return FAIL;
+        return FlagCheck::Fail;
     }
 
     if r#type == FLAG_NEGATIVE {
         let flist = h.flag_state.get_mut(name).expect("flag not registered");
         flist.value = value.map(SmolStr::from);
         flist.neg = 1;
-        return SUCCEED;
+        return FlagCheck::Succeed;
     }
 
     if r#type == FLAG_POSITIVE {
         let flist = h.flag_state.get_mut(name).expect("flag not registered");
         flist.value = value.map(SmolStr::from);
         flist.neg = 0;
-        return SUCCEED;
+        return FlagCheck::Succeed;
     }
 
     if r#type == FLAG_REQUIRE {
         let flist = h.flag_state.get_mut(name).expect("flag not registered");
         if value.is_none() {
             if flist.value.is_none() {
-                return FAIL;
+                return FlagCheck::Fail;
             } else {
-                return SUCCEED;
+                return FlagCheck::Succeed;
             }
         } else {
             if flist.value.is_none() {
-                return FAIL;
+                return FlagCheck::Fail;
             }
             if value != flist.value.as_deref() {
-                return FAIL;
+                return FlagCheck::Fail;
             } else {
                 if flist.neg == 1 {
-                    return FAIL;
+                    return FlagCheck::Fail;
                 }
-                return SUCCEED;
+                return FlagCheck::Succeed;
             }
         }
     }
@@ -1971,21 +1980,21 @@ pub fn apply_check_flag(
         let f1_neg = flist.neg;
 
         if !f2_present && f1_value.is_some() {
-            return FAIL;
+            return FlagCheck::Fail;
         }
         if !f2_present && f1_value.is_none() {
-            return SUCCEED;
+            return FlagCheck::Succeed;
         }
         if f2_value.is_none() || f1_value.is_none() {
             if f2_value.is_none() && f1_value.is_none() && f1_neg == f2_neg {
-                return SUCCEED;
+                return FlagCheck::Succeed;
             } else {
-                return FAIL;
+                return FlagCheck::Fail;
             }
         } else if f2_value == f1_value && f1_neg == f2_neg {
-            return SUCCEED;
+            return FlagCheck::Succeed;
         }
-        return FAIL;
+        return FlagCheck::Fail;
     }
 
     tracing::warn!(
@@ -1994,7 +2003,7 @@ pub fn apply_check_flag(
         name,
         value.unwrap_or("")
     );
-    FAIL
+    FlagCheck::Fail
 }
 
 #[cfg(test)]
@@ -2496,53 +2505,53 @@ mod tests {
         // U.F.1 on an unset feature stores the value and succeeds.
         assert_eq!(
             apply_check_flag(&mut h, FLAG_UNIFY, Some("F"), Some("1")),
-            SUCCEED
+            FlagCheck::Succeed
         );
         // same value unifies; different value fails.
         assert_eq!(
             apply_check_flag(&mut h, FLAG_UNIFY, Some("F"), Some("1")),
-            SUCCEED
+            FlagCheck::Succeed
         );
         assert_eq!(
             apply_check_flag(&mut h, FLAG_UNIFY, Some("F"), Some("2")),
-            FAIL
+            FlagCheck::Fail
         );
         // R.F requires a value present -> succeed while set.
         assert_eq!(
             apply_check_flag(&mut h, FLAG_REQUIRE, Some("F"), None),
-            SUCCEED
+            FlagCheck::Succeed
         );
         // D.F.1 disallows the currently-set value -> fail; a different value ok.
         assert_eq!(
             apply_check_flag(&mut h, FLAG_DISALLOW, Some("F"), Some("1")),
-            FAIL
+            FlagCheck::Fail
         );
         assert_eq!(
             apply_check_flag(&mut h, FLAG_DISALLOW, Some("F"), Some("9")),
-            SUCCEED
+            FlagCheck::Succeed
         );
         // C.F clears the value -> R.F now fails (nothing set).
         assert_eq!(
             apply_check_flag(&mut h, FLAG_CLEAR, Some("F"), None),
-            SUCCEED
+            FlagCheck::Succeed
         );
         assert_eq!(
             apply_check_flag(&mut h, FLAG_REQUIRE, Some("F"), None),
-            FAIL
+            FlagCheck::Fail
         );
         // P.F.5 sets; clear_flags resets, so REQUIRE fails again.
         assert_eq!(
             apply_check_flag(&mut h, FLAG_POSITIVE, Some("F"), Some("5")),
-            SUCCEED
+            FlagCheck::Succeed
         );
         assert_eq!(
             apply_check_flag(&mut h, FLAG_REQUIRE, Some("F"), None),
-            SUCCEED
+            FlagCheck::Succeed
         );
         apply_clear_flags(&mut h);
         assert_eq!(
             apply_check_flag(&mut h, FLAG_REQUIRE, Some("F"), None),
-            FAIL
+            FlagCheck::Fail
         );
     }
 

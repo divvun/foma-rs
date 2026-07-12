@@ -123,10 +123,6 @@ pub const LOWER: i32 = 32;
 pub const UPPER: i32 = 64;
 pub const SPACE: i32 = 128;
 
-/* apply.c traversal results */
-pub const FAIL: i32 = 0;
-pub const SUCCEED: i32 = 1;
-
 /* apply.c buffer sizes */
 pub const DEFAULT_OUTSTRING_SIZE: usize = 4096;
 pub const DEFAULT_STACK_SIZE: usize = 128;
