@@ -446,39 +446,38 @@
 > [spec:foma:def:foma.iface-pairs-file-fn]
 > void iface_pairs_file(char *filename)
 
-> [spec:foma:sem:foma.iface-pairs-file-fn]
+> [spec:foma:sem:foma.iface-pairs-file-fn+1]
 > Implemented in foma/iface.c. Requires >= 1 network on the stack. If the top FSM's pathcount
 > equals PATHCOUNT_CYCLIC (-1), prints "FSM is cyclic: can't write all pairs to file.\n" and
 > returns. Prints "Writing to %s.\n", then fopen(filename, "w"); on failure perror("Error
 > opening file") and return.
 > Gets the cached apply handle; sets show-flags and obey-flags from the globals (print-space
-> and print-pairs are NOT synced), and temporarily reprograms the handle's word formatting:
-> space symbol "\001", epsilon "\002", input:output separator "\003".
-> Loops apply_words(ah) until NULL with NO count limit (every path is written). Each result is
-> split by iface_split_result into freshly calloc'd upper and lower strings: upper is the
-> result with \001/\002 bytes deleted and every span from a \003 up to the next \001 dropped;
-> lower is the same filter applied to the byte-reversed result and reversed back. Writes
-> "<upper>\t<lower>\n" to the file, then frees both strings. (The split buffers are
-> strlen(result) bytes each — a result needing no filtering at all overflows by one byte;
-> latent bug inherited from iface_split_result.)
-> Finally restores space " ", epsilon "0", separator ":", calls apply_reset_enumerator(ah),
-> and fcloses the file.
+> and print-pairs are NOT synced), and enables structured pair collection on the handle.
+> Loops apply_words(ah) until NULL with NO count limit (every path is written). Each result's
+> upper and lower sides are read back with `apply_last_pairs` and written as
+> "<upper>\t<lower>\n" to the file.
+> Finally disables pair collection, calls apply_reset_enumerator(ah), and closes the file.
+> C had no structured channel: it reprogrammed the handle's space/epsilon/separator symbols to
+> the bytes "\001"/"\002"/"\003" and re-split the rendered string on them (with a one-byte
+> calloc overflow when no filtering was needed, and corrupted output when a sigma symbol
+> itself contained those bytes).
 
 > [spec:foma:def:foma.iface-pairs-fn]
 > void iface_pairs(int limit)
 
-> [spec:foma:sem:foma.iface-pairs-fn]
+> [spec:foma:sem:foma.iface-pairs-fn+1]
 > Implemented in foma/iface.c as iface_pairs_call(limit, 0). That driver: a limit of -1 is
 > replaced by g_list_limit (default 100); requires >= 1 network on the stack; configures the
-> cached apply handle with show-flags/obey-flags from the globals and the temporary markers
-> space "\001", epsilon "\002", separator "\003".
+> cached apply handle with show-flags/obey-flags from the globals and enables structured
+> pair collection.
 > Loops at most `limit` times calling apply_words(ah) (random = 0 selects sequential
 > enumeration; iface_random_pairs passes 1 for apply_random_words), stopping early on NULL.
-> Each result is split via iface_split_result into upper/lower halves and printed to stdout as
-> "<upper>\t<lower>\n"; both halves are then freed.
-> Afterwards restores the handle's markers (space " ", epsilon "0", separator ":") and calls
-> apply_reset_enumerator(ah). Unlike iface_pairs_file there is no cyclicity guard: a cyclic
-> FSM is simply truncated at `limit` pairs.
+> Each result's sides are read back with `apply_last_pairs` and printed to stdout as
+> "<upper>\t<lower>\n" (C encoded the split in-band with control-byte markers and re-split
+> the rendered string).
+> Afterwards disables pair collection and calls apply_reset_enumerator(ah). Unlike
+> iface_pairs_file there is no cyclicity guard: a cyclic FSM is simply truncated at `limit`
+> pairs.
 
 > [spec:foma:def:foma.iface-pop-fn]
 > void iface_pop(void)

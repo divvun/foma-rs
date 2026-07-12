@@ -515,6 +515,27 @@
 > consistency via `[spec:foma:sem:apply.apply-check-flag-fn]`; zero makes flag symbols
 > unconditionally traversable, input-epsilon arcs.
 
+> [spec:foma:def:apply.apply-set-collect-pairs-fn]
+> fn apply_set_collect_pairs(h: &mut ApplyHandle, collect: bool)
+
+> [spec:foma:sem:apply.apply-set-collect-pairs-fn]
+> New public API (no C counterpart): sets h.collect_pairs and clears any recorded segments.
+> While on, two-sided enumeration (`[spec:foma:sem:apply.apply-append-fn+1]`) records each
+> appended arc as a structured (upper, lower) PairSegment keyed to its output byte offset,
+> read back with `[spec:foma:sem:apply.apply-last-pairs-fn]`. Replaces C's pairs-printing
+> trick of setting space/epsilon/separator to the control bytes \x01/\x02/\x03 and
+> re-splitting the rendered string, which corrupted output for symbols containing those bytes.
+
+> [spec:foma:def:apply.apply-last-pairs-fn]
+> fn apply_last_pairs(h: &ApplyHandle) -> (String, String)
+
+> [spec:foma:sem:apply.apply-last-pairs-fn]
+> New public API (no C counterpart): returns the (upper, lower) sides of the most recently
+> returned enumeration result, concatenated from the recorded PairSegments in offset order.
+> An identity segment contributes its text to both sides; an EPSILON side contributes
+> nothing. Segments at or beyond the current output position were abandoned by backtracking
+> and are skipped.
+
 > [spec:foma:def:apply.apply-set-print-pairs-fn]
 > void apply_set_print_pairs(struct apply_handle *h, int value)
 

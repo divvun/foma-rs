@@ -719,9 +719,10 @@ pub fn iface_pairs_call(session: &mut Session, limit: i32, random: i32) {
         session.stack_entry_ah_with_opts(ah, |opts, h| {
             apply_set_obey_flags(h, opts.obey_flags as i32)
         });
-        session.stack_entry_ah(ah, |h| apply_set_space_symbol(h, "\u{1}"));
-        session.stack_entry_ah(ah, |h| apply_set_epsilon(h, "\u{2}"));
-        session.stack_entry_ah(ah, |h| apply_set_separator(h, "\u{3}"));
+        /* C encoded the pair split in-band by setting space/epsilon/separator
+        to bytes 0x01/0x02/0x03 and re-splitting the rendered string; the
+        handle records structured segments instead. */
+        session.stack_entry_ah(ah, |h| apply_set_collect_pairs(h, true));
         let mut i = limit;
         while i > 0 {
             let result = if random == 1 {
@@ -729,25 +730,14 @@ pub fn iface_pairs_call(session: &mut Session, limit: i32, random: i32) {
             } else {
                 session.stack_entry_ah(ah, |h| apply_words(h))
             };
-            let result = match result {
-                None => break,
-                Some(r) => r,
-            };
-            let result = result.into_bytes();
-            let mut upper = Vec::new();
-            let mut lower = Vec::new();
-            iface_split_result(&result, &mut upper, &mut lower);
-            // printf("%s\t%s\n", upper, lower) — raw bytes (may be UTF-8-corrupted).
-            let mut out = std::io::stdout();
-            out.write_all(&upper).expect("writing pairs output");
-            out.write_all(b"\t").expect("writing pairs output");
-            out.write_all(&lower).expect("writing pairs output");
-            out.write_all(b"\n").expect("writing pairs output");
+            if result.is_none() {
+                break;
+            }
+            let (upper, lower) = session.stack_entry_ah(ah, |h| apply_last_pairs(h));
+            print!("{}\t{}\n", upper, lower);
             i -= 1;
         }
-        session.stack_entry_ah(ah, |h| apply_set_space_symbol(h, " "));
-        session.stack_entry_ah(ah, |h| apply_set_epsilon(h, "0"));
-        session.stack_entry_ah(ah, |h| apply_set_separator(h, ":"));
+        session.stack_entry_ah(ah, |h| apply_set_collect_pairs(h, false));
         session.stack_entry_ah(ah, |h| apply_reset_enumerator(h));
     }
 }
@@ -806,27 +796,16 @@ pub fn iface_pairs_file(session: &mut Session, filename: &str) {
         session.stack_entry_ah_with_opts(ah, |opts, h| {
             apply_set_obey_flags(h, opts.obey_flags as i32)
         });
-        session.stack_entry_ah(ah, |h| apply_set_space_symbol(h, "\u{1}"));
-        session.stack_entry_ah(ah, |h| apply_set_epsilon(h, "\u{2}"));
-        session.stack_entry_ah(ah, |h| apply_set_separator(h, "\u{3}"));
+        session.stack_entry_ah(ah, |h| apply_set_collect_pairs(h, true));
         loop {
             let result = session.stack_entry_ah(ah, |h| apply_words(h));
-            let result = match result {
-                None => break,
-                Some(r) => r,
-            };
-            let result = result.into_bytes();
-            let mut upper = Vec::new();
-            let mut lower = Vec::new();
-            iface_split_result(&result, &mut upper, &mut lower);
-            outfile.write_all(&upper).expect("writing pairs to file");
-            outfile.write_all(b"\t").expect("writing pairs to file");
-            outfile.write_all(&lower).expect("writing pairs to file");
-            outfile.write_all(b"\n").expect("writing pairs to file");
+            if result.is_none() {
+                break;
+            }
+            let (upper, lower) = session.stack_entry_ah(ah, |h| apply_last_pairs(h));
+            writeln!(outfile, "{}\t{}", upper, lower).expect("writing pairs to file");
         }
-        session.stack_entry_ah(ah, |h| apply_set_space_symbol(h, " "));
-        session.stack_entry_ah(ah, |h| apply_set_epsilon(h, "0"));
-        session.stack_entry_ah(ah, |h| apply_set_separator(h, ":"));
+        session.stack_entry_ah(ah, |h| apply_set_collect_pairs(h, false));
         session.stack_entry_ah(ah, |h| apply_reset_enumerator(h));
         // fclose(outfile) — dropped at scope end.
     }

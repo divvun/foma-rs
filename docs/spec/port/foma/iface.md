@@ -356,27 +356,29 @@
 > [spec:foma:def:iface.iface-pairs-call-fn]
 > void iface_pairs_call(int limit, int random)
 
-> [spec:foma:sem:iface.iface-pairs-call-fn]
+> [spec:foma:sem:iface.iface-pairs-call-fn+1]
 > Shared driver for "print pairs"/"print random-pairs". If limit == -1 substitute g_list_limit (default
 > 100). Requires ≥1 net. Gets the cached apply handle; sets ONLY show_flags and obey_flags from globals
-> (not print_space/print_pairs), then temporarily reconfigures the handle's formatting symbols: space =
-> "\x01", epsilon = "\x02", separator = "\x03". Loops at most `limit` times: result =
-> apply_random_words(ah) if random == 1 else apply_words(ah); NULL breaks. Each result is split with
-> iface_split_result into freshly allocated upper and lower strings, printed as "%s\t%s\n" (upper TAB
-> lower), and both strings freed. Afterwards restores space " ", epsilon "0", separator ":" on the handle
-> and calls apply_reset_enumerator(ah). Net not consumed.
+> (not print_space/print_pairs), then enables structured pair collection on the handle
+> (`apply_set_collect_pairs`). Loops at most `limit` times: result = apply_random_words(ah) if
+> random == 1 else apply_words(ah); NULL breaks. Each result's sides are read back with
+> `apply_last_pairs` and printed as "%s\t%s\n" (upper TAB lower). Afterwards disables pair
+> collection and calls apply_reset_enumerator(ah). Net not consumed.
+> C had no structured channel: it temporarily set the handle's space/epsilon/separator symbols to
+> the bytes "\x01"/"\x02"/"\x03", re-split the rendered string on them (iface_split_result), and
+> restored " "/"0"/":" — which corrupted output when a sigma symbol itself contained those bytes.
 
 > [spec:foma:def:iface.iface-pairs-file-fn]
 > void iface_pairs_file(char *filename)
 
-> [spec:foma:sem:iface.iface-pairs-file-fn]
+> [spec:foma:sem:iface.iface-pairs-file-fn+1]
 > "print pairs > filename": requires ≥1 net. If the top net's pathcount == PATHCOUNT_CYCLIC (-1) prints
 > "FSM is cyclic: can't write all pairs to file.\n" and returns. Prints "Writing to %s.\n". Opens filename
 > "w"; on failure perror("Error opening file") and returns. Then identical handle setup to
-> iface_pairs_call (show_flags/obey_flags from globals; space "\x01", epsilon "\x02", separator "\x03"),
-> but loops WITHOUT limit: apply_words(ah) until NULL, splitting each result via iface_split_result and
-> writing "%s\t%s\n" (upper TAB lower) to the file, freeing the split strings. Restores space " ",
-> epsilon "0", separator ":", calls apply_reset_enumerator, and fcloses the file. Net not consumed.
+> `[spec:foma:sem:iface.iface-pairs-call-fn+1]` (show_flags/obey_flags from globals; structured pair
+> collection enabled), but loops WITHOUT limit: apply_words(ah) until NULL, reading each result's
+> sides with `apply_last_pairs` and writing "%s\t%s\n" (upper TAB lower) to the file. Disables pair
+> collection, calls apply_reset_enumerator, and closes the file. Net not consumed.
 
 > [spec:foma:def:iface.iface-pairs-fn]
 > void iface_pairs(int limit)
@@ -715,17 +717,6 @@
 > [spec:foma:sem:iface.iface-sort-output-fn]
 > "sort out": identical to iface_sort_input but calls fsm_sort_arcs(top->fsm, 2) — sorts each state's
 > arcs by output-symbol number in place, setting arcs_sorted_out. Net stays on the stack.
-
-> [spec:foma:def:iface.iface-split-result-fn]
-> void iface_split_result(char *result, char **upper, char **lower)
-
-> [spec:foma:sem:iface.iface-split-result-fn]
-> Helper for the pairs commands: splits an apply result encoded with space='\001', epsilon='\002',
-> separator='\003' into the upper and lower strings (cleared first). The result is a
-> space-delimited sequence of symbol pairs; within each pair the bytes before the '\003' separator
-> are the upper side and those after are the lower. A pair with no separator is a bare (identity)
-> symbol and its bytes are appended to BOTH sides. '\002' epsilon markers (and the '\003'
-> separators) contribute nothing. Reads to the first NUL or the buffer end.
 
 > [spec:foma:def:iface.iface-stack-check-fn]
 > int iface_stack_check (int size)

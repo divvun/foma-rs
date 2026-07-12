@@ -15,10 +15,10 @@ pub(crate) use flate2::Compression;
 pub(crate) use flate2::write::GzEncoder;
 
 pub(crate) use crate::apply::{
-    apply_clear, apply_down, apply_init, apply_lower_words, apply_random_lower, apply_random_upper,
-    apply_random_words, apply_reset_enumerator, apply_set_epsilon, apply_set_obey_flags,
-    apply_set_print_pairs, apply_set_print_space, apply_set_separator, apply_set_show_flags,
-    apply_set_space_symbol, apply_up, apply_upper_words, apply_words,
+    apply_clear, apply_down, apply_init, apply_last_pairs, apply_lower_words, apply_random_lower,
+    apply_random_upper, apply_random_words, apply_reset_enumerator, apply_set_collect_pairs,
+    apply_set_obey_flags, apply_set_print_pairs, apply_set_print_space, apply_set_show_flags,
+    apply_up, apply_upper_words, apply_words,
 };
 pub(crate) use crate::coaccessible::fsm_coaccessible;
 pub(crate) use crate::constructions::{

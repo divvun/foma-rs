@@ -1531,23 +1531,6 @@ fn pairs_file_writes_pairs_and_refuses_cyclic() {
     assert!(!std::path::Path::new(&pc).exists());
 }
 
-// split string / split result: extract the upper side of the pair encoding
-// (space=1, epsilon=2, separator=3); split_result additionally reverses to
-// pull both sides. Doc example: a:b c:d e 0:g → ace,bdeg (the identity `e`
-// appears on both sides).
-// [spec:foma:sem:iface.iface-split-result-fn/test]
-#[test]
-fn split_result_extracts_both_sides() {
-    // Encoding of [a:b, c:d, e (identity), 0:g (epsilon:g)]:
-    //   a SEP b SPACE c SEP d SPACE e SPACE EPS SEP g
-    let input: Vec<u8> = vec![b'a', 3, b'b', 1, b'c', 3, b'd', 1, b'e', 1, 2, 3, b'g'];
-    let mut upper = Vec::new();
-    let mut lower = Vec::new();
-    iface_split_result(&input, &mut upper, &mut lower);
-    assert_eq!(upper, b"ace");
-    assert_eq!(lower, b"bdeg");
-}
-
 // write att / write prolog: watt returns 1 on an empty stack, else writes an
 // AT&T/prolog file (net preserved). Round-trip through the matching io reader.
 // [spec:foma:sem:iface.iface-write-att-fn/test]

@@ -570,6 +570,19 @@ pub struct Searchstack {
     pub flagneg: i32,
 }
 
+/// One upper:lower arc segment recorded by apply_append during two-sided
+/// enumeration. `offset` is the outstring byte position the segment was
+/// appended at, used to discard segments a backtracked branch abandoned.
+/// No C counterpart (C round-tripped pair output through in-band control
+/// bytes that collided with symbol text containing those bytes).
+#[derive(Debug, Clone)]
+pub struct PairSegment {
+    pub offset: u32,
+    pub upper: String,
+    /// None = identity: the upper text counts for both sides.
+    pub lower: Option<String>,
+}
+
 // [spec:foma:def:fomalibconf.apply-handle]
 #[derive(Debug, Clone)]
 pub struct ApplyHandle {
@@ -603,6 +616,9 @@ pub struct ApplyHandle {
     pub separator: Option<SmolStr>,
     pub epsilon_symbol: Option<SmolStr>,
     pub print_pairs: i32,
+    /// Record PairSegments during two-sided enumeration (apply_set_collect_pairs).
+    pub collect_pairs: bool,
+    pub pair_segments: Vec<PairSegment>,
     pub apply_stack_ptr: i32,
     pub apply_stack_top: i32,
     pub oldflagneg: i32,

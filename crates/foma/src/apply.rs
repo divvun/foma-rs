@@ -39,8 +39,8 @@ use crate::sigma::sigma_max;
 use crate::types::{
     APPLY_BINSEARCH_THRESHOLD, APPLY_INDEX_INPUT, ApplyHandle, ApplyStateIndex, DEFAULT_STACK_SIZE,
     DOWN, ENUMERATE, EPSILON, FAIL, FLAG_CLEAR, FLAG_DISALLOW, FLAG_EQUAL, FLAG_NEGATIVE,
-    FLAG_POSITIVE, FLAG_REQUIRE, FLAG_UNIFY, FlagLookup, Fsm, IDENTITY, LOWER, RANDOM, SUCCEED,
-    Searchstack, SigmaTrie, SigmaTrieArrays, SigmatchArray, Sigs, UNKNOWN, UP, UPPER,
+    FLAG_POSITIVE, FLAG_REQUIRE, FLAG_UNIFY, FlagLookup, Fsm, IDENTITY, LOWER, PairSegment, RANDOM,
+    SUCCEED, Searchstack, SigmaTrie, SigmaTrieArrays, SigmatchArray, Sigs, UNKNOWN, UP, UPPER,
 };
 use crate::utf8::{is_combining, utf8skip};
 use smol_str::SmolStr;
@@ -155,6 +155,34 @@ pub fn apply_set_epsilon(h: &mut ApplyHandle, symbol: &str) {
 pub fn apply_set_space_symbol(h: &mut ApplyHandle, space: &str) {
     h.space_symbol = Some(space.into());
     h.print_space = 1;
+}
+
+// [spec:foma:def:apply.apply-set-collect-pairs-fn]
+// [spec:foma:sem:apply.apply-set-collect-pairs-fn]
+// New public API (no C counterpart): record structured (upper, lower)
+// segments during two-sided enumeration; read back with apply_last_pairs.
+// Replaces C's trick of setting space/epsilon/separator to control bytes
+// and re-splitting the rendered string, which broke on symbols containing
+// those bytes.
+pub fn apply_set_collect_pairs(h: &mut ApplyHandle, collect: bool) {
+    h.collect_pairs = collect;
+    h.pair_segments.clear();
+}
+
+// [spec:foma:def:apply.apply-last-pairs-fn]
+// [spec:foma:sem:apply.apply-last-pairs-fn]
+// New public API (no C counterpart): the (upper, lower) sides of the most
+// recently returned enumeration result, concatenated from the recorded
+// segments. Identity segments contribute to both sides; segments at or
+// beyond opos were abandoned by backtracking and are skipped.
+pub fn apply_last_pairs(h: &ApplyHandle) -> (String, String) {
+    let mut upper = String::new();
+    let mut lower = String::new();
+    for s in h.pair_segments.iter().filter(|s| s.offset < h.opos as u32) {
+        upper.push_str(&s.upper);
+        lower.push_str(s.lower.as_deref().unwrap_or(&s.upper));
+    }
+    (upper, lower)
 }
 
 // [spec:foma:def:apply.apply-set-print-pairs-fn]
@@ -373,6 +401,7 @@ pub fn apply_clear(mut h: Box<ApplyHandle>) {
     h.last_net = None;
     h.iterator = 0;
     h.outstring = String::new();
+    h.pair_segments = Vec::new();
     h.separator = None;
     h.epsilon_symbol = None;
     drop(h);
@@ -487,6 +516,8 @@ pub fn apply_init(net: &Fsm) -> Box<ApplyHandle> {
         separator: None,
         epsilon_symbol: None,
         print_pairs: 0,
+        collect_pairs: false,
+        pair_segments: Vec::new(),
         apply_stack_ptr: 0,
         apply_stack_top: 0,
         oldflagneg: 0,
@@ -1385,6 +1416,33 @@ pub fn apply_append(h: &mut ApplyHandle, cptr: i32, sym: i32) -> i32 {
             if !astring_eq_bstring {
                 h.outstring.push_str(&sep);
                 h.outstring.push_str(&bstring);
+            }
+            if h.collect_pairs {
+                /* segments the truncate above abandoned are stale */
+                while h
+                    .pair_segments
+                    .last()
+                    .is_some_and(|s| s.offset >= start as u32)
+                {
+                    h.pair_segments.pop();
+                }
+                h.pair_segments.push(PairSegment {
+                    offset: start as u32,
+                    /* an EPSILON side contributes nothing, matching the
+                    one-sided branch below */
+                    upper: if symin == EPSILON {
+                        String::new()
+                    } else {
+                        astring.clone()
+                    },
+                    lower: if astring_eq_bstring {
+                        None
+                    } else if symout == EPSILON {
+                        Some(String::new())
+                    } else {
+                        Some(bstring.clone())
+                    },
+                });
             }
         } else {
             /* Print one side only; an EPSILON side contributes nothing */
