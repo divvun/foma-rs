@@ -156,9 +156,9 @@ pub fn iface_substitute_defined(session: &mut Session, original: &str, substitut
                 let top = session
                     .stack_find_top()
                     .expect("nonempty stack: iface_stack_check(1) passed above");
-                if !session
-                    .stack_entry_fsm(top, |f| fsm_symbol_occurs(f, &original, M_UPPER + M_LOWER))
-                {
+                if !session.stack_entry_fsm(top, |f| {
+                    fsm_symbol_occurs(f, &original, Sides::UPPER | Sides::LOWER)
+                }) {
                     println!("Symbol '{}' does not occur.", original);
                 } else {
                     let newnet = session.stack_entry_fsm_with_opts(top, |opts, f| {

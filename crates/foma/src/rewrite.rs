@@ -21,10 +21,7 @@ use crate::sigma::{
     sigma_add, sigma_contains, sigma_find, sigma_remove, sigma_sort, sigma_substitute,
 };
 use crate::structures::{fsm_copy, fsm_destroy, fsm_empty_set, fsm_empty_string, fsm_identity};
-use crate::types::{
-    ARROW_DOTTED, ARROW_LEFT, ARROW_LONGEST_MATCH, ARROW_OPTIONAL, ARROW_RIGHT,
-    ARROW_SHORTEST_MATCH, Fsm, Fsmcontexts, ReplaceDir, RewriteSet,
-};
+use crate::types::{ArrowType, Fsm, Fsmcontexts, ReplaceDir, RewriteSet};
 
 // Lower(X) puts X on output tape (may also be represented by @ID@ on input tape)
 // Upper(X) puts X on input tape
@@ -382,7 +379,7 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
             while let Some(r) = rules {
                 /* Just the rule center w/ number without CP() contests */
                 /* Actually, maybe better to include CP(U,L) in this, very slow with e.g. a -> a || _ b^15 */
-                if r.arrow_type & ARROW_DOTTED != 0 {
+                if r.arrow_type.contains(ArrowType::DOTTED) {
                     /* define EP Tape1of4("@O@") | [ Tape1of4("@I[@" "@I@"* "@I]@" | "@I[]@") & Tape3of4(~["@0@"*]) ] ; */
                     /* Additional constraint: 0->x is only allowed between EP _ EP */
                     /* The left and right sides can be checked separately */
@@ -452,7 +449,9 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
                 }
                 /* Determine C (based on rule type) */
                 let mut c = fsm_empty_set();
-                if (r.arrow_type & ARROW_RIGHT) != 0 && (r.arrow_type & ARROW_OPTIONAL) == 0 {
+                if r.arrow_type.contains(ArrowType::RIGHT)
+                    && !r.arrow_type.contains(ArrowType::OPTIONAL)
+                {
                     let left_copy =
                         fsm_copy(r.left.as_deref_mut().expect("rule left built for this op"));
                     c = fsm_union(
@@ -465,7 +464,9 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
                         ),
                     );
                 }
-                if (r.arrow_type & ARROW_LEFT) != 0 && (r.arrow_type & ARROW_OPTIONAL) == 0 {
+                if r.arrow_type.contains(ArrowType::LEFT)
+                    && !r.arrow_type.contains(ArrowType::OPTIONAL)
+                {
                     let right_copy = fsm_copy(
                         r.right
                             .as_deref_mut()
@@ -481,8 +482,8 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
                         ),
                     );
                 }
-                if r.arrow_type & ARROW_LONGEST_MATCH != 0 {
-                    if r.arrow_type & ARROW_RIGHT != 0 {
+                if r.arrow_type.contains(ArrowType::LONGEST_MATCH) {
+                    if r.arrow_type.contains(ArrowType::RIGHT) {
                         let left_copy =
                             fsm_copy(r.left.as_deref_mut().expect("rule left built for this op"));
                         let mut lang = rewrite_upper(opts, &mut rb, left_copy);
@@ -500,7 +501,7 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
                             rewr_notlongest(opts, &rb, &mut lang, rule_number, r.arrow_type),
                         );
                     }
-                    if r.arrow_type & ARROW_LEFT != 0 {
+                    if r.arrow_type.contains(ArrowType::LEFT) {
                         let right_copy = fsm_copy(
                             r.right
                                 .as_deref_mut()
@@ -525,8 +526,8 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
                         );
                     }
                 }
-                if r.arrow_type & ARROW_SHORTEST_MATCH != 0 {
-                    if r.arrow_type & ARROW_RIGHT != 0 {
+                if r.arrow_type.contains(ArrowType::SHORTEST_MATCH) {
+                    if r.arrow_type.contains(ArrowType::RIGHT) {
                         let left_copy =
                             fsm_copy(r.left.as_deref_mut().expect("rule left built for this op"));
                         let mut lang = rewrite_upper(opts, &mut rb, left_copy);
@@ -540,7 +541,7 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
                         let mut lang = rewrite_upper(opts, &mut rb, left_copy);
                         c = fsm_union(opts, c, rewr_notshortest(opts, &rb, &mut lang, rule_number));
                     }
-                    if r.arrow_type & ARROW_LEFT != 0 {
+                    if r.arrow_type.contains(ArrowType::LEFT) {
                         let right_copy = fsm_copy(
                             r.right
                                 .as_deref_mut()
@@ -562,7 +563,9 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
                     }
                 }
                 if rewrite_contexts.is_none() {
-                    if r.arrow_type & ARROW_DOTTED != 0 && (r.arrow_type & ARROW_OPTIONAL) == 0 {
+                    if r.arrow_type.contains(ArrowType::DOTTED)
+                        && !r.arrow_type.contains(ArrowType::OPTIONAL)
+                    {
                         let epep = fsm_concat(
                             opts,
                             rewrite_epextend(opts, &mut rb),
@@ -578,7 +581,9 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Box<Fsm> {
                 while let Some(ctx) = contexts {
                     /* Constraints: running intersect w/ Base */
                     /* NotContain(LC [Unrewritten|LM|...] RC) */
-                    if r.arrow_type & ARROW_DOTTED != 0 && (r.arrow_type & ARROW_OPTIONAL) == 0 {
+                    if r.arrow_type.contains(ArrowType::DOTTED)
+                        && !r.arrow_type.contains(ArrowType::OPTIONAL)
+                    {
                         /* Extend left and right */
                         let cpleft_copy = fsm_copy(
                             ctx.cpleft
@@ -709,7 +714,7 @@ pub fn rewr_notlongest(
     rb: &RewriteBatch,
     lang: &mut Fsm,
     rule_number: i32,
-    arrow_type: i32,
+    arrow_type: ArrowType,
 ) -> Box<Fsm> {
     /* define NotLongest(X)  [Upper(X)/Lower(X) & Tape1of4(IOpen Tape1Sig* ["@O@" | IOpen] Tape1Sig*)] */
     let mut nl = fsm_parse_regex(opts,
@@ -737,7 +742,7 @@ pub fn rewr_notlongest(
     );
     nl = fsm_intersect(opts, nl, rulenum);
     /* lang can't end in @0@ */
-    let flt = if arrow_type & ARROW_RIGHT != 0 {
+    let flt = if arrow_type.contains(ArrowType::RIGHT) {
         fsm_parse_regex(opts, "[? ? ? ?]* [? ? [?-\"@0@\"] ?]", None, None)
             .expect("constant rewrite regex compiles")
     } else {
@@ -789,7 +794,7 @@ pub fn rewr_notleftmost(
     rb: &RewriteBatch,
     lang: &mut Fsm,
     rule_number: i32,
-    arrow_type: i32,
+    arrow_type: ArrowType,
 ) -> Box<Fsm> {
     /* define Leftmost(X)   [Upper/Lower(X) & Tape1of4("@O@" Tape1Sig* IOpen Tape1Sig*) ] */
     let mut nl = fsm_parse_regex(
@@ -840,7 +845,7 @@ pub fn rewr_notleftmost(
         ),
     );
     nl = fsm_intersect(opts, nl, rulenum);
-    let flt = if arrow_type & ARROW_RIGHT != 0 {
+    let flt = if arrow_type.contains(ArrowType::RIGHT) {
         fsm_parse_regex(opts, "[? ? ? ?]* [? ? [?-\"@0@\"] ?]", None, None)
             .expect("constant rewrite regex compiles")
     } else {
@@ -1944,7 +1949,7 @@ mod tests {
     use crate::options::FomaOptions;
     use crate::regex::fsm_parse_regex;
     use crate::structures::{fsm_copy, fsm_empty_set, fsm_empty_string, fsm_identity, fsm_isempty};
-    use crate::types::{ARROW_RIGHT, Fsm, Fsmcontexts, Fsmrules, ReplaceDir, RewriteSet};
+    use crate::types::{ArrowType, Fsm, Fsmcontexts, Fsmrules, ReplaceDir, RewriteSet};
 
     /* All lower-side outputs of `word` (apply down), sorted+deduped. */
     fn down_all(net: &Fsm, word: &str) -> Vec<String> {
@@ -2026,7 +2031,7 @@ mod tests {
 
     // Simple obligatory replacement `a -> b`. Drives the whole compiler:
     // rewrite_cp -> rewrite_align -> rewrite_tape_m_to_n_of_k / rewrite_itape;
-    // Base uses rewrite_any_4tape and Outside; the ARROW_RIGHT obligatory
+    // Base uses rewrite_any_4tape and Outside; the ArrowType::RIGHT obligatory
     // constraint is C = rewr_unrewritten(left), subtracted via rewr_contains;
     // rule sigmas get rewrite_add_special_syms; rb torn down by rewrite_cleanup.
     // [spec:foma:sem:rewrite.fsm-rewrite-fn/test]
@@ -2052,7 +2057,7 @@ mod tests {
     }
 
     // Optional replacement `a (->) b`: both a and b are valid outputs (the
-    // obligatory unrewritten constraint is skipped for ARROW_OPTIONAL).
+    // obligatory unrewritten constraint is skipped for ArrowType::OPTIONAL).
     // [spec:foma:sem:rewrite.fsm-rewrite-fn/test]
     // [spec:foma:sem:fomalib.fsm-rewrite-fn/test]
     #[test]
@@ -2144,7 +2149,7 @@ mod tests {
             right2: None,
             cross_product: None,
             next: None,
-            arrow_type: ARROW_RIGHT,
+            arrow_type: ArrowType::RIGHT,
             dotted: 0,
         });
         let mut rs = RewriteSet {
@@ -2174,7 +2179,7 @@ mod tests {
             right2: None,
             cross_product: None,
             next: None,
-            arrow_type: ARROW_RIGHT,
+            arrow_type: ArrowType::RIGHT,
             dotted: 0,
         });
         let ctx = Box::new(Fsmcontexts {

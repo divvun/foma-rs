@@ -10,6 +10,7 @@ license = "Apache-2.0"
 [workspace.dependencies]
 nfst-xre = "0.1.0"
 nfst-lexc = "0.1.0"
+bitflags = "2"
 flate2 = "1"
 smol_str = "0.3"
 tracing = "0.1"

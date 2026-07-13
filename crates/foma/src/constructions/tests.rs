@@ -1335,14 +1335,14 @@ fn fsm_compact_removes_symbol_subsumed_by_identity() {
 #[test]
 fn fsm_symbol_occurs_checks_requested_sides() {
     let net = re("a:b");
-    assert!(fsm_symbol_occurs(&net, "a", M_UPPER));
-    assert!(!fsm_symbol_occurs(&net, "a", M_LOWER));
-    assert!(fsm_symbol_occurs(&net, "b", M_LOWER));
-    assert!(!fsm_symbol_occurs(&net, "b", M_UPPER));
-    assert!(fsm_symbol_occurs(&net, "a", M_UPPER + M_LOWER));
+    assert!(fsm_symbol_occurs(&net, "a", Sides::UPPER));
+    assert!(!fsm_symbol_occurs(&net, "a", Sides::LOWER));
+    assert!(fsm_symbol_occurs(&net, "b", Sides::LOWER));
+    assert!(!fsm_symbol_occurs(&net, "b", Sides::UPPER));
+    assert!(fsm_symbol_occurs(&net, "a", Sides::UPPER | Sides::LOWER));
     // Not in sigma -> false; unknown side value -> false.
-    assert!(!fsm_symbol_occurs(&net, "z", M_UPPER));
-    assert!(!fsm_symbol_occurs(&net, "a", 0));
+    assert!(!fsm_symbol_occurs(&net, "z", Sides::UPPER));
+    assert!(!fsm_symbol_occurs(&net, "a", Sides::empty()));
 }
 
 /* ---- equal substrings --------------------------------------------- */

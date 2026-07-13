@@ -39,9 +39,8 @@ use crate::reverse::fsm_reverse;
 use crate::rewrite::fsm_rewrite;
 use crate::structures::{fsm_copy, fsm_destroy, fsm_empty_string, fsm_identity, fsm_isempty};
 use crate::types::{
-    ARROW_DOTTED, ARROW_LEFT, ARROW_LEFT_TO_RIGHT, ARROW_LONGEST_MATCH, ARROW_OPTIONAL,
-    ARROW_RIGHT, ARROW_RIGHT_TO_LEFT, ARROW_SHORTEST_MATCH, DefinedFunctions, DefinedNetworks, Fsm,
-    Fsmcontexts, Fsmrules, OP_IGNORE_ALL, OP_IGNORE_INTERNAL, ReplaceDir, RewriteSet,
+    ArrowType, DefinedFunctions, DefinedNetworks, Fsm, Fsmcontexts, Fsmrules, OP_IGNORE_ALL,
+    OP_IGNORE_INTERNAL, ReplaceDir, RewriteSet,
 };
 use crate::utf8::replace_equal_len;
 
@@ -498,18 +497,26 @@ fn function_apply(
 
 // ───────────────────────── replacement rules ─────────────────────────
 
-fn arrow_to_type(arrow: ReplaceArrow) -> i32 {
+fn arrow_to_type(arrow: ReplaceArrow) -> ArrowType {
     match arrow {
-        ReplaceArrow::Right => ARROW_RIGHT,
-        ReplaceArrow::OptionalRight => ARROW_RIGHT | ARROW_OPTIONAL,
-        ReplaceArrow::Left => ARROW_LEFT,
-        ReplaceArrow::OptionalLeft => ARROW_LEFT | ARROW_OPTIONAL,
-        ReplaceArrow::LeftRight => ARROW_LEFT | ARROW_RIGHT,
-        ReplaceArrow::OptionalLeftRight => ARROW_LEFT | ARROW_RIGHT | ARROW_OPTIONAL,
-        ReplaceArrow::LtrLongest => ARROW_RIGHT | ARROW_LONGEST_MATCH | ARROW_LEFT_TO_RIGHT,
-        ReplaceArrow::LtrShortest => ARROW_RIGHT | ARROW_SHORTEST_MATCH | ARROW_LEFT_TO_RIGHT,
-        ReplaceArrow::RtlLongest => ARROW_RIGHT | ARROW_LONGEST_MATCH | ARROW_RIGHT_TO_LEFT,
-        ReplaceArrow::RtlShortest => ARROW_RIGHT | ARROW_SHORTEST_MATCH | ARROW_RIGHT_TO_LEFT,
+        ReplaceArrow::Right => ArrowType::RIGHT,
+        ReplaceArrow::OptionalRight => ArrowType::RIGHT | ArrowType::OPTIONAL,
+        ReplaceArrow::Left => ArrowType::LEFT,
+        ReplaceArrow::OptionalLeft => ArrowType::LEFT | ArrowType::OPTIONAL,
+        ReplaceArrow::LeftRight => ArrowType::LEFT | ArrowType::RIGHT,
+        ReplaceArrow::OptionalLeftRight => ArrowType::LEFT | ArrowType::RIGHT | ArrowType::OPTIONAL,
+        ReplaceArrow::LtrLongest => {
+            ArrowType::RIGHT | ArrowType::LONGEST_MATCH | ArrowType::LEFT_TO_RIGHT
+        }
+        ReplaceArrow::LtrShortest => {
+            ArrowType::RIGHT | ArrowType::SHORTEST_MATCH | ArrowType::LEFT_TO_RIGHT
+        }
+        ReplaceArrow::RtlLongest => {
+            ArrowType::RIGHT | ArrowType::LONGEST_MATCH | ArrowType::RIGHT_TO_LEFT
+        }
+        ReplaceArrow::RtlShortest => {
+            ArrowType::RIGHT | ArrowType::SHORTEST_MATCH | ArrowType::RIGHT_TO_LEFT
+        }
     }
 }
 
@@ -686,7 +693,7 @@ fn build_mapping(
     opts: &FomaOptions,
     ps: &mut ParseState,
     m: &MappingPair,
-    arrow_type: i32,
+    arrow_type: ArrowType,
     out: &mut Vec<Fsmrules>,
     mut nets: Option<&mut DefinedNetworks>,
     mut funcs: Option<&mut DefinedFunctions>,
@@ -704,7 +711,7 @@ fn build_mapping(
             add_rule(opts, out, upper, r, r2, arrow_type);
         }
         MappingSide::Dotted(Some(e)) => {
-            /* LDOT n0 RDOT ARROW ...: add_rule with ARROW_DOTTED. */
+            /* LDOT n0 RDOT ARROW ...: add_rule with ArrowType::DOTTED. */
             let upper = build_net(
                 opts,
                 ps,
@@ -713,12 +720,12 @@ fn build_mapping(
                 funcs.as_deref_mut(),
             )?;
             let (r, r2) = build_rhs(opts, ps, &m.kind, nets.as_deref_mut(), funcs.as_deref_mut())?;
-            add_rule(opts, out, upper, r, r2, arrow_type | ARROW_DOTTED);
+            add_rule(opts, out, upper, r, r2, arrow_type | ArrowType::DOTTED);
         }
         MappingSide::Dotted(None) => {
-            /* LDOT RDOT ARROW n0: add_eprule with ARROW_DOTTED. */
+            /* LDOT RDOT ARROW n0: add_eprule with ArrowType::DOTTED. */
             let (r, r2) = build_rhs(opts, ps, &m.kind, nets, funcs)?;
-            add_eprule(out, r, r2, arrow_type | ARROW_DOTTED);
+            add_eprule(out, r, r2, arrow_type | ArrowType::DOTTED);
         }
     }
     Some(())
@@ -769,8 +776,8 @@ fn build_side(
 }
 
 /// regex.y add_rule: build the Fsmrules node(s) for one mapping. For dotted
-/// rules the main rule has ARROW_DOTTED stripped (and its LHS loses the empty
-/// string); an extra rule keeping ARROW_DOTTED is emitted only when the LHS
+/// rules the main rule has ArrowType::DOTTED stripped (and its LHS loses the empty
+/// string); an extra rule keeping ArrowType::DOTTED is emitted only when the LHS
 /// could match the empty string.
 fn add_rule(
     opts: &FomaOptions,
@@ -778,9 +785,9 @@ fn add_rule(
     l: Box<Fsm>,
     r: Option<Box<Fsm>>,
     r2: Option<Box<Fsm>>,
-    ty: i32,
+    ty: ArrowType,
 ) {
-    if (ty & ARROW_DOTTED) == 0 {
+    if !ty.contains(ArrowType::DOTTED) {
         out.push(Fsmrules {
             left: Some(l),
             right: r,
@@ -801,7 +808,7 @@ fn add_rule(
         right2: r2,
         cross_product: None,
         next: None,
-        arrow_type: ty - ARROW_DOTTED,
+        arrow_type: ty - ArrowType::DOTTED,
         dotted: 0,
     };
 
@@ -826,8 +833,8 @@ fn add_rule(
 }
 
 /// regex.y add_eprule: `[..] -> R (... R2)` — LHS is the empty string, and the
-/// arrow_type keeps ARROW_DOTTED (unlike add_rule's main rule).
-fn add_eprule(out: &mut Vec<Fsmrules>, r: Option<Box<Fsm>>, r2: Option<Box<Fsm>>, ty: i32) {
+/// arrow_type keeps ArrowType::DOTTED (unlike add_rule's main rule).
+fn add_eprule(out: &mut Vec<Fsmrules>, r: Option<Box<Fsm>>, r2: Option<Box<Fsm>>, ty: ArrowType) {
     out.push(Fsmrules {
         left: Some(fsm_empty_string()),
         right: r,

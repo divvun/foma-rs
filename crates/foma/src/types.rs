@@ -14,6 +14,7 @@
 //! nfst's SmolStr migration. Mutable accumulator buffers (Apply/MED
 //! `instring`/`outstring`, built via push_str/truncate) stay `String`.
 
+use bitflags::bitflags;
 use smol_str::SmolStr;
 
 /* ------------------------------------------------------------------ */
@@ -50,16 +51,21 @@ pub enum ReplaceDir {
     TwoLevel,
 }
 
-/* Arrow types in fsmrules */
-pub const ARROW_RIGHT: i32 = 1;
-pub const ARROW_LEFT: i32 = 2;
-pub const ARROW_OPTIONAL: i32 = 4;
-/// This is for the [..] part of a dotted rule
-pub const ARROW_DOTTED: i32 = 8;
-pub const ARROW_LONGEST_MATCH: i32 = 16;
-pub const ARROW_SHORTEST_MATCH: i32 = 32;
-pub const ARROW_LEFT_TO_RIGHT: i32 = 64;
-pub const ARROW_RIGHT_TO_LEFT: i32 = 128;
+bitflags! {
+    /// Arrow types in fsmrules (C: `ARROW_*` bitmask on `fsmrules.arrow_type`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct ArrowType: i32 {
+        const RIGHT = 1;
+        const LEFT = 2;
+        const OPTIONAL = 4;
+        /// This is for the [..] part of a dotted rule
+        const DOTTED = 8;
+        const LONGEST_MATCH = 16;
+        const SHORTEST_MATCH = 32;
+        const LEFT_TO_RIGHT = 64;
+        const RIGHT_TO_LEFT = 128;
+    }
+}
 
 /* Flag types */
 pub const FLAG_UNIFY: i32 = 1;
@@ -79,8 +85,14 @@ pub const PATHCOUNT_CYCLIC: i64 = -1;
 pub const PATHCOUNT_OVERFLOW: i64 = -2;
 pub const PATHCOUNT_UNKNOWN: i64 = -3;
 
-pub const M_UPPER: i32 = 1;
-pub const M_LOWER: i32 = 2;
+bitflags! {
+    /// Which side(s) of a transducer label a query applies to (C: `M_UPPER`/`M_LOWER`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Sides: i32 {
+        const UPPER = 1;
+        const LOWER = 2;
+    }
+}
 
 pub const APPLY_INDEX_INPUT: i32 = 1;
 pub const APPLY_INDEX_OUTPUT: i32 = 2;
@@ -113,15 +125,20 @@ pub const PROMPT_A: i32 = 1;
 pub const MAX_STACK: usize = 2097152;
 pub const MAX_PTR_STACK: usize = 2097152;
 
-/* apply.c mode bits (apply_handle.mode) */
-pub const RANDOM: i32 = 1;
-pub const ENUMERATE: i32 = 2;
-pub const MATCH: i32 = 4;
-pub const UP: i32 = 8;
-pub const DOWN: i32 = 16;
-pub const LOWER: i32 = 32;
-pub const UPPER: i32 = 64;
-pub const SPACE: i32 = 128;
+bitflags! {
+    /// apply.c mode bits (C: `apply_handle.mode`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct ApplyMode: i32 {
+        const RANDOM = 1;
+        const ENUMERATE = 2;
+        const MATCH = 4;
+        const UP = 8;
+        const DOWN = 16;
+        const LOWER = 32;
+        const UPPER = 64;
+        const SPACE = 128;
+    }
+}
 
 /* apply.c buffer sizes */
 pub const DEFAULT_OUTSTRING_SIZE: usize = 4096;
@@ -237,7 +254,7 @@ pub struct Fsmrules {
     pub right2: Option<Box<Fsm>>,
     pub cross_product: Option<Box<Fsm>>,
     pub next: Option<Box<Fsmrules>>,
-    pub arrow_type: i32,
+    pub arrow_type: ArrowType,
     /// [.A.] rule
     pub dotted: i32,
 }
@@ -598,7 +615,7 @@ pub struct ApplyHandle {
     pub curr_ptr: i32,
     pub ipos: i32,
     pub opos: i32,
-    pub mode: i32,
+    pub mode: ApplyMode,
     pub printcount: i32,
     pub numlines: Vec<i32>,
     pub statemap: Vec<i32>,

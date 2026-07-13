@@ -37,10 +37,10 @@ use crate::mem::round_up_to_power_of_two;
 use crate::options::FomaOptions;
 use crate::sigma::sigma_max;
 use crate::types::{
-    APPLY_BINSEARCH_THRESHOLD, APPLY_INDEX_INPUT, ApplyHandle, ApplyStateIndex, DEFAULT_STACK_SIZE,
-    DOWN, ENUMERATE, EPSILON, FLAG_CLEAR, FLAG_DISALLOW, FLAG_EQUAL, FLAG_NEGATIVE, FLAG_POSITIVE,
-    FLAG_REQUIRE, FLAG_UNIFY, FlagLookup, Fsm, IDENTITY, LOWER, PairSegment, RANDOM, Searchstack,
-    SigmaTrie, SigmaTrieArrays, SigmatchArray, Sigs, UNKNOWN, UP, UPPER,
+    APPLY_BINSEARCH_THRESHOLD, APPLY_INDEX_INPUT, ApplyHandle, ApplyMode, ApplyStateIndex,
+    DEFAULT_STACK_SIZE, EPSILON, FLAG_CLEAR, FLAG_DISALLOW, FLAG_EQUAL, FLAG_NEGATIVE,
+    FLAG_POSITIVE, FLAG_REQUIRE, FLAG_UNIFY, FlagLookup, Fsm, IDENTITY, PairSegment, Searchstack,
+    SigmaTrie, SigmaTrieArrays, SigmatchArray, Sigs, UNKNOWN,
 };
 use crate::utf8::{is_combining, utf8skip};
 use smol_str::SmolStr;
@@ -312,7 +312,7 @@ pub fn apply_enumerate(h: &mut ApplyHandle) -> Option<String> {
         h.iterate_old = 0;
         apply_force_clear_stack(h);
         result = apply_net(h);
-        if (h.mode & RANDOM) != RANDOM {
+        if !h.mode.contains(ApplyMode::RANDOM) {
             h.iterator += 1;
         }
     } else {
@@ -327,7 +327,7 @@ pub fn apply_enumerate(h: &mut ApplyHandle) -> Option<String> {
 // [spec:foma:def:fomalib.apply-words-fn]
 // [spec:foma:sem:fomalib.apply-words-fn]
 pub fn apply_words(h: &mut ApplyHandle) -> Option<String> {
-    h.mode = DOWN + ENUMERATE + LOWER + UPPER;
+    h.mode = ApplyMode::DOWN | ApplyMode::ENUMERATE | ApplyMode::LOWER | ApplyMode::UPPER;
     apply_enumerate(h)
 }
 
@@ -336,7 +336,7 @@ pub fn apply_words(h: &mut ApplyHandle) -> Option<String> {
 // [spec:foma:def:fomalib.apply-upper-words-fn]
 // [spec:foma:sem:fomalib.apply-upper-words-fn]
 pub fn apply_upper_words(h: &mut ApplyHandle) -> Option<String> {
-    h.mode = DOWN + ENUMERATE + UPPER;
+    h.mode = ApplyMode::DOWN | ApplyMode::ENUMERATE | ApplyMode::UPPER;
     apply_enumerate(h)
 }
 
@@ -345,7 +345,7 @@ pub fn apply_upper_words(h: &mut ApplyHandle) -> Option<String> {
 // [spec:foma:def:fomalib.apply-lower-words-fn]
 // [spec:foma:sem:fomalib.apply-lower-words-fn]
 pub fn apply_lower_words(h: &mut ApplyHandle) -> Option<String> {
-    h.mode = DOWN + ENUMERATE + LOWER;
+    h.mode = ApplyMode::DOWN | ApplyMode::ENUMERATE | ApplyMode::LOWER;
     apply_enumerate(h)
 }
 
@@ -355,7 +355,11 @@ pub fn apply_lower_words(h: &mut ApplyHandle) -> Option<String> {
 // [spec:foma:sem:fomalib.apply-random-words-fn]
 pub fn apply_random_words(h: &mut ApplyHandle) -> Option<String> {
     apply_clear_flags(h);
-    h.mode = DOWN + ENUMERATE + LOWER + UPPER + RANDOM;
+    h.mode = ApplyMode::DOWN
+        | ApplyMode::ENUMERATE
+        | ApplyMode::LOWER
+        | ApplyMode::UPPER
+        | ApplyMode::RANDOM;
     apply_enumerate(h)
 }
 
@@ -365,7 +369,7 @@ pub fn apply_random_words(h: &mut ApplyHandle) -> Option<String> {
 // [spec:foma:sem:fomalib.apply-random-lower-fn]
 pub fn apply_random_lower(h: &mut ApplyHandle) -> Option<String> {
     apply_clear_flags(h);
-    h.mode = DOWN + ENUMERATE + LOWER + RANDOM;
+    h.mode = ApplyMode::DOWN | ApplyMode::ENUMERATE | ApplyMode::LOWER | ApplyMode::RANDOM;
     apply_enumerate(h)
 }
 
@@ -375,7 +379,7 @@ pub fn apply_random_lower(h: &mut ApplyHandle) -> Option<String> {
 // [spec:foma:sem:fomalib.apply-random-upper-fn]
 pub fn apply_random_upper(h: &mut ApplyHandle) -> Option<String> {
     apply_clear_flags(h);
-    h.mode = DOWN + ENUMERATE + UPPER + RANDOM;
+    h.mode = ApplyMode::DOWN | ApplyMode::ENUMERATE | ApplyMode::UPPER | ApplyMode::RANDOM;
     apply_enumerate(h)
 }
 
@@ -440,7 +444,7 @@ pub fn apply_updown(h: &mut ApplyHandle, word: Option<&str>) -> Option<String> {
 // [spec:foma:def:fomalib.apply-down-fn]
 // [spec:foma:sem:fomalib.apply-down-fn]
 pub fn apply_down(h: &mut ApplyHandle, word: Option<&str>) -> Option<String> {
-    h.mode = DOWN;
+    h.mode = ApplyMode::DOWN;
     if !h.index_in.is_empty() {
         h.indexed = 1;
     } else {
@@ -460,7 +464,7 @@ pub fn apply_down(h: &mut ApplyHandle, word: Option<&str>) -> Option<String> {
 // [spec:foma:def:fomalib.apply-up-fn]
 // [spec:foma:sem:fomalib.apply-up-fn]
 pub fn apply_up(h: &mut ApplyHandle, word: Option<&str>) -> Option<String> {
-    h.mode = UP;
+    h.mode = ApplyMode::UP;
     if !h.index_out.is_empty() {
         h.indexed = 1;
     } else {
@@ -494,7 +498,7 @@ pub fn apply_init(net: &Fsm) -> Box<ApplyHandle> {
         curr_ptr: 0,
         ipos: 0,
         opos: 0,
-        mode: 0,
+        mode: ApplyMode::empty(),
         printcount: 0,
         numlines: Vec::new(),
         statemap: Vec::new(),
@@ -881,7 +885,7 @@ pub fn apply_binarysearch(h: &mut ApplyHandle) -> bool {
 
     h.curr_ptr = h.ptr;
     thisptr = h.curr_ptr;
-    nextsym = if (h.mode & DOWN) == DOWN {
+    nextsym = if h.mode.contains(ApplyMode::DOWN) {
         l_in(h, h.curr_ptr)
     } else {
         l_out(h, h.curr_ptr)
@@ -906,7 +910,7 @@ pub fn apply_binarysearch(h: &mut ApplyHandle) -> bool {
 
     if seeksym == IDENTITY || lastptr - thisptr < APPLY_BINSEARCH_THRESHOLD {
         while thisptr <= lastptr {
-            nextsym = if (h.mode & DOWN) == DOWN {
+            nextsym = if h.mode.contains(ApplyMode::DOWN) {
                 l_in(h, thisptr)
             } else {
                 l_out(h, thisptr)
@@ -928,7 +932,7 @@ pub fn apply_binarysearch(h: &mut ApplyHandle) -> bool {
             return false;
         }
         midptr = (thisptr + lastptr) / 2;
-        nextsym = if (h.mode & DOWN) == DOWN {
+        nextsym = if h.mode.contains(ApplyMode::DOWN) {
             l_in(h, midptr)
         } else {
             l_out(h, midptr)
@@ -940,7 +944,7 @@ pub fn apply_binarysearch(h: &mut ApplyHandle) -> bool {
             thisptr = midptr + 1;
             continue;
         } else {
-            while (if (h.mode & DOWN) == DOWN {
+            while (if h.mode.contains(ApplyMode::DOWN) {
                 l_in(h, midptr - 1)
             } else {
                 l_out(h, midptr - 1)
@@ -972,7 +976,7 @@ pub fn apply_follow_next_arc(h: &mut ApplyHandle) -> bool {
         while let Some(fsmptr) = h.iptr.as_deref().map(|i| i.fsmptr).filter(|&f| f != -1) {
             h.ptr = fsmptr;
             h.curr_ptr = fsmptr;
-            if (h.mode & DOWN) == DOWN {
+            if h.mode.contains(ApplyMode::DOWN) {
                 symin = l_in(h, h.curr_ptr);
                 symout = l_out(h, h.curr_ptr);
             } else {
@@ -1025,7 +1029,7 @@ pub fn apply_follow_next_arc(h: &mut ApplyHandle) -> bool {
     {
         loop {
             if apply_binarysearch(h) {
-                if (h.mode & DOWN) == DOWN {
+                if h.mode.contains(ApplyMode::DOWN) {
                     symin = l_in(h, h.curr_ptr);
                     symout = l_out(h, h.curr_ptr);
                 } else {
@@ -1073,7 +1077,7 @@ pub fn apply_follow_next_arc(h: &mut ApplyHandle) -> bool {
         h.curr_ptr = h.ptr;
         while l_state_no(h, h.curr_ptr) == l_state_no(h, h.ptr) && l_in(h, h.curr_ptr) != -1 {
             /* Select one random arc to follow out of all outgoing arcs */
-            if (h.mode & RANDOM) == RANDOM {
+            if h.mode.contains(ApplyMode::RANDOM) {
                 let mut vc = 0;
                 h.curr_ptr = h.ptr;
                 while l_state_no(h, h.curr_ptr) == l_state_no(h, h.ptr) && l_in(h, h.curr_ptr) != -1
@@ -1089,7 +1093,7 @@ pub fn apply_follow_next_arc(h: &mut ApplyHandle) -> bool {
                 }
             }
 
-            if (h.mode & DOWN) == DOWN {
+            if h.mode.contains(ApplyMode::DOWN) {
                 symin = l_in(h, h.curr_ptr);
                 symout = l_out(h, h.curr_ptr);
             } else {
@@ -1149,7 +1153,7 @@ pub fn apply_return_string(h: &mut ApplyHandle) -> Option<String> {
     /* Cut at opos to avoid returning stale gunk a backtracked branch left beyond
     it (C wrote a NUL at opos). opos is always a char boundary. */
     h.outstring.truncate(h.opos as usize);
-    if (h.mode & RANDOM) == RANDOM {
+    if h.mode.contains(ApplyMode::RANDOM) {
         /* To end or not to end */
         if h.lcg.rand() % 2 == 0 {
             apply_stack_clear(h);
@@ -1166,7 +1170,7 @@ pub fn apply_return_string(h: &mut ApplyHandle) -> Option<String> {
 // [spec:foma:def:apply.apply-mark-state-fn]
 // [spec:foma:sem:apply.apply-mark-state-fn]
 pub fn apply_mark_state(h: &mut ApplyHandle) {
-    if (h.mode & RANDOM) != RANDOM {
+    if !h.mode.contains(ApplyMode::RANDOM) {
         let sn = l_state_no(h, h.ptr) as usize;
         if h.marks[sn] == h.ipos + 1 {
             h.marks[sn] = -(h.ipos + 1);
@@ -1216,7 +1220,7 @@ pub fn apply_at_last_arc(h: &ApplyHandle) -> bool {
         } else {
             i32::MAX
         };
-        nextsym = if (h.mode & DOWN) == DOWN {
+        nextsym = if h.mode.contains(ApplyMode::DOWN) {
             l_in(h, h.ptr)
         } else {
             l_out(h, h.ptr)
@@ -1235,7 +1239,7 @@ pub fn apply_at_last_arc(h: &ApplyHandle) -> bool {
 // [spec:foma:sem:apply.apply-set-iptr-fn]
 pub fn apply_set_iptr(h: &mut ApplyHandle) {
     // Select index for the direction; if absent, leave iptr/state_has_index.
-    let is_down = (h.mode & DOWN) == DOWN;
+    let is_down = h.mode.contains(ApplyMode::DOWN);
     let idx_empty = if is_down {
         h.index_in.is_empty()
     } else {
@@ -1336,7 +1340,8 @@ pub fn apply_net(h: &mut ApplyHandle) -> Option<String> {
             Pc::L2 => {
                 /* Print accumulated string upon entry to state */
                 if l_final(h, h.ptr) == 1
-                    && (h.ipos == h.current_instring_length || (h.mode & ENUMERATE) == ENUMERATE)
+                    && (h.ipos == h.current_instring_length
+                        || h.mode.contains(ApplyMode::ENUMERATE))
                 {
                     if let Some(returnstring) = apply_return_string(h) {
                         return Some(returnstring);
@@ -1353,7 +1358,7 @@ pub fn apply_net(h: &mut ApplyHandle) -> Option<String> {
         }
     }
 
-    if (h.mode & RANDOM) == RANDOM {
+    if h.mode.contains(ApplyMode::RANDOM) {
         apply_stack_clear(h);
         h.iterator = 0;
         h.iterate_old = 0;
@@ -1407,8 +1412,8 @@ pub fn apply_append(h: &mut ApplyHandle, cptr: i32, sym: i32) -> i32 {
     let start = h.opos as usize;
     h.outstring.truncate(start);
 
-    if (h.mode & ENUMERATE) == ENUMERATE {
-        if (h.mode & (UPPER | LOWER)) == (UPPER | LOWER) {
+    if h.mode.contains(ApplyMode::ENUMERATE) {
+        if h.mode.contains(ApplyMode::UPPER | ApplyMode::LOWER) {
             /* Print both sides, colon-separated (unless identical) */
             h.outstring.push_str(&astring);
             if !astring_eq_bstring {
@@ -1454,7 +1459,7 @@ pub fn apply_append(h: &mut ApplyHandle, cptr: i32, sym: i32) -> i32 {
             } else {
                 bstring.as_str()
             };
-            let pstring = if (h.mode & (UPPER | LOWER)) == UPPER {
+            let pstring = if (h.mode & (ApplyMode::UPPER | ApplyMode::LOWER)) == ApplyMode::UPPER {
                 a
             } else {
                 b
@@ -1465,12 +1470,12 @@ pub fn apply_append(h: &mut ApplyHandle, cptr: i32, sym: i32) -> i32 {
         /* Print pairs is ON and the symbols differ */
         // C wrote a single input byte into the shared "?" literal (UB). Here the
         // whole input character is used for an UNKNOWN side; sigs is not mutated.
-        if symin == UNKNOWN && (h.mode & DOWN) == DOWN {
+        if symin == UNKNOWN && h.mode.contains(ApplyMode::DOWN) {
             if let Some(c) = h.instring[h.ipos as usize..].chars().next() {
                 astring = c.to_string();
             }
         }
-        if symout == UNKNOWN && (h.mode & UP) == UP {
+        if symout == UNKNOWN && h.mode.contains(ApplyMode::UP) {
             if let Some(c) = h.instring[h.ipos as usize..].chars().next() {
                 bstring = c.to_string();
             }
@@ -1491,7 +1496,7 @@ pub fn apply_append(h: &mut ApplyHandle, cptr: i32, sym: i32) -> i32 {
     } else if sym == EPSILON {
         return 0;
     } else {
-        let pstring = if (h.mode & DOWN) == DOWN {
+        let pstring = if h.mode.contains(ApplyMode::DOWN) {
             &bstring
         } else {
             &astring
@@ -1520,7 +1525,7 @@ pub fn apply_match_length(h: &ApplyHandle, symbol: i32) -> i32 {
     if h.has_flags != 0 && h.flag_lookup[symbol as usize].r#type != 0 {
         return 0;
     }
-    if (h.mode & ENUMERATE) == ENUMERATE {
+    if h.mode.contains(ApplyMode::ENUMERATE) {
         return 0;
     }
     if h.ipos >= h.current_instring_length {
@@ -1540,7 +1545,7 @@ pub fn apply_match_length(h: &ApplyHandle, symbol: i32) -> i32 {
 // [spec:foma:def:apply.apply-match-str-fn]
 // [spec:foma:sem:apply.apply-match-str-fn]
 pub fn apply_match_str(h: &mut ApplyHandle, symbol: i32, position: i32) -> i32 {
-    if (h.mode & ENUMERATE) == ENUMERATE {
+    if h.mode.contains(ApplyMode::ENUMERATE) {
         if h.has_flags != 0 && h.flag_lookup[symbol as usize].r#type != 0 {
             if h.obey_flags == 0 {
                 return 0;
@@ -1770,7 +1775,7 @@ pub fn apply_create_sigarray(h: &mut ApplyHandle, net: &Fsm) {
 // [spec:foma:sem:apply.apply-create-sigmatch-fn]
 pub fn apply_create_sigmatch(h: &mut ApplyHandle) {
     /* We create a sigmatch array only in case we match against a real string */
-    if (h.mode & ENUMERATE) == ENUMERATE {
+    if h.mode.contains(ApplyMode::ENUMERATE) {
         return;
     }
     let symbol: Vec<u8> = h.instring.as_bytes().to_vec();
@@ -2118,7 +2123,7 @@ mod tests {
         let abc = signum(&net, "abc");
         let a = signum(&net, "a");
         let mut h = apply_init(&net);
-        h.mode = DOWN;
+        h.mode = ApplyMode::DOWN;
         h.instring = "aabc".to_string();
         apply_create_sigmatch(&mut h);
         assert_eq!(h.current_instring_length, 4);
@@ -2138,7 +2143,7 @@ mod tests {
         let abc = signum(&net, "abc");
         let a = signum(&net, "a");
         let mut h = apply_init(&net);
-        h.mode = DOWN;
+        h.mode = ApplyMode::DOWN;
         h.instring = "abc".to_string();
         apply_create_sigmatch(&mut h);
         h.ipos = 0;
