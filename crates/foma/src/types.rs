@@ -230,9 +230,9 @@ pub struct Fsm {
     pub is_minimized: Tern,
     pub is_epsilon_free: Tern,
     pub is_loop_free: Tern,
-    pub is_completed: i32,
-    pub arcs_sorted_in: i32,
-    pub arcs_sorted_out: i32,
+    pub is_completed: Tern,
+    pub arcs_sorted_in: bool,
+    pub arcs_sorted_out: bool,
     /// The line table: sentinel-terminated (final line has state_no == -1),
     /// exactly as in C (pointer to first line). Empty vec ↔ NULL.
     pub states: Vec<FsmState>,

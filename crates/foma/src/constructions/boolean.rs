@@ -323,7 +323,7 @@ pub fn fsm_completes(opts: &FomaOptions, net: Box<Fsm>, operation: i32) -> Box<F
         drop(starts);
         drop(finals);
         drop(sinks);
-        net.is_completed = YES;
+        net.is_completed = Tern::Yes;
         net.is_minimized = Tern::Yes;
         net.is_pruned = Tern::No;
         net.is_deterministic = Tern::Yes;
@@ -438,7 +438,7 @@ pub fn fsm_completes(opts: &FomaOptions, net: Box<Fsm>, operation: i32) -> Box<F
     drop(state_table);
     net.is_minimized = Tern::No;
     net.is_pruned = Tern::No;
-    net.is_completed = YES;
+    net.is_completed = Tern::Yes;
     net.statecount = statecount;
     net
 }

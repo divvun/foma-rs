@@ -163,7 +163,7 @@ mod tests {
         assert_eq!(net.is_minimized, Tern::No);
         assert_eq!(net.is_epsilon_free, Tern::Unk);
         assert_eq!(net.is_loop_free, Tern::Unk);
-        assert_eq!(net.is_completed, UNK);
+        assert_eq!(net.is_completed, Tern::Unk);
         /* resulting language is {b} */
         let mut h = apply_init(&net);
         assert_eq!(apply_down(&mut h, Some("b")), Some("b".to_string()));
@@ -188,7 +188,7 @@ mod tests {
         assert_eq!(net.is_minimized, Tern::No);
         assert_eq!(net.is_epsilon_free, Tern::Unk);
         assert_eq!(net.is_loop_free, Tern::Unk);
-        assert_eq!(net.is_completed, UNK);
+        assert_eq!(net.is_completed, Tern::Unk);
         /* resulting language is {a} */
         let mut h = apply_init(&net);
         assert_eq!(apply_down(&mut h, Some("a")), Some("a".to_string()));

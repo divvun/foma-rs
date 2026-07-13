@@ -40,9 +40,9 @@ pub fn fsm_update_flags(
     net.is_minimized = Tern::from_wire(min);
     net.is_epsilon_free = Tern::from_wire(eps);
     net.is_loop_free = Tern::from_wire(r#loop);
-    net.is_completed = completed;
-    net.arcs_sorted_in = NO;
-    net.arcs_sorted_out = NO;
+    net.is_completed = Tern::from_wire(completed);
+    net.arcs_sorted_in = false;
+    net.arcs_sorted_out = false;
 }
 
 // [spec:foma:def:constructions.fsm-count-states-fn]

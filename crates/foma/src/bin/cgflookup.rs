@@ -322,10 +322,10 @@ fn main() {
 
     while let Some(mut net) = fsm_read_binary_file_multiple(&mut fsrh) {
         numnets += 1;
-        if direction == DIR_DOWN && net.arcs_sorted_in != 1 && sortarcs != 0 {
+        if direction == DIR_DOWN && !net.arcs_sorted_in && sortarcs != 0 {
             fsm_sort_arcs(&mut net, 1);
         }
-        if direction == DIR_UP && net.arcs_sorted_out != 1 && sortarcs != 0 {
+        if direction == DIR_UP && !net.arcs_sorted_out && sortarcs != 0 {
             fsm_sort_arcs(&mut net, 2);
         }
         let mut ah = apply_init(&net);

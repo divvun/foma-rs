@@ -1367,6 +1367,14 @@ children (
                 title "Magic-i32 → Props newtype for the 2-bit-packed extras byte: is_completed (quad-state 0..3) + arcs_sorted_in/out, owning pack/unpack that reproduces io.rs:999-1001/:1203 bit math exactly (extras = is_completed | in<<2 | out<<4)"
                 priority 2
                 deps (w10-i32-tern)
+                log (
+                    {
+                        at 2026-07-13T12:05:51.523496Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan_start)"
+                    }
+                )
             }
 
             {

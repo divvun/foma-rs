@@ -100,10 +100,10 @@ pub(crate) fn print_net(net: &mut Fsm, filename: Option<&str>) {
     if net.is_loop_free != Tern::No {
         write!(out, "loop_free ").expect("writing net");
     }
-    if net.arcs_sorted_in != 0 {
+    if net.arcs_sorted_in {
         write!(out, "arcs_sorted_in ").expect("writing net");
     }
-    if net.arcs_sorted_out != 0 {
+    if net.arcs_sorted_out {
         write!(out, "arcs_sorted_out ").expect("writing net");
     }
     writeln!(out).expect("writing net");

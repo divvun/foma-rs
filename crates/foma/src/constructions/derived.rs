@@ -190,8 +190,8 @@ pub fn fsm_symbol(symbol: &str) -> Box<Fsm> {
         net.statecount = 2;
         net.linecount = 2;
         net.finalcount = 1;
-        net.arcs_sorted_in = YES;
-        net.arcs_sorted_out = YES;
+        net.arcs_sorted_in = true;
+        net.arcs_sorted_out = true;
         net.is_deterministic = Tern::Yes;
         net.is_minimized = Tern::Yes;
         net.is_epsilon_free = Tern::Yes;

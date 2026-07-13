@@ -138,17 +138,17 @@ pub fn fsm_sort_arcs(net: &mut Fsm, direction: i32) {
         i += 1;
     }
     if net.arity == 1 {
-        net.arcs_sorted_in = 1;
-        net.arcs_sorted_out = 1;
+        net.arcs_sorted_in = true;
+        net.arcs_sorted_out = true;
         return;
     }
     if direction == 1 {
-        net.arcs_sorted_in = 1;
-        net.arcs_sorted_out = 0;
+        net.arcs_sorted_in = true;
+        net.arcs_sorted_out = false;
     }
     if direction == 2 {
-        net.arcs_sorted_out = 1;
-        net.arcs_sorted_in = 0;
+        net.arcs_sorted_out = true;
+        net.arcs_sorted_in = false;
     }
 }
 
@@ -328,9 +328,9 @@ pub fn fsm_create(name: &str) -> Box<Fsm> {
         is_minimized: Tern::No,
         is_epsilon_free: Tern::No,
         is_loop_free: Tern::No,
-        is_completed: 0,
-        arcs_sorted_in: NO,
-        arcs_sorted_out: NO,
+        is_completed: Tern::No,
+        arcs_sorted_in: false,
+        arcs_sorted_out: false,
         sigma: sigma_create(),
         states: Vec::new(),
         medlookup: None,
@@ -1591,8 +1591,8 @@ mod tests {
         assert_eq!(net.states[1].r#in, 5);
         assert_eq!(net.states[2].r#in, 8);
         // arity != 1, direction 1: in sorted, out flag cleared
-        assert_eq!(net.arcs_sorted_in, 1);
-        assert_eq!(net.arcs_sorted_out, 0);
+        assert!(net.arcs_sorted_in);
+        assert!(!net.arcs_sorted_out);
     }
 
     // [spec:foma:sem:structures.fsm-sort-arcs-fn/test]
@@ -1613,8 +1613,8 @@ mod tests {
         assert_eq!(net.states[0].out, 1);
         assert_eq!(net.states[1].out, 4);
         assert_eq!(net.states[2].out, 7);
-        assert_eq!(net.arcs_sorted_out, 1);
-        assert_eq!(net.arcs_sorted_in, 0);
+        assert!(net.arcs_sorted_out);
+        assert!(!net.arcs_sorted_in);
     }
 
     // [spec:foma:sem:structures.fsm-sort-arcs-fn/test]
@@ -1631,8 +1631,8 @@ mod tests {
             1,
         );
         fsm_sort_arcs(&mut net, 1);
-        assert_eq!(net.arcs_sorted_in, 1);
-        assert_eq!(net.arcs_sorted_out, 1);
+        assert!(net.arcs_sorted_in);
+        assert!(net.arcs_sorted_out);
     }
 
     // [spec:foma:sem:structures.map-firstlines-fn/test]
@@ -1685,8 +1685,8 @@ mod tests {
         assert_eq!(net.is_deterministic, Tern::Yes);
         assert_eq!(net.is_minimized, Tern::Yes);
         assert_eq!(net.is_loop_free, Tern::Yes);
-        assert_eq!(net.is_completed, NO);
-        assert_eq!(net.arcs_sorted_in, NO);
+        assert_eq!(net.is_completed, Tern::No);
+        assert!(!net.arcs_sorted_in);
     }
 
     // [spec:foma:sem:structures.fsm-empty-string-fn/test]
@@ -1761,7 +1761,7 @@ mod tests {
         assert_eq!(net.arccount, 0);
         assert_eq!(net.is_deterministic, Tern::No);
         assert_eq!(net.is_minimized, Tern::No);
-        assert_eq!(net.arcs_sorted_in, NO);
+        assert!(!net.arcs_sorted_in);
         // sigma = empty alphabet
         assert!(net.sigma.is_empty());
         assert!(net.states.is_empty());

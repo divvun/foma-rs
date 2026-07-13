@@ -997,9 +997,10 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Result<Option<Box<Fsm>>, FomaError
     }
     io_gets(iobh, &mut buf);
 
-    net.is_completed = extras & 3;
-    net.arcs_sorted_in = (extras & 12) >> 2;
-    net.arcs_sorted_out = (extras & 48) >> 4;
+    let props = Props::from_extras(extras);
+    net.is_completed = props.is_completed;
+    net.arcs_sorted_in = props.arcs_sorted_in;
+    net.arcs_sorted_out = props.arcs_sorted_out;
 
     /* Sigma header: skip anything until ##sigma## */
     while buf != "##sigma##" {
@@ -1201,6 +1202,33 @@ pub(crate) fn io_gets(iobh: &mut IoBufHandle, target: &mut String) -> i32 {
 // GzEncoder (or any other writer) the caller passes as `&mut W`, dispatched
 // statically, and a write failure is propagated as an `io::Error` instead of
 // being reported by a return code no caller inspected.
+/// The `extras` field on the props line packs three 2-bit values (C io.rs):
+/// bits 0-1 `is_completed`, bits 2-3 `arcs_sorted_in`, bits 4-5 `arcs_sorted_out`.
+struct Props {
+    is_completed: Tern,
+    arcs_sorted_in: bool,
+    arcs_sorted_out: bool,
+}
+
+impl Props {
+    /// C: `is_completed = extras & 3; arcs_sorted_in = (extras & 12) >> 2;`
+    /// `arcs_sorted_out = (extras & 48) >> 4`.
+    fn from_extras(extras: i32) -> Props {
+        Props {
+            is_completed: Tern::from_wire(extras & 3),
+            arcs_sorted_in: (extras & 12) >> 2 != 0,
+            arcs_sorted_out: (extras & 48) >> 4 != 0,
+        }
+    }
+
+    /// C: `extras = is_completed | (arcs_sorted_in << 2) | (arcs_sorted_out << 4)`.
+    fn to_extras(&self) -> i32 {
+        self.is_completed as i32
+            | (self.arcs_sorted_in as i32) << 2
+            | (self.arcs_sorted_out as i32) << 4
+    }
+}
+
 pub fn foma_net_print<W: std::io::Write + ?Sized>(
     net: &Fsm,
     outfile: &mut W,
@@ -1210,7 +1238,12 @@ pub fn foma_net_print<W: std::io::Write + ?Sized>(
     /* Properties */
     outfile.write_all(b"##props##\n")?;
 
-    let extras = net.is_completed | (net.arcs_sorted_in << 2) | (net.arcs_sorted_out << 4);
+    let extras = Props {
+        is_completed: net.is_completed,
+        arcs_sorted_in: net.arcs_sorted_in,
+        arcs_sorted_out: net.arcs_sorted_out,
+    }
+    .to_extras();
 
     writeln!(
         outfile,
@@ -1652,9 +1685,9 @@ mod tests {
         net.is_minimized = Tern::Yes;
         net.is_epsilon_free = Tern::Yes;
         net.is_loop_free = Tern::Yes;
-        net.is_completed = 2;
-        net.arcs_sorted_in = 0;
-        net.arcs_sorted_out = 0;
+        net.is_completed = Tern::Unk;
+        net.arcs_sorted_in = false;
+        net.arcs_sorted_out = false;
         add_sig(&mut net, &[(3, "a"), (4, "b")]);
         net.states = vec![
             FsmState {
@@ -1824,6 +1857,32 @@ mod tests {
         assert_eq!(back.is_minimized, Tern::Unk);
         assert_eq!(back.is_epsilon_free, Tern::No);
         assert_eq!(back.is_loop_free, Tern::Unk);
+    }
+
+    // [spec:foma:sem:io.foma-net-print-fn+1/test]
+    // [spec:foma:sem:io.io-net-read-fn/test]
+    #[test]
+    fn props_extras_byte_packs_and_unpacks_every_combination() {
+        /* The extras byte is `is_completed | in<<2 | out<<4`. Every combination
+        must survive pack→unpack, and the packed byte must equal the hand-computed
+        bit layout — this owns the io.rs:999-1001/:1203 math the wire relies on. */
+        for (comp, cbits) in [(Tern::No, 0), (Tern::Yes, 1), (Tern::Unk, 2)] {
+            for si in [false, true] {
+                for so in [false, true] {
+                    let extras = Props {
+                        is_completed: comp,
+                        arcs_sorted_in: si,
+                        arcs_sorted_out: so,
+                    }
+                    .to_extras();
+                    assert_eq!(extras, cbits | (si as i32) << 2 | (so as i32) << 4);
+                    let back = Props::from_extras(extras);
+                    assert_eq!(back.is_completed, comp);
+                    assert_eq!(back.arcs_sorted_in, si);
+                    assert_eq!(back.arcs_sorted_out, so);
+                }
+            }
+        }
     }
 
     // [spec:foma:sem:io.foma-net-print-fn+1/test]

@@ -23,7 +23,7 @@ use crate::sigma::{sigma_max, sigma_sort, sigma_to_list};
 use crate::structures::{fsm_create, fsm_destroy, fsm_empty_set};
 use crate::types::{
     EPSILON, Fsm, FsmConstructHandle, FsmReadHandle, FsmSigmaHash, FsmSigmaList, FsmState,
-    FsmStateList, FsmTransList, IDENTITY, PATHCOUNT_UNKNOWN, Sigma, Tern, UNK, UNKNOWN,
+    FsmStateList, FsmTransList, IDENTITY, PATHCOUNT_UNKNOWN, Sigma, Tern, UNKNOWN,
 };
 use smol_str::SmolStr;
 
@@ -246,9 +246,9 @@ impl FsmBuilder {
         net.is_minimized = Tern::Unk;
         net.is_epsilon_free = Tern::from_wire(self.is_epsilon_free as i32);
         net.is_loop_free = Tern::Unk;
-        net.is_completed = UNK;
-        net.arcs_sorted_in = 0;
-        net.arcs_sorted_out = 0;
+        net.is_completed = Tern::Unk;
+        net.arcs_sorted_in = false;
+        net.arcs_sorted_out = false;
         net.states = states;
         /* free(slookup) */
         self.slookup = Vec::new();
@@ -1323,9 +1323,9 @@ mod tests {
         assert_eq!(net.is_pruned, Tern::Unk);
         assert_eq!(net.is_minimized, Tern::Unk);
         assert_eq!(net.is_loop_free, Tern::Unk);
-        assert_eq!(net.is_completed, UNK);
-        assert_eq!(net.arcs_sorted_in, 0);
-        assert_eq!(net.arcs_sorted_out, 0);
+        assert_eq!(net.is_completed, Tern::Unk);
+        assert!(!net.arcs_sorted_in);
+        assert!(!net.arcs_sorted_out);
     }
 
     // [spec:foma:sem:dynarray.fsm-state-set-current-state-fn/test]

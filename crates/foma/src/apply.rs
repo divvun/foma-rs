@@ -446,7 +446,7 @@ pub fn apply_down(h: &mut ApplyHandle, word: Option<&str>) -> Option<String> {
     h.mode = ApplyMode::DOWN;
     h.indexed = !h.index_in.is_empty();
     // C dereferences last_net before apply_updown's NULL guard.
-    h.binsearch = last_net(h).arcs_sorted_in == 1;
+    h.binsearch = last_net(h).arcs_sorted_in;
     apply_updown(h, word)
 }
 
@@ -457,7 +457,7 @@ pub fn apply_down(h: &mut ApplyHandle, word: Option<&str>) -> Option<String> {
 pub fn apply_up(h: &mut ApplyHandle, word: Option<&str>) -> Option<String> {
     h.mode = ApplyMode::UP;
     h.indexed = !h.index_out.is_empty();
-    h.binsearch = last_net(h).arcs_sorted_out == 1;
+    h.binsearch = last_net(h).arcs_sorted_out;
     apply_updown(h, word)
 }
 
@@ -2622,7 +2622,7 @@ mod tests {
         // Shared-prefix net; sorting the input side enables the binsearch path.
         let mut net = parse("{cat}|{car}|{can}");
         fsm_sort_arcs(&mut net, 1);
-        assert_eq!(net.arcs_sorted_in, 1);
+        assert!(net.arcs_sorted_in);
         // apply_down sets h.binsearch = true from arcs_sorted_in.
         let mut h = apply_init(&net);
         let mut r = apply_down(&mut h, Some("cat"));

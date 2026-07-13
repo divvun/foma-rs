@@ -160,17 +160,17 @@ fn fsm_sort_lines_groups_by_state_keeps_sentinel_last() {
 #[test]
 fn fsm_update_flags_assigns_verbatim_and_clears_arc_sort() {
     let mut net = fsm_create("");
-    net.arcs_sorted_in = YES;
-    net.arcs_sorted_out = YES;
+    net.arcs_sorted_in = true;
+    net.arcs_sorted_out = true;
     fsm_update_flags(&mut net, 1, 0, 2, 1, 0, 2);
     assert_eq!(net.is_deterministic, Tern::Yes);
     assert_eq!(net.is_pruned, Tern::No);
     assert_eq!(net.is_minimized, Tern::Unk);
     assert_eq!(net.is_epsilon_free, Tern::Yes);
     assert_eq!(net.is_loop_free, Tern::No);
-    assert_eq!(net.is_completed, 2);
-    assert_eq!(net.arcs_sorted_in, NO);
-    assert_eq!(net.arcs_sorted_out, NO);
+    assert_eq!(net.is_completed, Tern::Unk);
+    assert!(!net.arcs_sorted_in);
+    assert!(!net.arcs_sorted_out);
 }
 
 // [spec:foma:sem:constructions.add-fsm-arc-fn/test]
@@ -645,7 +645,7 @@ fn fsm_concat_with_empty_language_is_empty() {
 fn fsm_complement_negates_over_extended_alphabet() {
     let opts = &FomaOptions::default();
     let c = fsm_complement(opts, re("a"));
-    assert_eq!(c.is_completed, YES);
+    assert_eq!(c.is_completed, Tern::Yes);
     assert_eq!(down(&c, ""), ws(&[""]), "empty string is in ~[a]");
     assert_eq!(down(&c, "a"), Vec::<String>::new(), "a is excluded");
     assert_eq!(down(&c, "aa"), ws(&["aa"]));
@@ -674,7 +674,7 @@ fn fsm_complement_is_involutive() {
 fn fsm_complete_preserves_language_but_marks_completed() {
     let opts = &FomaOptions::default();
     let comp = fsm_complete(opts, re("a"));
-    assert_eq!(comp.is_completed, YES);
+    assert_eq!(comp.is_completed, Tern::Yes);
     assert_eq!(down(&comp, "a"), ws(&["a"]));
     assert_eq!(down(&comp, ""), Vec::<String>::new());
     assert_eq!(
@@ -781,7 +781,7 @@ fn fsm_symbol_ordinary_exact_shape_flags_and_language() {
     assert_eq!(net.is_deterministic, Tern::Yes);
     assert_eq!(net.is_minimized, Tern::Yes);
     assert_eq!(net.is_epsilon_free, Tern::Yes);
-    assert_eq!((net.arcs_sorted_in, net.arcs_sorted_out), (YES, YES));
+    assert_eq!((net.arcs_sorted_in, net.arcs_sorted_out), (true, true));
     assert_eq!(down(&net, "a"), ws(&["a"]));
 }
 
