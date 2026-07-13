@@ -38,8 +38,7 @@ use crate::options::FomaOptions;
 use crate::sigma::sigma_max;
 use crate::types::{
     APPLY_BINSEARCH_THRESHOLD, APPLY_INDEX_INPUT, ApplyHandle, ApplyMode, ApplyStateIndex,
-    DEFAULT_STACK_SIZE, EPSILON, FLAG_CLEAR, FLAG_DISALLOW, FLAG_EQUAL, FLAG_NEGATIVE,
-    FLAG_POSITIVE, FLAG_REQUIRE, FLAG_UNIFY, FlagLookup, Fsm, IDENTITY, PairSegment, Searchstack,
+    DEFAULT_STACK_SIZE, EPSILON, FlagLookup, FlagType, Fsm, IDENTITY, PairSegment, Searchstack,
     SigmaTrie, SigmaTrieArrays, SigmatchArray, Sigs, UNKNOWN,
 };
 use crate::utf8::{is_combining, utf8skip};
@@ -981,9 +980,12 @@ pub fn apply_follow_next_arc(h: &mut ApplyHandle) -> bool {
                     eatupo = apply_append(h, h.curr_ptr, symout);
                     if h.obey_flags
                         && h.has_flags
-                        && (h.flag_lookup[symin as usize].r#type
-                            & (FLAG_UNIFY | FLAG_CLEAR | FLAG_POSITIVE | FLAG_NEGATIVE))
-                            != 0
+                        && h.flag_lookup[symin as usize].r#type.intersects(
+                            FlagType::UNIFY
+                                | FlagType::CLEAR
+                                | FlagType::POSITIVE
+                                | FlagType::NEGATIVE,
+                        )
                     {
                         fname = h.flag_lookup[symin as usize].name.clone();
                         fvalue = h.oldflagvalue.clone();
@@ -1103,9 +1105,9 @@ pub fn apply_follow_next_arc(h: &mut ApplyHandle) -> bool {
                 eatupo = apply_append(h, h.curr_ptr, symout);
                 if h.obey_flags
                     && h.has_flags
-                    && (h.flag_lookup[symin as usize].r#type
-                        & (FLAG_UNIFY | FLAG_CLEAR | FLAG_POSITIVE | FLAG_NEGATIVE))
-                        != 0
+                    && h.flag_lookup[symin as usize].r#type.intersects(
+                        FlagType::UNIFY | FlagType::CLEAR | FlagType::POSITIVE | FlagType::NEGATIVE,
+                    )
                 {
                     fname = h.flag_lookup[symin as usize].name.clone();
                     fvalue = h.oldflagvalue.clone();
@@ -1360,8 +1362,10 @@ pub fn apply_append(h: &mut ApplyHandle, cptr: i32, sym: i32) -> i32 {
     let symout = l_out(h, cptr);
 
     // Flag suppression: a suppressed flag diacritic renders as the empty string.
-    let a_suppressed = h.has_flags && !h.show_flags && h.flag_lookup[symin as usize].r#type != 0;
-    let b_suppressed = h.has_flags && !h.show_flags && h.flag_lookup[symout as usize].r#type != 0;
+    let a_suppressed =
+        h.has_flags && !h.show_flags && !h.flag_lookup[symin as usize].r#type.is_empty();
+    let b_suppressed =
+        h.has_flags && !h.show_flags && !h.flag_lookup[symout as usize].r#type.is_empty();
     let mut astring: String = if a_suppressed {
         String::new()
     } else {
@@ -1502,7 +1506,7 @@ pub fn apply_match_length(h: &ApplyHandle, symbol: i32) -> i32 {
     if symbol == EPSILON {
         return 0;
     }
-    if h.has_flags && h.flag_lookup[symbol as usize].r#type != 0 {
+    if h.has_flags && !h.flag_lookup[symbol as usize].r#type.is_empty() {
         return 0;
     }
     if h.mode.contains(ApplyMode::ENUMERATE) {
@@ -1526,7 +1530,7 @@ pub fn apply_match_length(h: &ApplyHandle, symbol: i32) -> i32 {
 // [spec:foma:sem:apply.apply-match-str-fn]
 pub fn apply_match_str(h: &mut ApplyHandle, symbol: i32, position: i32) -> i32 {
     if h.mode.contains(ApplyMode::ENUMERATE) {
-        if h.has_flags && h.flag_lookup[symbol as usize].r#type != 0 {
+        if h.has_flags && !h.flag_lookup[symbol as usize].r#type.is_empty() {
             if !h.obey_flags {
                 return 0;
             }
@@ -1548,7 +1552,7 @@ pub fn apply_match_str(h: &mut ApplyHandle, symbol: i32, position: i32) -> i32 {
     }
 
     /* If symbol is a flag, we need to check consistency */
-    if h.has_flags && h.flag_lookup[symbol as usize].r#type != 0 {
+    if h.has_flags && !h.flag_lookup[symbol as usize].r#type.is_empty() {
         if !h.obey_flags {
             return 0;
         }
@@ -1646,10 +1650,10 @@ pub fn apply_mark_flagstates(h: &mut ApplyHandle) {
     while net.states[i].state_no != -1 {
         let ln = &net.states[i];
         if ln.target != -1 {
-            if h.flag_lookup[ln.r#in as usize].r#type != 0 {
+            if !h.flag_lookup[ln.r#in as usize].r#type.is_empty() {
                 bitset(&mut fs, ln.state_no);
             }
-            if h.flag_lookup[ln.out as usize].r#type != 0 {
+            if !h.flag_lookup[ln.out as usize].r#type.is_empty() {
                 bitset(&mut fs, ln.state_no);
             }
         }
@@ -1729,7 +1733,7 @@ pub fn apply_create_sigarray(h: &mut ApplyHandle, net: &Fsm) {
     if h.has_flags {
         h.flag_lookup = vec![
             FlagLookup {
-                r#type: 0,
+                r#type: FlagType::empty(),
                 name: None,
                 value: None,
             };
@@ -1859,7 +1863,7 @@ pub enum FlagCheck {
 // [spec:foma:sem:apply.apply-check-flag-fn]
 pub fn apply_check_flag(
     h: &mut ApplyHandle,
-    r#type: i32,
+    r#type: FlagType,
     name: Option<&str>,
     value: Option<&str>,
 ) -> FlagCheck {
@@ -1872,7 +1876,7 @@ pub fn apply_check_flag(
         h.oldflagneg = flist.neg;
     }
 
-    if r#type == FLAG_UNIFY {
+    if r#type == FlagType::UNIFY {
         let flist = h.flag_state.get_mut(name).expect("flag not registered");
         if flist.value.is_none() {
             flist.value = value.map(SmolStr::from);
@@ -1887,14 +1891,14 @@ pub fn apply_check_flag(
         return FlagCheck::Fail;
     }
 
-    if r#type == FLAG_CLEAR {
+    if r#type == FlagType::CLEAR {
         let flist = h.flag_state.get_mut(name).expect("flag not registered");
         flist.value = None;
         flist.neg = false;
         return FlagCheck::Succeed;
     }
 
-    if r#type == FLAG_DISALLOW {
+    if r#type == FlagType::DISALLOW {
         let flist = h.flag_state.get_mut(name).expect("flag not registered");
         if flist.value.is_none() {
             return FlagCheck::Succeed;
@@ -1914,21 +1918,21 @@ pub fn apply_check_flag(
         return FlagCheck::Fail;
     }
 
-    if r#type == FLAG_NEGATIVE {
+    if r#type == FlagType::NEGATIVE {
         let flist = h.flag_state.get_mut(name).expect("flag not registered");
         flist.value = value.map(SmolStr::from);
         flist.neg = true;
         return FlagCheck::Succeed;
     }
 
-    if r#type == FLAG_POSITIVE {
+    if r#type == FlagType::POSITIVE {
         let flist = h.flag_state.get_mut(name).expect("flag not registered");
         flist.value = value.map(SmolStr::from);
         flist.neg = false;
         return FlagCheck::Succeed;
     }
 
-    if r#type == FLAG_REQUIRE {
+    if r#type == FlagType::REQUIRE {
         let flist = h.flag_state.get_mut(name).expect("flag not registered");
         if value.is_none() {
             if flist.value.is_none() {
@@ -1951,7 +1955,7 @@ pub fn apply_check_flag(
         }
     }
 
-    if r#type == FLAG_EQUAL {
+    if r#type == FlagType::EQUAL {
         // value names another feature; find flist2.
         let (f2_present, f2_value, f2_neg) = {
             let f2 = h.flag_state.get(value.unwrap_or(""));
@@ -1984,7 +1988,7 @@ pub fn apply_check_flag(
 
     tracing::warn!(
         "Don't know what do with flag [{}][{}][{}]",
-        r#type,
+        r#type.bits(),
         name,
         value.unwrap_or("")
     );
@@ -2489,53 +2493,53 @@ mod tests {
         let mut h = apply_init(&net);
         // U.F.1 on an unset feature stores the value and succeeds.
         assert_eq!(
-            apply_check_flag(&mut h, FLAG_UNIFY, Some("F"), Some("1")),
+            apply_check_flag(&mut h, FlagType::UNIFY, Some("F"), Some("1")),
             FlagCheck::Succeed
         );
         // same value unifies; different value fails.
         assert_eq!(
-            apply_check_flag(&mut h, FLAG_UNIFY, Some("F"), Some("1")),
+            apply_check_flag(&mut h, FlagType::UNIFY, Some("F"), Some("1")),
             FlagCheck::Succeed
         );
         assert_eq!(
-            apply_check_flag(&mut h, FLAG_UNIFY, Some("F"), Some("2")),
+            apply_check_flag(&mut h, FlagType::UNIFY, Some("F"), Some("2")),
             FlagCheck::Fail
         );
         // R.F requires a value present -> succeed while set.
         assert_eq!(
-            apply_check_flag(&mut h, FLAG_REQUIRE, Some("F"), None),
+            apply_check_flag(&mut h, FlagType::REQUIRE, Some("F"), None),
             FlagCheck::Succeed
         );
         // D.F.1 disallows the currently-set value -> fail; a different value ok.
         assert_eq!(
-            apply_check_flag(&mut h, FLAG_DISALLOW, Some("F"), Some("1")),
+            apply_check_flag(&mut h, FlagType::DISALLOW, Some("F"), Some("1")),
             FlagCheck::Fail
         );
         assert_eq!(
-            apply_check_flag(&mut h, FLAG_DISALLOW, Some("F"), Some("9")),
+            apply_check_flag(&mut h, FlagType::DISALLOW, Some("F"), Some("9")),
             FlagCheck::Succeed
         );
         // C.F clears the value -> R.F now fails (nothing set).
         assert_eq!(
-            apply_check_flag(&mut h, FLAG_CLEAR, Some("F"), None),
+            apply_check_flag(&mut h, FlagType::CLEAR, Some("F"), None),
             FlagCheck::Succeed
         );
         assert_eq!(
-            apply_check_flag(&mut h, FLAG_REQUIRE, Some("F"), None),
+            apply_check_flag(&mut h, FlagType::REQUIRE, Some("F"), None),
             FlagCheck::Fail
         );
         // P.F.5 sets; clear_flags resets, so REQUIRE fails again.
         assert_eq!(
-            apply_check_flag(&mut h, FLAG_POSITIVE, Some("F"), Some("5")),
+            apply_check_flag(&mut h, FlagType::POSITIVE, Some("F"), Some("5")),
             FlagCheck::Succeed
         );
         assert_eq!(
-            apply_check_flag(&mut h, FLAG_REQUIRE, Some("F"), None),
+            apply_check_flag(&mut h, FlagType::REQUIRE, Some("F"), None),
             FlagCheck::Succeed
         );
         apply_clear_flags(&mut h);
         assert_eq!(
-            apply_check_flag(&mut h, FLAG_REQUIRE, Some("F"), None),
+            apply_check_flag(&mut h, FlagType::REQUIRE, Some("F"), None),
             FlagCheck::Fail
         );
     }
@@ -2548,7 +2552,7 @@ mod tests {
         // panics via .expect (unreachable in practice).
         let net = parse(r#"[a "@U.F.1@"]"#);
         let mut h = apply_init(&net);
-        apply_check_flag(&mut h, FLAG_UNIFY, Some("NOPE"), Some("1"));
+        apply_check_flag(&mut h, FlagType::UNIFY, Some("NOPE"), Some("1"));
     }
 
     // [spec:foma:sem:apply.apply-add-flag-fn/test]

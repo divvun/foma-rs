@@ -67,14 +67,20 @@ bitflags! {
     }
 }
 
-/* Flag types */
-pub const FLAG_UNIFY: i32 = 1;
-pub const FLAG_CLEAR: i32 = 2;
-pub const FLAG_DISALLOW: i32 = 4;
-pub const FLAG_NEGATIVE: i32 = 8;
-pub const FLAG_POSITIVE: i32 = 16;
-pub const FLAG_REQUIRE: i32 = 32;
-pub const FLAG_EQUAL: i32 = 64;
+bitflags! {
+    /// Flag-diacritic types (C: `FLAG_*` on `flag_list.type` / `flag_lookup.type`).
+    /// Each flag carries exactly one type; `empty()` marks a non-flag symbol.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    pub struct FlagType: i32 {
+        const UNIFY = 1;
+        const CLEAR = 2;
+        const DISALLOW = 4;
+        const NEGATIVE = 8;
+        const POSITIVE = 16;
+        const REQUIRE = 32;
+        const EQUAL = 64;
+    }
+}
 
 pub const NO: i32 = 0;
 pub const YES: i32 = 1;
@@ -573,7 +579,7 @@ pub struct FlagState {
 // [spec:foma:def:fomalibconf.apply-handle.flag-lookup]
 #[derive(Debug, Clone)]
 pub struct FlagLookup {
-    pub r#type: i32,
+    pub r#type: FlagType,
     pub name: Option<SmolStr>,
     pub value: Option<SmolStr>,
 }

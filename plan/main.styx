@@ -1303,6 +1303,13 @@ children (
                         kind @note
                         text "The one legitimate integer use that forces bitflags (not a plain enum): the set-membership test `(fl.type & (FLAG_UNIFY|FLAG_REQUIRE|FLAG_DISALLOW|FLAG_EQUAL)) != 0` at flags.rs:104 and the twin `(flag_lookup[sym].type & (FLAG_UNIFY|FLAG_CLEAR|FLAG_POSITIVE|FLAG_NEGATIVE)) != 0` at apply.rs:997/1119. FLAG_* are already power-of-two (types.rs:57-63: UNIFY=1,CLEAR=2,DISALLOW=4,NEGATIVE=8,POSITIVE=16,REQUIRE=32,EQUAL=64). Model as bitflags FlagType so `.intersects(...)` reproduces the &-test verbatim; flag_get_type returns Option<FlagType> (its 0 = \"not a flag\" case, keyed on at apply.rs:1377 etc.) or a FlagType with a distinguished empty/none. Thread through Flags.type, FlagLookup.type, flag_type_to_char/flag_create_symbol/flag_build/apply_check_flag params, and flag_build's Row decision-table columns."
                     }
+
+                    {
+                        at 2026-07-13T09:39:34.270367Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan_start)"
+                    }
                 )
             }
 
