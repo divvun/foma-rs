@@ -1388,6 +1388,14 @@ children (
                 id w10-structural-smells
                 title "Structural smells: decompose fsm_merge_sigma (extract expand_unknowns(net,mergesigma,presence) to collapse the two ~110-line copy-paste blocks, halving CC-123); guard fsm_left_rewr against a degenerate rewr net (derived.rs:1849 reads states[0].in/out with no first-arc guard → silent wrong machine)"
                 priority 2
+                log (
+                    {
+                        at 2026-07-13T12:49:00.237291Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan_start)"
+                    }
+                )
             }
 
             {

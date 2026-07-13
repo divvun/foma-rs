@@ -1847,6 +1847,14 @@ pub fn fsm_left_rewr(opts: &FomaOptions, net: Box<Fsm>, rewr: Box<Fsm>) -> Box<F
     let mut net = net;
     let mut rewr = rewr;
     fsm_merge_sigma(opts, &mut net, &mut rewr);
+    /* A well-formed rewrite net's first line is the A:B relabel arc. A degenerate
+    rewr with no first arc (an empty line table, or a lone final state whose
+    in/out are -1) has nothing to rewrite with — return net unchanged instead of
+    relabelling on a sentinel symbol and silently building a wrong machine (C read
+    states[0] unconditionally). */
+    if rewr.states.is_empty() || rewr.states[0].r#in < 0 || rewr.states[0].out < 0 {
+        return net;
+    }
     let relabelin = rewr.states[0].r#in as i32;
     let relabelout = rewr.states[0].out as i32;
 

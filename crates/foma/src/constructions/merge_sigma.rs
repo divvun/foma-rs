@@ -75,6 +75,236 @@ pub fn copy_mergesigma(mergesigma: Option<&Mergesigma>) -> Vec<Sigma> {
     new_sigma
 }
 
+/// Expand `?`/`@`/`?:x`/`x:?`/`?:?` arcs in `net` into explicit arcs over the
+/// symbols the *other* net contributed — the mergesigma nodes carrying
+/// `presence` (2 when expanding net1, 1 when expanding net2). Shared body of the
+/// two fsm_merge_sigma expansion passes, which C kept as a copy-paste pair.
+fn expand_unknowns(net: &mut Fsm, start_mergesigma: &Mergesigma, presence: u8) {
+    let net_lines = find_arccount(&net.states);
+    let mut net_unk = 0;
+    let mut ms = Some(start_mergesigma);
+    while let Some(m) = ms {
+        if m.presence == presence {
+            net_unk += 1;
+        }
+        ms = m.next.as_deref();
+    }
+
+    let mut net_adds = 0;
+    let mut i = 0usize;
+    while net.states[i].state_no != -1 {
+        let (line_in, line_out) = (net.states[i].r#in as i32, net.states[i].out as i32);
+        if line_in == IDENTITY {
+            net_adds += net_unk;
+        }
+        if line_in == UNKNOWN && line_out != UNKNOWN {
+            net_adds += net_unk;
+        }
+        if line_out == UNKNOWN && line_in != UNKNOWN {
+            net_adds += net_unk;
+        }
+        if line_in == UNKNOWN && line_out == UNKNOWN {
+            net_adds += net_unk * net_unk - net_unk + 2 * net_unk;
+        }
+        i += 1;
+    }
+
+    /* C: malloc'd (uninitialized); zeroed lines here */
+    let mut new_state: Vec<FsmState> = vec![
+        FsmState {
+            state_no: 0,
+            r#in: 0,
+            out: 0,
+            target: 0,
+            final_state: 0,
+            start_state: 0,
+        };
+        (net_adds + net_lines + 1) as usize
+    ];
+    let mut j: i32 = 0;
+    let mut i = 0usize;
+    while net.states[i].state_no != -1 {
+        let state_no = net.states[i].state_no;
+        let line_in = net.states[i].r#in as i32;
+        let line_out = net.states[i].out as i32;
+        let target = net.states[i].target;
+        let final_state = net.states[i].final_state as i32;
+        let start_state = net.states[i].start_state as i32;
+
+        if line_in == IDENTITY {
+            add_fsm_arc(
+                &mut new_state,
+                j,
+                state_no,
+                line_in,
+                line_out,
+                target,
+                final_state,
+                start_state,
+            );
+            j += 1;
+            let mut ms = Some(start_mergesigma);
+            while let Some(m) = ms {
+                if m.presence == presence && m.number > IDENTITY {
+                    add_fsm_arc(
+                        &mut new_state,
+                        j,
+                        state_no,
+                        m.number,
+                        m.number,
+                        target,
+                        final_state,
+                        start_state,
+                    );
+                    j += 1;
+                }
+                ms = m.next.as_deref();
+            }
+        }
+
+        if line_in == UNKNOWN && line_out != UNKNOWN {
+            add_fsm_arc(
+                &mut new_state,
+                j,
+                state_no,
+                line_in,
+                line_out,
+                target,
+                final_state,
+                start_state,
+            );
+            j += 1;
+            let mut ms = Some(start_mergesigma);
+            while let Some(m) = ms {
+                if m.presence == presence && m.number > IDENTITY {
+                    add_fsm_arc(
+                        &mut new_state,
+                        j,
+                        state_no,
+                        m.number,
+                        line_out,
+                        target,
+                        final_state,
+                        start_state,
+                    );
+                    j += 1;
+                }
+                ms = m.next.as_deref();
+            }
+        }
+
+        if line_in != UNKNOWN && line_out == UNKNOWN {
+            add_fsm_arc(
+                &mut new_state,
+                j,
+                state_no,
+                line_in,
+                line_out,
+                target,
+                final_state,
+                start_state,
+            );
+            j += 1;
+            let mut ms = Some(start_mergesigma);
+            while let Some(m) = ms {
+                if m.presence == presence && m.number > IDENTITY {
+                    add_fsm_arc(
+                        &mut new_state,
+                        j,
+                        state_no,
+                        line_in,
+                        m.number,
+                        target,
+                        final_state,
+                        start_state,
+                    );
+                    j += 1;
+                }
+                ms = m.next.as_deref();
+            }
+        }
+
+        /* Replace ?:? with ?:[all unknowns] [all unknowns]:? and [all unknowns]:[all unknowns] where a != b */
+        if line_in == UNKNOWN && line_out == UNKNOWN {
+            add_fsm_arc(
+                &mut new_state,
+                j,
+                state_no,
+                line_in,
+                line_out,
+                target,
+                final_state,
+                start_state,
+            );
+            j += 1;
+            let mut ms2 = Some(start_mergesigma);
+            while let Some(m2) = ms2 {
+                let mut ms = Some(start_mergesigma);
+                while let Some(m) = ms {
+                    if ((m.presence == presence
+                        && m2.presence == presence
+                        && m.number > IDENTITY
+                        && m2.number > IDENTITY)
+                        || (m.number == UNKNOWN && m2.number > IDENTITY && m2.presence == presence)
+                        || (m2.number == UNKNOWN && m.number > IDENTITY && m.presence == presence))
+                        && m.number != m2.number
+                    {
+                        add_fsm_arc(
+                            &mut new_state,
+                            j,
+                            state_no,
+                            m.number,
+                            m2.number,
+                            target,
+                            final_state,
+                            start_state,
+                        );
+                        j += 1;
+                    }
+                    ms = m.next.as_deref();
+                }
+                ms2 = m2.next.as_deref();
+            }
+        }
+
+        /* Simply copy arcs that are not IDENTITY or UNKNOWN */
+        if (line_in > IDENTITY || line_in == EPSILON)
+            && (line_out > IDENTITY || line_out == EPSILON)
+        {
+            add_fsm_arc(
+                &mut new_state,
+                j,
+                state_no,
+                line_in,
+                line_out,
+                target,
+                final_state,
+                start_state,
+            );
+            j += 1;
+        }
+
+        if line_in == -1 {
+            add_fsm_arc(
+                &mut new_state,
+                j,
+                state_no,
+                line_in,
+                line_out,
+                target,
+                final_state,
+                start_state,
+            );
+            j += 1;
+        }
+        i += 1;
+    }
+
+    add_fsm_arc(&mut new_state, j, -1, -1, -1, -1, -1, -1);
+    /* free(net->states); net->states = new_state */
+    net.states = new_state;
+}
+
 // [spec:foma:def:constructions.fsm-merge-sigma-fn]
 // [spec:foma:sem:constructions.fsm-merge-sigma-fn]
 // [spec:foma:def:fomalib.fsm-merge-sigma-fn]
@@ -85,7 +315,6 @@ pub fn fsm_merge_sigma(opts: &FomaOptions, net1: &mut Fsm, net2: &mut Fsm) {
     let mut equal = 1;
     let mut unknown_1 = 0;
     let mut unknown_2 = 0;
-    let mut net_unk = 0;
 
     if !opts.skip_word_boundary_marker {
         let in_1 = sigma_contains(".#.", &net1.sigma);
@@ -244,456 +473,11 @@ pub fn fsm_merge_sigma(opts: &FomaOptions, net1: &mut Fsm, net2: &mut Fsm) {
     /* Expand on ?, ?:x, y:? */
 
     if unknown_1 != 0 && equal == 0 {
-        /* Expand net 1 */
-        let net_lines = find_arccount(&net1.states);
-        /* C: net_unk carries its function-entry 0 here (only net 2's
-        branch re-zeroes it) */
-        let mut ms = Some(&*start_mergesigma);
-        while let Some(m) = ms {
-            if m.presence == 2 {
-                net_unk += 1;
-            }
-            ms = m.next.as_deref();
-        }
-        let mut net_adds = 0;
-        let mut i = 0usize;
-        while net1.states[i].state_no != -1 {
-            let (line_in, line_out) = (net1.states[i].r#in as i32, net1.states[i].out as i32);
-            if line_in == IDENTITY {
-                net_adds += net_unk;
-            }
-            if line_in == UNKNOWN && line_out != UNKNOWN {
-                net_adds += net_unk;
-            }
-            if line_out == UNKNOWN && line_in != UNKNOWN {
-                net_adds += net_unk;
-            }
-            if line_in == UNKNOWN && line_out == UNKNOWN {
-                net_adds += net_unk * net_unk - net_unk + 2 * net_unk;
-            }
-            i += 1;
-        }
-
-        /* C: malloc'd (uninitialized); zeroed lines here */
-        let mut new_1_state: Vec<FsmState> = vec![
-            FsmState {
-                state_no: 0,
-                r#in: 0,
-                out: 0,
-                target: 0,
-                final_state: 0,
-                start_state: 0,
-            };
-            (net_adds + net_lines + 1) as usize
-        ];
-        let mut j: i32 = 0;
-        let mut i = 0usize;
-        while net1.states[i].state_no != -1 {
-            let state_no = net1.states[i].state_no;
-            let line_in = net1.states[i].r#in as i32;
-            let line_out = net1.states[i].out as i32;
-            let target = net1.states[i].target;
-            let final_state = net1.states[i].final_state as i32;
-            let start_state = net1.states[i].start_state as i32;
-
-            if line_in == IDENTITY {
-                add_fsm_arc(
-                    &mut new_1_state,
-                    j,
-                    state_no,
-                    line_in,
-                    line_out,
-                    target,
-                    final_state,
-                    start_state,
-                );
-                j += 1;
-                let mut ms = Some(&*start_mergesigma);
-                while let Some(m) = ms {
-                    if m.presence == 2 && m.number > IDENTITY {
-                        add_fsm_arc(
-                            &mut new_1_state,
-                            j,
-                            state_no,
-                            m.number,
-                            m.number,
-                            target,
-                            final_state,
-                            start_state,
-                        );
-                        j += 1;
-                    }
-                    ms = m.next.as_deref();
-                }
-            }
-
-            if line_in == UNKNOWN && line_out != UNKNOWN {
-                add_fsm_arc(
-                    &mut new_1_state,
-                    j,
-                    state_no,
-                    line_in,
-                    line_out,
-                    target,
-                    final_state,
-                    start_state,
-                );
-                j += 1;
-                let mut ms = Some(&*start_mergesigma);
-                while let Some(m) = ms {
-                    if m.presence == 2 && m.number > IDENTITY {
-                        add_fsm_arc(
-                            &mut new_1_state,
-                            j,
-                            state_no,
-                            m.number,
-                            line_out,
-                            target,
-                            final_state,
-                            start_state,
-                        );
-                        j += 1;
-                    }
-                    ms = m.next.as_deref();
-                }
-            }
-
-            if line_in != UNKNOWN && line_out == UNKNOWN {
-                add_fsm_arc(
-                    &mut new_1_state,
-                    j,
-                    state_no,
-                    line_in,
-                    line_out,
-                    target,
-                    final_state,
-                    start_state,
-                );
-                j += 1;
-                let mut ms = Some(&*start_mergesigma);
-                while let Some(m) = ms {
-                    if m.presence == 2 && m.number > IDENTITY {
-                        add_fsm_arc(
-                            &mut new_1_state,
-                            j,
-                            state_no,
-                            line_in,
-                            m.number,
-                            target,
-                            final_state,
-                            start_state,
-                        );
-                        j += 1;
-                    }
-                    ms = m.next.as_deref();
-                }
-            }
-
-            /* Replace ?:? with ?:[all unknowns] [all unknowns]:? and [all unknowns]:[all unknowns] where a != b */
-            if line_in == UNKNOWN && line_out == UNKNOWN {
-                add_fsm_arc(
-                    &mut new_1_state,
-                    j,
-                    state_no,
-                    line_in,
-                    line_out,
-                    target,
-                    final_state,
-                    start_state,
-                );
-                j += 1;
-                let mut ms2 = Some(&*start_mergesigma);
-                while let Some(m2) = ms2 {
-                    let mut ms = Some(&*start_mergesigma);
-                    while let Some(m) = ms {
-                        if ((m.presence == 2
-                            && m2.presence == 2
-                            && m.number > IDENTITY
-                            && m2.number > IDENTITY)
-                            || (m.number == UNKNOWN && m2.number > IDENTITY && m2.presence == 2)
-                            || (m2.number == UNKNOWN && m.number > IDENTITY && m.presence == 2))
-                            && m.number != m2.number
-                        {
-                            add_fsm_arc(
-                                &mut new_1_state,
-                                j,
-                                state_no,
-                                m.number,
-                                m2.number,
-                                target,
-                                final_state,
-                                start_state,
-                            );
-                            j += 1;
-                        }
-                        ms = m.next.as_deref();
-                    }
-                    ms2 = m2.next.as_deref();
-                }
-            }
-
-            /* Simply copy arcs that are not IDENTITY or UNKNOWN */
-            if (line_in > IDENTITY || line_in == EPSILON)
-                && (line_out > IDENTITY || line_out == EPSILON)
-            {
-                add_fsm_arc(
-                    &mut new_1_state,
-                    j,
-                    state_no,
-                    line_in,
-                    line_out,
-                    target,
-                    final_state,
-                    start_state,
-                );
-                j += 1;
-            }
-
-            if line_in == -1 {
-                add_fsm_arc(
-                    &mut new_1_state,
-                    j,
-                    state_no,
-                    line_in,
-                    line_out,
-                    target,
-                    final_state,
-                    start_state,
-                );
-                j += 1;
-            }
-            i += 1;
-        }
-
-        add_fsm_arc(&mut new_1_state, j, -1, -1, -1, -1, -1, -1);
-        /* free(net1->states); net1->states = new_1_state */
-        net1.states = new_1_state;
+        expand_unknowns(net1, &start_mergesigma, 2);
     }
 
     if unknown_2 != 0 && equal == 0 {
-        /* Expand net 2 */
-        let net_lines = find_arccount(&net2.states);
-        net_unk = 0;
-        let mut ms = Some(&*start_mergesigma);
-        while let Some(m) = ms {
-            if m.presence == 1 {
-                net_unk += 1;
-            }
-            ms = m.next.as_deref();
-        }
-
-        let mut net_adds = 0;
-        let mut i = 0usize;
-        while net2.states[i].state_no != -1 {
-            let (line_in, line_out) = (net2.states[i].r#in as i32, net2.states[i].out as i32);
-            if line_in == IDENTITY {
-                net_adds += net_unk;
-            }
-            if line_in == UNKNOWN && line_out != UNKNOWN {
-                net_adds += net_unk;
-            }
-            if line_out == UNKNOWN && line_in != UNKNOWN {
-                net_adds += net_unk;
-            }
-            if line_in == UNKNOWN && line_out == UNKNOWN {
-                net_adds += net_unk * net_unk - net_unk + 2 * net_unk;
-            }
-            i += 1;
-        }
-
-        /* We need net_add new lines in fsm_state */
-        let mut new_2_state: Vec<FsmState> = vec![
-            FsmState {
-                state_no: 0,
-                r#in: 0,
-                out: 0,
-                target: 0,
-                final_state: 0,
-                start_state: 0,
-            };
-            (net_adds + net_lines + 1) as usize
-        ];
-        let mut j: i32 = 0;
-        let mut i = 0usize;
-        while net2.states[i].state_no != -1 {
-            let state_no = net2.states[i].state_no;
-            let line_in = net2.states[i].r#in as i32;
-            let line_out = net2.states[i].out as i32;
-            let target = net2.states[i].target;
-            let final_state = net2.states[i].final_state as i32;
-            let start_state = net2.states[i].start_state as i32;
-
-            if line_in == IDENTITY {
-                add_fsm_arc(
-                    &mut new_2_state,
-                    j,
-                    state_no,
-                    line_in,
-                    line_out,
-                    target,
-                    final_state,
-                    start_state,
-                );
-                j += 1;
-                let mut ms = Some(&*start_mergesigma);
-                while let Some(m) = ms {
-                    if m.presence == 1 && m.number > IDENTITY {
-                        add_fsm_arc(
-                            &mut new_2_state,
-                            j,
-                            state_no,
-                            m.number,
-                            m.number,
-                            target,
-                            final_state,
-                            start_state,
-                        );
-                        j += 1;
-                    }
-                    ms = m.next.as_deref();
-                }
-            }
-
-            if line_in == UNKNOWN && line_out != UNKNOWN {
-                add_fsm_arc(
-                    &mut new_2_state,
-                    j,
-                    state_no,
-                    line_in,
-                    line_out,
-                    target,
-                    final_state,
-                    start_state,
-                );
-                j += 1;
-                let mut ms = Some(&*start_mergesigma);
-                while let Some(m) = ms {
-                    if m.presence == 1 && m.number > IDENTITY {
-                        add_fsm_arc(
-                            &mut new_2_state,
-                            j,
-                            state_no,
-                            m.number,
-                            line_out,
-                            target,
-                            final_state,
-                            start_state,
-                        );
-                        j += 1;
-                    }
-                    ms = m.next.as_deref();
-                }
-            }
-
-            if line_in != UNKNOWN && line_out == UNKNOWN {
-                add_fsm_arc(
-                    &mut new_2_state,
-                    j,
-                    state_no,
-                    line_in,
-                    line_out,
-                    target,
-                    final_state,
-                    start_state,
-                );
-                j += 1;
-                let mut ms = Some(&*start_mergesigma);
-                while let Some(m) = ms {
-                    if m.presence == 1 && m.number > IDENTITY {
-                        add_fsm_arc(
-                            &mut new_2_state,
-                            j,
-                            state_no,
-                            line_in,
-                            m.number,
-                            target,
-                            final_state,
-                            start_state,
-                        );
-                        j += 1;
-                    }
-                    ms = m.next.as_deref();
-                }
-            }
-
-            if line_in == UNKNOWN && line_out == UNKNOWN {
-                add_fsm_arc(
-                    &mut new_2_state,
-                    j,
-                    state_no,
-                    line_in,
-                    line_out,
-                    target,
-                    final_state,
-                    start_state,
-                );
-                j += 1;
-                let mut ms2 = Some(&*start_mergesigma);
-                while let Some(m2) = ms2 {
-                    let mut ms = Some(&*start_mergesigma);
-                    while let Some(m) = ms {
-                        if ((m.presence == 1
-                            && m2.presence == 1
-                            && m.number > IDENTITY
-                            && m2.number > IDENTITY)
-                            || (m.number == UNKNOWN && m2.number > IDENTITY && m2.presence == 1)
-                            || (m2.number == UNKNOWN && m.number > IDENTITY && m.presence == 1))
-                            && m.number != m2.number
-                        {
-                            add_fsm_arc(
-                                &mut new_2_state,
-                                j,
-                                state_no,
-                                m.number,
-                                m2.number,
-                                target,
-                                final_state,
-                                start_state,
-                            );
-                            j += 1;
-                        }
-                        ms = m.next.as_deref();
-                    }
-                    ms2 = m2.next.as_deref();
-                }
-            }
-
-            /* Simply copy arcs that are not IDENTITY or UNKNOWN */
-            if (line_in > IDENTITY || line_in == EPSILON)
-                && (line_out > IDENTITY || line_out == EPSILON)
-            {
-                add_fsm_arc(
-                    &mut new_2_state,
-                    j,
-                    state_no,
-                    line_in,
-                    line_out,
-                    target,
-                    final_state,
-                    start_state,
-                );
-                j += 1;
-            }
-
-            if line_in == -1 {
-                add_fsm_arc(
-                    &mut new_2_state,
-                    j,
-                    state_no,
-                    line_in,
-                    line_out,
-                    target,
-                    final_state,
-                    start_state,
-                );
-                j += 1;
-            }
-            i += 1;
-        }
-
-        add_fsm_arc(&mut new_2_state, j, -1, -1, -1, -1, -1, -1);
-        /* free(net2->states); net2->states = new_2_state */
-        net2.states = new_2_state;
+        expand_unknowns(net2, &start_mergesigma, 1);
     }
     /* free(mapping_1); free(mapping_2) */
     drop(mapping_1);
