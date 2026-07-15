@@ -120,5 +120,5 @@ assertions (
     {id w10-structural-smells, kind @complete, author "brendan@necessary.nu", at 2026-07-13T12:56:15.428811Z}
     {id w10-dead-cruft, kind @complete, author "brendan@necessary.nu", at 2026-07-13T14:40:40.80419Z}
     {id w10-i32-option-sentinels, kind @complete, author "brendan@necessary.nu", at 2026-07-13T14:44:28.166591Z}
-    {id w11-build-perf, kind @doing, author "brendan@necessary.nu", at 2026-07-15T20:50:19.590759Z}
+    {id w11-build-perf, kind @complete, author "brendan@necessary.nu", at 2026-07-15T20:52:23.589799Z}
 )

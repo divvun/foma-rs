@@ -1467,6 +1467,13 @@ children (
                 kind @status
                 text "Todo → Doing (nplan_start)"
             }
+
+            {
+                at 2026-07-15T20:52:23.589799Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Doing → Done (nplan_complete)"
+            }
         )
     }
 )
