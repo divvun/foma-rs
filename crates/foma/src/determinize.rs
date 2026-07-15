@@ -53,7 +53,7 @@ pub const NHASH_LOAD_LIMIT: i32 = 2;
 nodes occupy indices 0..num_states (targets always reference head nodes, so
 a target index is the target's state number); chain nodes are appended
 after. Chain nodes' mark is malloc garbage in C and never read — 0 here. */
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct EClosureMemo {
     pub state: i32,
     pub mark: i32,
@@ -80,7 +80,7 @@ pub struct NhashList {
 }
 
 // [spec:foma:def:determinize.t-memo]
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct TMemo {
     pub finalstart: u8,
     pub size: u32,
@@ -97,7 +97,7 @@ pub struct TransList {
 // [spec:foma:def:determinize.trans-array]
 /* transitions is the C's struct trans_list * interior pointer into the
 trans_list_determinize pool — here the base offset of this state's slice. */
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct TransArray {
     pub transitions: usize,
     pub size: u32,

@@ -1456,4 +1456,17 @@ children (
             }
         )
     }
+
+    {
+        id w11-build-perf
+        title "Build-path performance: profile FST construction and cut the hot spots (merge_sigma identical-alphabet fast-path, Copy line-table/determinize structs). Behaviour-preserving; gated by the full test suite + the build_bench harness."
+        log (
+            {
+                at 2026-07-15T20:50:19.590759Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Doing (nplan_start)"
+            }
+        )
+    }
 )

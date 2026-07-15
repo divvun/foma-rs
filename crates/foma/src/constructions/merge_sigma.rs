@@ -310,6 +310,16 @@ fn expand_unknowns(net: &mut Fsm, start_mergesigma: &Mergesigma, presence: u8) {
 // [spec:foma:def:fomalib.fsm-merge-sigma-fn]
 // [spec:foma:sem:fomalib.fsm-merge-sigma-fn]
 pub fn fsm_merge_sigma(opts: &FomaOptions, net1: &mut Fsm, net2: &mut Fsm) {
+    // Fast path: identical alphabets need no remapping, sigma rebuild, or
+    // unknown-expansion — the full merge below would reproduce the same sigma
+    // with an identity arc mapping. (DEVIATION from C, which always rebuilds;
+    // observably identical, and both sigmas are kept sorted so a positional
+    // compare is exact.) This is the common case when combining machines over a
+    // shared alphabet (e.g. unioning many words into a lexicon).
+    if net1.sigma == net2.sigma {
+        return;
+    }
+
     let mut end_1 = 0;
     let mut end_2 = 0;
     let mut equal = 1;
@@ -461,8 +471,9 @@ pub fn fsm_merge_sigma(opts: &FomaOptions, net1: &mut Fsm, net2: &mut Fsm) {
 
     /* Copy mergesigma to net1, net2 */
 
+    /* Both nets get the same merged alphabet; build it once and clone. */
     let new_sigma_1 = copy_mergesigma(Some(&start_mergesigma));
-    let new_sigma_2 = copy_mergesigma(Some(&start_mergesigma));
+    let new_sigma_2 = new_sigma_1.clone();
 
     fsm_sigma_destroy(core::mem::take(&mut net1.sigma));
     fsm_sigma_destroy(core::mem::take(&mut net2.sigma));

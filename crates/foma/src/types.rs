@@ -251,7 +251,7 @@ pub struct Medlookup {
 
 /// Array of states (one line of the fsm line table)
 // [spec:foma:def:fomalib.fsm-state]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct FsmState {
     /// State number
     pub state_no: i32,
@@ -301,7 +301,7 @@ pub struct RewriteSet {
 /// One sigma alphabet entry; number < IDENTITY is reserved for special
 /// symbols. The alphabet as a whole is a `Vec<Sigma>` in insertion order.
 // [spec:foma:def:fomalib.sigma+1]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sigma {
     pub number: i32,
     pub symbol: SmolStr,
