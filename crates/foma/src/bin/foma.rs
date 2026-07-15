@@ -245,8 +245,7 @@ fn xprintf(string: &str) {
 // time; appends the line to readline's interactive history.
 // DEVIATION from C: readline is not linked; this is a no-op stand-in. A real
 // port would wire this to an equivalent line-history facility.
-#[allow(unused_variables)]
-fn add_history(line: &str) -> i32 {
+fn add_history(_line: &str) -> i32 {
     0
 }
 
@@ -338,8 +337,7 @@ fn my_completion(text: &str, start: usize, end: usize) -> Vec<String> {
 // strdup(name + smatch) for each prefix hit; resets its static cursors on
 // state == 0. DEVIATION from C (readline not linked): rl_line_buffer/rl_point
 // are the stand-in thread_locals set by my_completion.
-#[allow(unused_variables)]
-fn my_generator(text: &str, state: i32) -> Option<String> {
+fn my_generator(_text: &str, state: i32) -> Option<String> {
     let text = RL_LINE_BUFFER.with(|b| b.borrow().clone());
     if state == 0 {
         GEN_LIST_INDEX.with(|c| c.set(0));
