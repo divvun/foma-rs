@@ -66,7 +66,7 @@ pub fn fsm_get_library_version_string() -> String {
 pub fn fsm_set_option(opts: &mut FomaOptions, option: u64, value: &bool) -> bool {
     /* C: switch (option) — value is a void * dereferenced as _Bool * for
     the matching option (never NULL-checked; &bool here) */
-    if option == crate::types::FSM_OPTIONS::FSMO_SKIP_WORD_BOUNDARY_MARKER as u64 {
+    if option == crate::types::FsmOptions::SkipWordBoundaryMarker as u64 {
         opts.skip_word_boundary_marker = *value;
         return true;
     }
@@ -81,7 +81,7 @@ pub fn fsm_set_option(opts: &mut FomaOptions, option: u64, value: &bool) -> bool
 // safe Rust returns the current value instead — None ↔ NULL for unknown
 // options)
 pub fn fsm_get_option(opts: &FomaOptions, option: u64) -> Option<bool> {
-    if option == crate::types::FSM_OPTIONS::FSMO_SKIP_WORD_BOUNDARY_MARKER as u64 {
+    if option == crate::types::FsmOptions::SkipWordBoundaryMarker as u64 {
         return Some(opts.skip_word_boundary_marker);
     }
     None
@@ -1541,8 +1541,8 @@ mod tests {
     // [spec:foma:sem:fomalib.fsm-get-option-fn/test]
     #[test]
     fn set_and_get_option() {
-        let skip = crate::types::FSM_OPTIONS::FSMO_SKIP_WORD_BOUNDARY_MARKER as u64;
-        let unknown = crate::types::FSM_OPTIONS::FSMO_NUM_OPTIONS as u64;
+        let skip = crate::types::FsmOptions::SkipWordBoundaryMarker as u64;
+        let unknown = crate::types::FsmOptions::NumOptions as u64;
         let mut opts = FomaOptions::default();
 
         // set known option -> true, then get reflects the stored value

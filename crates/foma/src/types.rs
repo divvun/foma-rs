@@ -308,13 +308,12 @@ pub struct Sigma {
 }
 
 // [spec:foma:def:fomalib.fsm-options]
-// C: typedef enum { ... } FSM_OPTIONS; — names kept literally.
-#[allow(non_camel_case_types)]
+// C: typedef enum { FSMO_SKIP_WORD_BOUNDARY_MARKER, FSMO_NUM_OPTIONS } FSM_OPTIONS;
 #[derive(Debug, Clone, Copy)]
-pub enum FSM_OPTIONS {
+pub enum FsmOptions {
     /// _Bool
-    FSMO_SKIP_WORD_BOUNDARY_MARKER,
-    FSMO_NUM_OPTIONS,
+    SkipWordBoundaryMarker,
+    NumOptions,
 }
 
 /* String hashing */
