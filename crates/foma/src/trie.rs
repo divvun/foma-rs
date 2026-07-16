@@ -23,8 +23,18 @@ pub const TRIE_STATESIZE: u32 = 32768;
 // [spec:foma:def:fomalib.fsm-trie-init-fn]
 // [spec:foma:sem:fomalib.fsm-trie-init-fn]
 pub fn fsm_trie_init() -> FsmTrieHandle {
+    fsm_trie_init_sized(THASH_TABLESIZE)
+}
+
+/// `fsm_trie_init` with a caller-chosen bucket count. The hash-table size only
+/// affects collision-chain lengths and the arc-emission order of
+/// `fsm_trie_done` — never the accepted language — so a caller that minimizes
+/// the result (e.g. the regex union→DAWG fast path) can right-size it to the
+/// word set instead of paying the 1M-bucket default's zero-fill, which bulk
+/// `read text` amortizes but a small regex union does not.
+pub fn fsm_trie_init_sized(hash_tablesize: u32) -> FsmTrieHandle {
     FsmTrieHandle {
-        /* calloc(THASH_TABLESIZE, sizeof(struct trie_hash)) — zeroed heads */
+        /* calloc(hash_tablesize, sizeof(struct trie_hash)) — zeroed heads */
         trie_hash: vec![
             TrieHash {
                 insym: None,
@@ -33,7 +43,7 @@ pub fn fsm_trie_init() -> FsmTrieHandle {
                 targetstate: 0,
                 next: None,
             };
-            THASH_TABLESIZE as usize
+            hash_tablesize.max(1) as usize
         ],
         /* calloc(TRIE_STATESIZE, sizeof(struct trie_states)) — all non-final */
         trie_states: vec![TrieStates { is_final: false }; TRIE_STATESIZE as usize],
@@ -51,7 +61,7 @@ pub fn fsm_trie_init() -> FsmTrieHandle {
 // [spec:foma:sem:fomalib.fsm-trie-done-fn]
 pub fn fsm_trie_done(th: FsmTrieHandle) -> Box<Fsm> {
     let mut newh = fsm_construct_init("name");
-    for i in 0..THASH_TABLESIZE as usize {
+    for i in 0..th.trie_hash.len() {
         let mut thash: Option<&TrieHash> = Some(&th.trie_hash[i]);
         while let Some(t) = thash {
             let Some(insym) = t.insym.as_deref() else {
@@ -113,9 +123,9 @@ pub fn fsm_trie_end_word(th: &mut FsmTrieHandle) {
 // [spec:foma:def:fomalib.fsm-trie-symbol-fn]
 // [spec:foma:sem:fomalib.fsm-trie-symbol-fn]
 pub fn fsm_trie_symbol(th: &mut FsmTrieHandle, insym: &str, outsym: &str) {
-    let h = trie_hashf(th.trie_cursor, insym, outsym);
-    if th.trie_hash[h as usize].insym.is_some() {
-        let mut thash: Option<&TrieHash> = Some(&th.trie_hash[h as usize]);
+    let h = (trie_hashf(th.trie_cursor, insym, outsym) % th.trie_hash.len() as u32) as usize;
+    if th.trie_hash[h].insym.is_some() {
+        let mut thash: Option<&TrieHash> = Some(&th.trie_hash[h]);
         while let Some(t) = thash {
             if t.insym.as_deref() == Some(insym)
                 && t.outsym.as_deref() == Some(outsym)
@@ -135,7 +145,7 @@ pub fn fsm_trie_symbol(th: &mut FsmTrieHandle, insym: &str, outsym: &str) {
     // DEVIATION from C (insym/outsym alias strings interned in the sh_hash;
     // cheap clones of the interned copies here, per the TrieHash type in types.rs)
     let sh = &mut th.sh_hash;
-    let thash = &mut th.trie_hash[h as usize];
+    let thash = &mut th.trie_hash[h];
     if thash.insym.is_none() {
         thash.insym = Some(sh_find_add_string(sh, insym, 1));
         thash.outsym = Some(sh_find_add_string(sh, outsym, 1));
@@ -150,7 +160,7 @@ pub fn fsm_trie_symbol(th: &mut FsmTrieHandle, insym: &str, outsym: &str) {
             sourcestate: th.trie_cursor,
             targetstate: th.used_states,
         });
-        th.trie_hash[h as usize].next = Some(newthash);
+        th.trie_hash[h].next = Some(newthash);
     }
     th.trie_cursor = th.used_states;
 
@@ -180,7 +190,8 @@ pub fn trie_hashf(source: u32, insym: &str, outsym: &str) -> u32 {
         hash = hash.wrapping_mul(101).wrapping_add(b as i8 as i32 as u32);
     }
     hash = hash.wrapping_mul(101).wrapping_add(source);
-    hash % THASH_TABLESIZE
+    /* raw hash; the caller reduces it modulo the actual table size */
+    hash
 }
 
 #[cfg(test)]
@@ -243,11 +254,13 @@ mod tests {
     // [spec:foma:sem:trie.trie-hashf-fn/test]
     #[test]
     fn trie_hashf_poly101_with_source_and_signed_char() {
-        assert_eq!(trie_hashf(0, "", ""), 0);
-        assert_eq!(trie_hashf(0, "a", "a"), 999294);
-        assert_eq!(trie_hashf(1, "a", "a"), 999295); // +source term
+        /* trie_hashf returns the raw poly-101 hash; the caller reduces it modulo
+        the table size. Compare bucket indices for the default table. */
+        assert_eq!(trie_hashf(0, "", "") % THASH_TABLESIZE, 0);
+        assert_eq!(trie_hashf(0, "a", "a") % THASH_TABLESIZE, 999294);
+        assert_eq!(trie_hashf(1, "a", "a") % THASH_TABLESIZE, 999295); // +source term
         // Signed-char folding on high bytes ("é" = C3 A9).
-        assert_eq!(trie_hashf(0, "é", "é"), 311100);
+        assert_eq!(trie_hashf(0, "é", "é") % THASH_TABLESIZE, 311100);
     }
 
     // [spec:foma:sem:trie.fsm-trie-symbol-fn/test]
@@ -258,7 +271,7 @@ mod tests {
     #[test]
     fn fsm_trie_symbol_inserts_head_then_reuses_and_end_word() {
         let mut th = fsm_trie_init();
-        let bucket = trie_hashf(0, "a", "a") as usize; // 999294
+        let bucket = (trie_hashf(0, "a", "a") % THASH_TABLESIZE) as usize; // 999294
         // Insert (0, a:a): new target state 1, cursor → 1, head filled in place.
         fsm_trie_symbol(&mut th, "a", "a");
         assert_eq!(th.used_states, 1);

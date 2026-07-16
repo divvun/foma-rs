@@ -38,11 +38,15 @@ use crate::minimize::fsm_minimize;
 use crate::reverse::fsm_reverse;
 use crate::rewrite::fsm_rewrite;
 use crate::structures::{fsm_copy, fsm_destroy, fsm_empty_string, fsm_identity, fsm_isempty};
+use crate::trie::{
+    THASH_TABLESIZE, fsm_trie_done, fsm_trie_end_word, fsm_trie_init_sized, fsm_trie_symbol,
+};
 use crate::types::{
     ArrowType, DefinedFunctions, DefinedNetworks, Fsm, Fsmcontexts, Fsmrules, OP_IGNORE_ALL,
     OP_IGNORE_INTERNAL, ReplaceDir, RewriteSet,
 };
 use crate::utf8::replace_equal_len;
+use smol_str::SmolStr;
 
 /* C: `#define MAX_PARSE_DEPTH 100` — the self-recursion guard for my_yyparse. */
 const MAX_PARSE_DEPTH: i32 = 100;
@@ -226,7 +230,24 @@ fn build_net(
         XreExpr::Unary(op, inner) => build_unary(opts, ps, *op, &inner.value, nets, funcs),
 
         // ──────────────── binary ────────────────
-        XreExpr::Binary(op, l, r) => build_binary(opts, ps, *op, &l.value, &r.value, nets, funcs),
+        XreExpr::Binary(op, l, r) => {
+            /* Fast path: a union of literal strings compiles straight to a
+            trie/DAWG, skipping the O(n^2) pairwise-union fold and the
+            determinization of the resulting epsilon-laden NFA. */
+            if *op == BinaryOp::Union {
+                let mut words = Vec::new();
+                if collect_union_words(expr, &mut words) && words.len() >= 2 {
+                    let has_defined = match nets.as_deref_mut() {
+                        Some(n) => words.iter().flatten().any(|s| find_defined(n, s).is_some()),
+                        None => false,
+                    };
+                    if !has_defined {
+                        return Some(build_dawg(&words));
+                    }
+                }
+            }
+            build_binary(opts, ps, *op, &l.value, &r.value, nets, funcs)
+        }
 
         // ──────────────── iteration ────────────────
         XreExpr::RepeatN(inner, n) => {
@@ -291,6 +312,67 @@ fn build_unary(
         UnaryOp::ContainmentOnce => fsm_contains_one(opts, net),
         UnaryOp::ContainmentOpt => fsm_contains_opt_one(opts, net),
     })
+}
+
+/// Collect the branch words of a union-of-strings AST. Returns true with the
+/// words filled if `expr` is a union whose every leaf is a plain concatenation
+/// of literal `Symbol`s; false if any leaf has other structure, in which case
+/// the caller falls back to the general union.
+fn collect_union_words(expr: &XreExpr, words: &mut Vec<Vec<SmolStr>>) -> bool {
+    match expr {
+        XreExpr::Binary(BinaryOp::Union, l, r) => {
+            collect_union_words(&l.value, words) && collect_union_words(&r.value, words)
+        }
+        XreExpr::Group(inner) => collect_union_words(&inner.value, words),
+        _ => {
+            let mut w = Vec::new();
+            if word_symbols(expr, &mut w) && !w.is_empty() {
+                words.push(w);
+                true
+            } else {
+                false
+            }
+        }
+    }
+}
+
+/// The symbols of a single string branch, or false if `expr` is anything other
+/// than a concatenation of literal `Symbol`s (an epsilon, `?`, pair, star,
+/// nested operator, …), which the general union path handles instead.
+fn word_symbols(expr: &XreExpr, out: &mut Vec<SmolStr>) -> bool {
+    match expr {
+        XreExpr::Symbol(s) => {
+            out.push(s.clone());
+            true
+        }
+        XreExpr::Binary(BinaryOp::Concatenate, l, r) => {
+            word_symbols(&l.value, out) && word_symbols(&r.value, out)
+        }
+        XreExpr::Group(inner) => word_symbols(&inner.value, out),
+        _ => false,
+    }
+}
+
+/// Build the automaton for a set of literal words as a trie; the caller's final
+/// `fsm_minimize` collapses it to the minimal DAWG (the trie is already
+/// deterministic, so minimization skips determinization).
+fn build_dawg(words: &[Vec<SmolStr>]) -> Box<Fsm> {
+    /* Size the trie hash to the arc count (chaining absorbs the load) rather
+    than pay fsm_trie_init's 1M-bucket default, whose zero-fill would dwarf the
+    build for a modest word set. The result is minimized, so the table size is
+    invisible in the output. */
+    let total: usize = words.iter().map(Vec::len).sum();
+    let size = total
+        .saturating_mul(2)
+        .clamp(1024, THASH_TABLESIZE as usize) as u32;
+    let mut th = fsm_trie_init_sized(size);
+    for word in words {
+        for sym in word {
+            fsm_trie_symbol(&mut th, sym, sym);
+        }
+        fsm_trie_end_word(&mut th);
+    }
+    fsm_trie_done(th)
 }
 
 fn build_binary(
