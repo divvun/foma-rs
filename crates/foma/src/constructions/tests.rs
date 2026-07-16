@@ -356,12 +356,7 @@ fn triplet_hash_free_is_null_tolerant() {
 // [spec:foma:sem:constructions.add-to-mergesigma-fn/test]
 #[test]
 fn add_to_mergesigma_dense_ordinary_numbering_and_special_passthrough() {
-    let mut head = Mergesigma {
-        number: -1,
-        symbol: None,
-        presence: 0,
-        next: None,
-    };
+    let mut ms: Vec<Mergesigma> = Vec::new();
     let s_id = Sigma {
         number: IDENTITY,
         symbol: "@_IDENTITY_SYMBOL_@".into(),
@@ -374,60 +369,52 @@ fn add_to_mergesigma_dense_ordinary_numbering_and_special_passthrough() {
         number: 9,
         symbol: "b".into(),
     };
-    {
-        let t1 = add_to_mergesigma(&mut head, &s_id, 1);
-        let t2 = add_to_mergesigma(t1, &s_a, 2);
-        add_to_mergesigma(t2, &s_b, 3);
-    }
-    // Dummy head overwritten in place; special keeps its number (2), presence stored.
+    // Special keeps its own number (2); first ordinary is always 3; consecutive
+    // ordinaries get consecutive dense numbers. Each call returns the assigned number.
+    assert_eq!(add_to_mergesigma(&mut ms, &s_id, 1), 2);
+    assert_eq!(add_to_mergesigma(&mut ms, &s_a, 2), 3);
+    assert_eq!(add_to_mergesigma(&mut ms, &s_b, 3), 4);
     assert_eq!(
-        (head.number, head.symbol.as_deref(), head.presence),
-        (2, Some("@_IDENTITY_SYMBOL_@"), 1)
+        ms.iter()
+            .map(|m| (m.number, m.symbol.as_deref(), m.presence))
+            .collect::<Vec<_>>(),
+        vec![
+            (2, Some("@_IDENTITY_SYMBOL_@"), 1),
+            (3, Some("a"), 2),
+            (4, Some("b"), 3),
+        ]
     );
-    let n1 = head.next.as_deref().unwrap();
-    // First ordinary symbol always numbered 3 regardless of source number.
-    assert_eq!(
-        (n1.number, n1.symbol.as_deref(), n1.presence),
-        (3, Some("a"), 2)
-    );
-    let n2 = n1.next.as_deref().unwrap();
-    // Consecutive ordinary symbols get consecutive dense numbers.
-    assert_eq!(
-        (n2.number, n2.symbol.as_deref(), n2.presence),
-        (4, Some("b"), 3)
-    );
-    assert!(n2.next.is_none());
 }
 
 // [spec:foma:sem:constructions.copy-mergesigma-fn/test]
 #[test]
 fn copy_mergesigma_deep_copies_number_and_symbol_dropping_presence() {
-    assert!(copy_mergesigma(None).is_empty());
-    // Dummy-head-only list is copied verbatim (number -1 survives, NULL
-    // symbol becomes the empty string).
-    let only = Mergesigma {
+    assert!(copy_mergesigma(&[]).is_empty());
+    // A node is copied verbatim: its number survives and a NULL symbol becomes
+    // the empty string.
+    let only = [Mergesigma {
         number: -1,
         symbol: None,
         presence: 0,
-        next: None,
-    };
-    let s = copy_mergesigma(Some(&only));
+    }];
+    let s = copy_mergesigma(&only);
     assert_eq!(s.len(), 1);
     assert_eq!(s[0].number, -1);
     assert_eq!(s[0].symbol, "");
-    // Multi-node list keeps number+symbol, in order.
-    let m = Mergesigma {
-        number: IDENTITY,
-        symbol: Some("@_IDENTITY_SYMBOL_@".into()),
-        presence: 3,
-        next: Some(Box::new(Mergesigma {
+    // Multi-node list keeps number+symbol, in order; presence is dropped.
+    let m = [
+        Mergesigma {
+            number: IDENTITY,
+            symbol: Some("@_IDENTITY_SYMBOL_@".into()),
+            presence: 3,
+        },
+        Mergesigma {
             number: 3,
             symbol: Some("a".into()),
             presence: 1,
-            next: None,
-        })),
-    };
-    let s = copy_mergesigma(Some(&m));
+        },
+    ];
+    let s = copy_mergesigma(&m);
     assert_eq!(
         s.iter()
             .map(|e| (e.number, e.symbol.as_str()))

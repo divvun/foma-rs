@@ -11,83 +11,64 @@ each use site below (int_stack_push calls in the same order) */
 pub struct Mergesigma {
     /* C: char *symbol aliases the source sigma node's string (no copy);
     owned clone here — observably equivalent (copy_mergesigma deep-copies
-    again and the C list is freed without freeing the symbols) */
+    again and the C list is freed without freeing the symbols). The C
+    singly-linked list is a `Vec<Mergesigma>` in append order here. */
     pub symbol: Option<SmolStr>,
     /// 1 = in net 1, 2 = in net 2, 3 = in both
     pub presence: u8,
     pub number: i32,
-    pub next: Option<Box<Mergesigma>>,
 }
 
 // [spec:foma:def:constructions.add-to-mergesigma-fn]
 // [spec:foma:sem:constructions.add-to-mergesigma-fn]
-pub fn add_to_mergesigma<'a>(
-    msigma: &'a mut Mergesigma,
-    sigma: &Sigma,
-    presence: i16,
-) -> &'a mut Mergesigma {
-    let mut number;
+pub fn add_to_mergesigma(msigma: &mut Vec<Mergesigma>, sigma: &Sigma, presence: i16) -> i32 {
+    /* the C sentinel head (number == -1, reused for the first node) is the
+    empty Vec here: an empty list numbers its first node as if from 2. */
+    let mut number = msigma.last().map_or(2, |m| m.number);
 
-    let msigma = if msigma.number == -1 {
-        number = 2;
-        msigma
-    } else {
-        number = msigma.number;
-        let msigma = msigma.next.insert(Box::new(Mergesigma {
-            symbol: None,
-            presence: 0,
-            number: 0,
-            next: None,
-        }));
-        msigma.next = None;
-        msigma.as_mut()
-    };
-
-    if sigma.number < 3 {
-        msigma.number = sigma.number;
+    let assigned = if sigma.number < 3 {
+        sigma.number
     } else {
         if number < 3 {
             number = 2;
         }
-        msigma.number = number + 1;
-    }
+        number + 1
+    };
     /* C: msigma->symbol = sigma->symbol (aliased, no copy) — owned clone
     here, see the Mergesigma type comment */
-    msigma.symbol = Some(sigma.symbol.clone());
-    msigma.presence = presence as u8;
-    msigma
+    msigma.push(Mergesigma {
+        symbol: Some(sigma.symbol.clone()),
+        presence: presence as u8,
+        number: assigned,
+    });
+    assigned
 }
 
 // [spec:foma:def:constructions.copy-mergesigma-fn]
 // [spec:foma:sem:constructions.copy-mergesigma-fn]
-pub fn copy_mergesigma(mergesigma: Option<&Mergesigma>) -> Vec<Sigma> {
+pub fn copy_mergesigma(mergesigma: &[Mergesigma]) -> Vec<Sigma> {
     /* append each mergesigma node in order; a NULL mergesigma symbol becomes
     an empty string (the merge always fills symbols for well-formed nets) */
-    let mut new_sigma: Vec<Sigma> = Vec::new();
-    let mut mergesigma = mergesigma;
-    while let Some(m) = mergesigma {
-        new_sigma.push(Sigma {
+    mergesigma
+        .iter()
+        .map(|m| Sigma {
             number: m.number,
             symbol: m.symbol.clone().unwrap_or_default(),
-        });
-        mergesigma = m.next.as_deref();
-    }
-    new_sigma
+        })
+        .collect()
 }
 
 /// Expand `?`/`@`/`?:x`/`x:?`/`?:?` arcs in `net` into explicit arcs over the
 /// symbols the *other* net contributed — the mergesigma nodes carrying
 /// `presence` (2 when expanding net1, 1 when expanding net2). Shared body of the
 /// two fsm_merge_sigma expansion passes, which C kept as a copy-paste pair.
-fn expand_unknowns(net: &mut Fsm, start_mergesigma: &Mergesigma, presence: u8) {
+fn expand_unknowns(net: &mut Fsm, mergesigma: &[Mergesigma], presence: u8) {
     let net_lines = find_arccount(&net.states);
     let mut net_unk = 0;
-    let mut ms = Some(start_mergesigma);
-    while let Some(m) = ms {
+    for m in mergesigma {
         if m.presence == presence {
             net_unk += 1;
         }
-        ms = m.next.as_deref();
     }
 
     let mut net_adds = 0;
@@ -143,8 +124,7 @@ fn expand_unknowns(net: &mut Fsm, start_mergesigma: &Mergesigma, presence: u8) {
                 start_state,
             );
             j += 1;
-            let mut ms = Some(start_mergesigma);
-            while let Some(m) = ms {
+            for m in mergesigma {
                 if m.presence == presence && m.number > IDENTITY {
                     add_fsm_arc(
                         &mut new_state,
@@ -158,7 +138,6 @@ fn expand_unknowns(net: &mut Fsm, start_mergesigma: &Mergesigma, presence: u8) {
                     );
                     j += 1;
                 }
-                ms = m.next.as_deref();
             }
         }
 
@@ -174,8 +153,7 @@ fn expand_unknowns(net: &mut Fsm, start_mergesigma: &Mergesigma, presence: u8) {
                 start_state,
             );
             j += 1;
-            let mut ms = Some(start_mergesigma);
-            while let Some(m) = ms {
+            for m in mergesigma {
                 if m.presence == presence && m.number > IDENTITY {
                     add_fsm_arc(
                         &mut new_state,
@@ -189,7 +167,6 @@ fn expand_unknowns(net: &mut Fsm, start_mergesigma: &Mergesigma, presence: u8) {
                     );
                     j += 1;
                 }
-                ms = m.next.as_deref();
             }
         }
 
@@ -205,8 +182,7 @@ fn expand_unknowns(net: &mut Fsm, start_mergesigma: &Mergesigma, presence: u8) {
                 start_state,
             );
             j += 1;
-            let mut ms = Some(start_mergesigma);
-            while let Some(m) = ms {
+            for m in mergesigma {
                 if m.presence == presence && m.number > IDENTITY {
                     add_fsm_arc(
                         &mut new_state,
@@ -220,7 +196,6 @@ fn expand_unknowns(net: &mut Fsm, start_mergesigma: &Mergesigma, presence: u8) {
                     );
                     j += 1;
                 }
-                ms = m.next.as_deref();
             }
         }
 
@@ -237,10 +212,8 @@ fn expand_unknowns(net: &mut Fsm, start_mergesigma: &Mergesigma, presence: u8) {
                 start_state,
             );
             j += 1;
-            let mut ms2 = Some(start_mergesigma);
-            while let Some(m2) = ms2 {
-                let mut ms = Some(start_mergesigma);
-                while let Some(m) = ms {
+            for m2 in mergesigma {
+                for m in mergesigma {
                     if ((m.presence == presence
                         && m2.presence == presence
                         && m.number > IDENTITY
@@ -261,9 +234,7 @@ fn expand_unknowns(net: &mut Fsm, start_mergesigma: &Mergesigma, presence: u8) {
                         );
                         j += 1;
                     }
-                    ms = m.next.as_deref();
                 }
-                ms2 = m2.next.as_deref();
             }
         }
 
@@ -348,19 +319,13 @@ pub fn fsm_merge_sigma(opts: &FomaOptions, net1: &mut Fsm, net2: &mut Fsm) {
 
     /* Fill mergesigma */
 
-    let mut start_mergesigma = Box::new(Mergesigma {
-        number: -1,
-        symbol: None,
-        presence: 0,
-        next: None,
-    });
+    let mut mergesigma: Vec<Mergesigma> = Vec::new();
 
     /* Loop over sigma 1, sigma 2 — index cursors over each alphabet Vec; the
     cursor being past the end plays the role of C's NULL. */
     {
         let mut i1 = 0usize;
         let mut i2 = 0usize;
-        let mut mergesigma: &mut Mergesigma = &mut start_mergesigma;
         loop {
             if i1 >= net1.sigma.len() {
                 end_1 = 1;
@@ -374,16 +339,14 @@ pub fn fsm_merge_sigma(opts: &FomaOptions, net1: &mut Fsm, net2: &mut Fsm) {
             if end_2 != 0 {
                 /* Treating only 1 now */
                 let s1 = &net1.sigma[i1];
-                mergesigma = add_to_mergesigma(mergesigma, s1, 1);
-                mapping_1[s1.number as usize] = mergesigma.number;
+                mapping_1[s1.number as usize] = add_to_mergesigma(&mut mergesigma, s1, 1);
                 i1 += 1;
                 equal = 0;
                 continue;
             } else if end_1 != 0 {
                 /* Treating only 2 now */
                 let s2 = &net2.sigma[i2];
-                mergesigma = add_to_mergesigma(mergesigma, s2, 2);
-                mapping_2[s2.number as usize] = mergesigma.number;
+                mapping_2[s2.number as usize] = add_to_mergesigma(&mut mergesigma, s2, 2);
                 i2 += 1;
                 equal = 0;
                 continue;
@@ -405,15 +368,15 @@ pub fn fsm_merge_sigma(opts: &FomaOptions, net1: &mut Fsm, net2: &mut Fsm) {
                     }
 
                     if s1.number == s2.number {
-                        mergesigma = add_to_mergesigma(mergesigma, s1, 3);
+                        add_to_mergesigma(&mut mergesigma, s1, 3);
                         i1 += 1;
                         i2 += 1;
                     } else if s1.number < s2.number {
-                        mergesigma = add_to_mergesigma(mergesigma, s1, 1);
+                        add_to_mergesigma(&mut mergesigma, s1, 1);
                         i1 += 1;
                         equal = 0;
                     } else {
-                        mergesigma = add_to_mergesigma(mergesigma, s2, 2);
+                        add_to_mergesigma(&mut mergesigma, s2, 2);
                         i2 += 1;
                         equal = 0;
                     }
@@ -423,21 +386,19 @@ pub fn fsm_merge_sigma(opts: &FomaOptions, net1: &mut Fsm, net2: &mut Fsm) {
                 /* strcmp — Rust str comparison is bytewise, as strcmp */
                 let cmp = s1.symbol.cmp(&s2.symbol);
                 if cmp == std::cmp::Ordering::Equal {
-                    mergesigma = add_to_mergesigma(mergesigma, s1, 3);
+                    let mnum = add_to_mergesigma(&mut mergesigma, s1, 3);
                     /* Add symbol numbers to mapping */
-                    mapping_1[s1.number as usize] = mergesigma.number;
-                    mapping_2[s2.number as usize] = mergesigma.number;
+                    mapping_1[s1.number as usize] = mnum;
+                    mapping_2[s2.number as usize] = mnum;
 
                     i1 += 1;
                     i2 += 1;
                 } else if cmp == std::cmp::Ordering::Less {
-                    mergesigma = add_to_mergesigma(mergesigma, s1, 1);
-                    mapping_1[s1.number as usize] = mergesigma.number;
+                    mapping_1[s1.number as usize] = add_to_mergesigma(&mut mergesigma, s1, 1);
                     i1 += 1;
                     equal = 0;
                 } else {
-                    mergesigma = add_to_mergesigma(mergesigma, s2, 2);
-                    mapping_2[s2.number as usize] = mergesigma.number;
+                    mapping_2[s2.number as usize] = add_to_mergesigma(&mut mergesigma, s2, 2);
                     i2 += 1;
                     equal = 0;
                 }
@@ -472,7 +433,7 @@ pub fn fsm_merge_sigma(opts: &FomaOptions, net1: &mut Fsm, net2: &mut Fsm) {
     /* Copy mergesigma to net1, net2 */
 
     /* Both nets get the same merged alphabet; build it once and clone. */
-    let new_sigma_1 = copy_mergesigma(Some(&start_mergesigma));
+    let new_sigma_1 = copy_mergesigma(&mergesigma);
     let new_sigma_2 = new_sigma_1.clone();
 
     fsm_sigma_destroy(core::mem::take(&mut net1.sigma));
@@ -484,16 +445,10 @@ pub fn fsm_merge_sigma(opts: &FomaOptions, net1: &mut Fsm, net2: &mut Fsm) {
     /* Expand on ?, ?:x, y:? */
 
     if unknown_1 != 0 && equal == 0 {
-        expand_unknowns(net1, &start_mergesigma, 2);
+        expand_unknowns(net1, &mergesigma, 2);
     }
 
     if unknown_2 != 0 && equal == 0 {
-        expand_unknowns(net2, &start_mergesigma, 1);
+        expand_unknowns(net2, &mergesigma, 1);
     }
-    /* free(mapping_1); free(mapping_2) */
-    drop(mapping_1);
-    drop(mapping_2);
-
-    /* Free structure */
-    drop(start_mergesigma);
 }
