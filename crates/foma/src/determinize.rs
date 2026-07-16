@@ -69,14 +69,16 @@ pub(crate) static PRIMES: [u32; 26] = [
 ];
 
 // [spec:foma:def:determinize.nhash-list]
-/* size == 0 marks an empty bucket head (calloc); collision nodes hang off
-`next` as an owned chain, spliced in directly after the head as in C. */
-#[derive(Debug, Clone, Default)]
+/* size == 0 marks an empty bucket head (calloc). Collision nodes are appended
+past the prime-sized head region of the same `table` Vec and chained by index
+(spliced in directly after the head as in C); an index link keeps NhashList a
+plain Copy struct, so the whole table frees in one deallocation. */
+#[derive(Debug, Clone, Copy, Default)]
 pub struct NhashList {
     pub setnum: i32,
     pub size: u32,
     pub set_offset: u32,
-    pub next: Option<Box<NhashList>>,
+    pub next: Option<u32>,
 }
 
 // [spec:foma:def:determinize.t-memo]
@@ -856,10 +858,11 @@ pub(crate) fn nhash_find_insert(s: &mut Subset, set: &[i32], setsize: i32) -> i3
         let mut found_setnum: Option<i32> = None;
         let mut star_mark = false;
         {
-            let mut tableptr: Option<&NhashList> = Some(&s.table[hashval as usize]);
-            while let Some(tp) = tableptr {
+            let mut cur: Option<u32> = Some(hashval as u32);
+            while let Some(ci) = cur {
+                let tp = s.table[ci as usize];
                 if tp.size as i32 != setsize {
-                    tableptr = tp.next.as_deref();
+                    cur = tp.next;
                     continue;
                 }
                 /* Compare the list at this bucket to the current set by
@@ -885,7 +888,7 @@ pub(crate) fn nhash_find_insert(s: &mut Subset, set: &[i32], setsize: i32) -> i3
                     found_setnum = Some(tp.setnum);
                     break;
                 }
-                tableptr = tp.next.as_deref();
+                cur = tp.next;
             }
         }
         if star_mark {
@@ -971,18 +974,20 @@ pub(crate) fn nhash_insert(s: &mut Subset, hashval: i32, set: &[i32], setsize: i
         return current_setnum;
     }
 
-    /* spliced in as the second chain element. (C assigns set_offset =
-    move_set(...) after the splice; move_set only touches the set_table
-    fields, so computing it first is unobservable) */
+    /* spliced in as the second chain element: appended to the table's
+    collision region and index-linked. (C assigns set_offset = move_set(...)
+    after the splice; move_set only touches the set_table fields, so computing
+    it first is unobservable.) */
     let set_offset = move_set(s, set, setsize);
-    let head = &mut s.table[hashval as usize];
-    let tableptr = Box::new(NhashList {
+    let old_next = s.table[hashval as usize].next;
+    let idx = s.table.len() as u32;
+    s.table.push(NhashList {
         setnum: current_setnum,
         size: setsize as u32,
         set_offset,
-        next: head.next.take(),
+        next: old_next,
     });
-    head.next = Some(tableptr);
+    s.table[hashval as usize].next = Some(idx);
 
     add_t_ptr(s, current_setnum, setsize, set_offset, fs as i32);
     current_setnum
@@ -1006,33 +1011,36 @@ pub(crate) fn nhash_rebuild_table(s: &mut Subset) {
     s.nhash_tablesize = PRIMES[i + 1] as i32;
 
     s.table = vec![NhashList::default(); s.nhash_tablesize as usize];
-    for bucket in oldtable.iter().take(oldsize as usize) {
-        if bucket.size == 0 {
+    for head in 0..oldsize as usize {
+        if oldtable[head].size == 0 {
             continue;
         }
-        let mut tableptr: Option<&NhashList> = Some(bucket);
-        while let Some(tp) = tableptr {
+        let mut cur: Option<u32> = Some(head as u32);
+        while let Some(ci) = cur {
+            let tp = oldtable[ci as usize];
             /* rehash */
             let hashval = hashf(s, &s.set_table[tp.set_offset as usize..], tp.size as i32);
-            let ntableptr = &mut s.table[hashval as usize];
-            if ntableptr.size == 0 {
+            if s.table[hashval as usize].size == 0 {
                 /* quirk kept: nhash_load only counts occupied buckets here,
                 understating the load factor for later checks */
                 s.nhash_load += 1;
+                let ntableptr = &mut s.table[hashval as usize];
                 ntableptr.size = tp.size;
                 ntableptr.set_offset = tp.set_offset;
                 ntableptr.setnum = tp.setnum;
                 ntableptr.next = None;
             } else {
-                let newptr = Box::new(NhashList {
+                let old_next = s.table[hashval as usize].next;
+                let idx = s.table.len() as u32;
+                s.table.push(NhashList {
                     setnum: tp.setnum,
                     size: tp.size,
                     set_offset: tp.set_offset,
-                    next: ntableptr.next.take(),
+                    next: old_next,
                 });
-                ntableptr.next = Some(newptr);
+                s.table[hashval as usize].next = Some(idx);
             }
-            tableptr = tp.next.as_deref();
+            cur = tp.next;
         }
     }
     nhash_free(oldtable, oldsize);
@@ -1065,19 +1073,11 @@ pub(crate) fn e_closure_free(s: &mut Subset) {
 
 // [spec:foma:def:determinize.nhash-free-fn]
 // [spec:foma:sem:determinize.nhash-free-fn]
-pub(crate) fn nhash_free(mut nptr: Vec<NhashList>, size: i32) {
-    /* for each bucket, free every chained node reachable from ->next (the
-    heads are elements of the array itself); iterative take()s mirror the
-    node-by-node frees and avoid recursive Box drops on long chains */
-    for bucket in nptr.iter_mut().take(size as usize) {
-        let mut nptr2 = bucket.next.take();
-        while let Some(mut node) = nptr2 {
-            let nnext = node.next.take();
-            drop(node); /* free(nptr2) */
-            nptr2 = nnext;
-        }
-    }
-    /* free(nptr) — the bucket array is dropped on return */
+pub(crate) fn nhash_free(nptr: Vec<NhashList>, _size: i32) {
+    /* NhashList is a plain Copy struct with index-linked collision nodes now,
+    so dropping the Vec frees the heads and every appended collision node in a
+    single deallocation — no per-node walk (and no recursion) needed. */
+    drop(nptr);
 }
 
 #[cfg(test)]
@@ -1528,18 +1528,21 @@ mod tests {
         assert!(s.e_closure_memo.is_empty());
     }
 
-    // nhash_free walks each bucket's ->next chain without panicking.
+    // nhash_free drops a table with an index-linked collision chain (head at
+    // bucket 0 -> node 2 -> node 3, appended past the 2-bucket head region).
     // [spec:foma:sem:determinize.nhash-free-fn/test]
     #[test]
     fn nhash_free_walks_chains() {
         let mut table = vec![NhashList::default(); 2];
         table[0].size = 1;
-        table[0].next = Some(Box::new(NhashList {
+        table[0].next = Some(2);
+        table.push(NhashList {
             setnum: 1,
             size: 1,
             set_offset: 0,
-            next: Some(Box::new(NhashList::default())),
-        }));
+            next: Some(3),
+        });
+        table.push(NhashList::default());
         nhash_free(table, 2);
     }
 
