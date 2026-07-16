@@ -461,19 +461,40 @@ pub fn apply_up(h: &mut ApplyHandle, word: Option<&str>) -> Option<String> {
     apply_updown(h, word)
 }
 
+/// Seed for the per-handle RNG, standing in for C foma's `srand((unsigned int) time(NULL))`.
+/// The seed only randomizes the *order* of `apply_random_*` enumeration and the hex names of
+/// unnamed constructed nets — it never affects the correctness of any other apply function.
+///
+/// On targets whose `std` has no real-time clock — notably `wasm32-unknown-unknown`, where
+/// `std::time::SystemTime::now()` panics ("time not implemented on this platform") — fall back to
+/// the ISO C default seed (`1`, equivalent to a program that never calls `srand`). Without this,
+/// the eager `SystemTime::now()` call panicked inside `apply_init`, taking down *every*
+/// `apply_up`/`apply_down` caller at construction time on wasm — even those that never touch the
+/// random-enumeration family. Other wasm targets (`wasm32-wasi`, `wasm32-unknown-emscripten`) do
+/// have a working clock and keep the wall-clock seed.
+fn apply_rng_seed() -> u32 {
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    {
+        1
+    }
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    {
+        // DEVIATION from C: SystemTime seconds stand in for time(NULL).
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0) as u32
+    }
+}
+
 // [spec:foma:def:apply.apply-init-fn]
 // [spec:foma:sem:apply.apply-init-fn]
 // [spec:foma:def:fomalib.apply-init-fn]
 // [spec:foma:sem:fomalib.apply-init-fn]
 pub fn apply_init(net: &Fsm) -> Box<ApplyHandle> {
-    // C: srand((unsigned int) time(NULL)); seeds the handle's LCG.
-    // DEVIATION from C (SystemTime seconds stand in for time(NULL)).
-    let seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0) as u32;
+    // C: srand((unsigned int) time(NULL)); seeds the handle's LCG (see `apply_rng_seed`).
     let mut lcg = Lcg::new();
-    lcg.srand(seed);
+    lcg.srand(apply_rng_seed());
 
     // calloc(1, sizeof(struct apply_handle)) — zeroed handle.
     let mut h = Box::new(ApplyHandle {
