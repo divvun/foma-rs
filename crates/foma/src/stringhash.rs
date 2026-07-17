@@ -18,8 +18,8 @@ const STRING_HASH_SIZE: usize = 8191;
 // [spec:foma:sem:stringhash.sh-init-fn]
 // [spec:foma:def:fomalib.sh-init-fn]
 // [spec:foma:sem:fomalib.sh-init-fn]
-pub fn sh_init() -> Box<ShHandle> {
-    let sh: Box<ShHandle> = Box::new(ShHandle {
+pub fn sh_init() -> ShHandle {
+    let sh: ShHandle = ShHandle {
         /* C: calloc(STRING_HASH_SIZE, sizeof(struct sh_hashtable)) —
         zero-initialized bucket heads stored inline in the array */
         hash: vec![
@@ -33,7 +33,7 @@ pub fn sh_init() -> Box<ShHandle> {
         /* C: malloc leaves lastvalue uninitialized; 0 here (safe Rust
         cannot reproduce an uninitialized read) */
         lastvalue: 0,
-    });
+    };
     sh
 }
 
@@ -43,7 +43,7 @@ pub fn sh_init() -> Box<ShHandle> {
 // [spec:foma:sem:fomalib.sh-done-fn]
 // Consumes the handle (C frees every chain node, every interned string,
 // the bucket array, and the handle itself — all handled by drop here).
-pub fn sh_done(sh: Box<ShHandle>) {
+pub fn sh_done(sh: ShHandle) {
     drop(sh);
 }
 

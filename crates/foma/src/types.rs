@@ -239,7 +239,7 @@ pub struct Fsm {
     pub states: crate::line_table::LineTable,
     pub sigma: Vec<Sigma>,
     // DEVIATION from C (aliased pointer; fsm_copy shares medlookup between copies and C double-frees)
-    pub medlookup: Option<Box<Medlookup>>,
+    pub medlookup: Option<Medlookup>,
 }
 
 /// Minimum edit distance structure
@@ -367,7 +367,7 @@ pub struct FsmTrieHandle {
     pub used_states: u32,
     pub statesize: u32,
     /// Per-trie string-intern table; fsm_trie_done consumes it with the handle.
-    pub sh_hash: Box<ShHandle>,
+    pub sh_hash: ShHandle,
 }
 
 /* Extraction routines */
@@ -535,7 +535,7 @@ pub struct ApplyMedHandle {
     /// C: malloc'd array of heap_size ints
     pub heap: Vec<i32>,
     pub intword: Vec<i32>,
-    pub sigmahash: Option<Box<ShHandle>>,
+    pub sigmahash: Option<ShHandle>,
     /// C: malloc'd array (map_firstlines), one entry per state
     pub state_array: Vec<StateArray>,
     // DEVIATION from C (borrowed pointer to the stack-owned net; the handle never owns it)
@@ -734,6 +734,11 @@ pub struct ApplyHandle {
 #[derive(Debug, Clone)]
 pub struct StackEntry {
     pub number: i32,
+    // Boxed on purpose (not a C-ism residue): ApplyHandle is ~820 bytes and
+    // ApplyMedHandle ~620, both `None` on every non-apply entry. StackEntry
+    // lives in the crate::stack arena Vec, so inlining these would bloat every
+    // slot ~6.7x for a usually-absent field — the large-optional-member case
+    // where a Box is the idiomatic choice.
     pub ah: Option<Box<ApplyHandle>>,
     pub amedh: Option<Box<ApplyMedHandle>>,
     pub fsm: Option<Fsm>,

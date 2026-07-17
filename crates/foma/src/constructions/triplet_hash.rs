@@ -25,10 +25,10 @@ pub struct Triplethash {
 
 // [spec:foma:def:constructions.triplet-hash-init-fn]
 // [spec:foma:sem:constructions.triplet-hash-init-fn]
-pub fn triplet_hash_init() -> Box<Triplethash> {
+pub fn triplet_hash_init() -> Triplethash {
     let tablesize: u32 = 128;
     // Empty slots are marked by key == -1; a/b/c stay don't-care until filled.
-    Box::new(Triplethash {
+    Triplethash {
         tablesize,
         occupancy: 0,
         triplets: vec![
@@ -40,7 +40,7 @@ pub fn triplet_hash_init() -> Box<Triplethash> {
             };
             tablesize as usize
         ],
-    })
+    }
 }
 
 // [spec:foma:def:constructions.triplethash-hashf-fn]
@@ -56,7 +56,7 @@ pub fn triplethash_hashf(a: i32, b: i32, c: i32) -> u32 {
 
 // [spec:foma:def:constructions.triplet-hash-free-fn]
 // [spec:foma:sem:constructions.triplet-hash-free-fn]
-pub fn triplet_hash_free(th: Option<Box<Triplethash>>) {
+pub fn triplet_hash_free(th: Option<Triplethash>) {
     if let Some(th) = th {
         /* free(th->triplets); free(th) */
         drop(th);

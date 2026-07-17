@@ -1105,9 +1105,9 @@ fn cmatrix_print_to<W: std::io::Write + ?Sized>(net: &Fsm, out: &mut W) {
 // [spec:foma:sem:fomalib.cmatrix-init-fn]
 pub fn cmatrix_init(net: &mut Fsm) {
     if net.medlookup.is_none() {
-        net.medlookup = Some(Box::new(Medlookup {
+        net.medlookup = Some(Medlookup {
             confusion_matrix: Vec::new(),
-        }));
+        });
     }
     let maxsigma: i32 = sigma_max(&net.sigma) + 1;
     let mut cm = vec![0i32; (maxsigma * maxsigma) as usize];

@@ -436,7 +436,7 @@ pub fn fsm_read_prolog(filename: &str) -> Option<Fsm> {
         Err(_) => return None,
     };
     let mut reader = BufReader::new(prolog_file);
-    let mut outh: Option<Box<FsmConstructHandle>> = None;
+    let mut outh: Option<FsmConstructHandle> = None;
     let mut buf = String::new();
     loop {
         buf.clear();
@@ -463,7 +463,7 @@ pub fn fsm_read_prolog(filename: &str) -> Option<Fsm> {
             let temp_ptr = field!(buf.find(' ')) + 1;
             let temp_ptr2 = field!(buf[temp_ptr..].find(").")) + temp_ptr;
             let temp = &buf[temp_ptr..temp_ptr2];
-            fsm_construct_set_final(field!(outh.as_deref_mut()), parse_leading_i32(temp));
+            fsm_construct_set_final(field!(outh.as_mut()), parse_leading_i32(temp));
         }
         if buf.starts_with("symbol(") {
             let temp_ptr = field!(buf.find(", \"")) + 3;
@@ -472,7 +472,7 @@ pub fn fsm_read_prolog(filename: &str) -> Option<Fsm> {
             if temp == "%0" {
                 temp = "0".to_string();
             }
-            let oh = field!(outh.as_deref_mut());
+            let oh = field!(outh.as_mut());
             if fsm_construct_check_symbol(oh, &temp) == -1 {
                 fsm_construct_add_symbol(oh, &temp);
             }
@@ -539,7 +539,7 @@ pub fn fsm_read_prolog(filename: &str) -> Option<Fsm> {
                 out_ = "?".to_string();
             }
 
-            let oh = field!(outh.as_deref_mut());
+            let oh = field!(outh.as_mut());
             if arity == 1 {
                 fsm_construct_add_arc(oh, source, target, &in_, &in_);
             } else {
@@ -549,7 +549,7 @@ pub fn fsm_read_prolog(filename: &str) -> Option<Fsm> {
     }
     /* fclose (drop reader) */
     if has_net == 1 {
-        fsm_construct_set_initial(outh.as_deref_mut().expect("outh built when has_net==1"), 0);
+        fsm_construct_set_initial(outh.as_mut().expect("outh built when has_net==1"), 0);
         let mut outnet = fsm_construct_done(outh.take().expect("outh built when has_net==1"));
         /* C: fsm_topsort(outnet) with the return value ignored (relies on
         in-place update). DEVIATION from C: fsm_topsort consumes/returns the
@@ -697,7 +697,7 @@ pub fn fsm_write_binary<W: std::io::Write>(net: &Fsm, out: W) -> std::io::Result
 // The opaque handle is reused across calls and freed on the NULL return, so the
 // caller passes it as `&mut Option<...>`; on the NULL path the handle is dropped
 // (io_free) and the caller's Option becomes None ("must not be used again").
-pub fn fsm_read_binary_file_multiple(fsrh: &mut Option<Box<FsmReadBinaryHandle>>) -> Option<Fsm> {
+pub fn fsm_read_binary_file_multiple(fsrh: &mut Option<FsmReadBinaryHandle>) -> Option<Fsm> {
     /* iobh = (struct io_buf_handle *) fsrh (must be non-NULL) */
     let result = {
         let handle = fsrh.as_mut().expect("fsrh handle must be present");
@@ -716,14 +716,14 @@ pub fn fsm_read_binary_file_multiple(fsrh: &mut Option<Box<FsmReadBinaryHandle>>
 
 // [spec:foma:def:io.fsm-read-binary-file-multiple-init-fn]
 // [spec:foma:sem:io.fsm-read-binary-file-multiple-init-fn]
-pub fn fsm_read_binary_file_multiple_init(filename: &str) -> Option<Box<FsmReadBinaryHandle>> {
+pub fn fsm_read_binary_file_multiple_init(filename: &str) -> Option<FsmReadBinaryHandle> {
     let mut iobh = io_init();
     if io_gz_file_to_mem(&mut iobh, filename) == 0 {
         io_free(iobh);
         return None;
     }
     /* (void *) iobh */
-    Some(Box::new(FsmReadBinaryHandle { iobh }))
+    Some(FsmReadBinaryHandle { iobh })
 }
 
 // [spec:foma:def:io.fsm-read-binary-file-fn+1]
@@ -1303,7 +1303,7 @@ pub fn foma_net_print<W: std::io::Write + ?Sized>(
     outfile.write_all(b"-1 -1 -1 -1 -1\n")?;
 
     /* Store confusion matrix */
-    if let Some(ml) = net.medlookup.as_deref() {
+    if let Some(ml) = net.medlookup.as_ref() {
         /* C: net->medlookup->confusion_matrix != NULL — an empty Vec ↔ NULL */
         if !ml.confusion_matrix.is_empty() {
             outfile.write_all(b"##cmatrix##\n")?;

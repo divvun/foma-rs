@@ -1829,9 +1829,9 @@ mod tests {
     fn destroy_frees_the_net() {
         fsm_destroy(fsm_empty_set());
         let mut net = fsm_empty_set();
-        net.medlookup = Some(Box::new(crate::types::Medlookup {
+        net.medlookup = Some(crate::types::Medlookup {
             confusion_matrix: vec![1, 2, 3],
-        }));
+        });
         fsm_destroy(net);
     }
 

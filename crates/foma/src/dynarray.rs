@@ -356,8 +356,8 @@ pub fn fsm_state_close(b: &mut FsmBuilder, net: &mut Fsm) {
 // [spec:foma:sem:dynarray.fsm-construct-init-fn]
 // [spec:foma:def:fomalib.fsm-construct-init-fn]
 // [spec:foma:sem:fomalib.fsm-construct-init-fn]
-pub fn fsm_construct_init(name: &str) -> Box<FsmConstructHandle> {
-    Box::new(FsmConstructHandle {
+pub fn fsm_construct_init(name: &str) -> FsmConstructHandle {
+    FsmConstructHandle {
         /* calloc(1024, ...) — zeroed entries */
         fsm_state_list: vec![
             FsmStateList {
@@ -392,7 +392,7 @@ pub fn fsm_construct_init(name: &str) -> Box<FsmConstructHandle> {
         no in-tree caller passes NULL */
         name: Some(name.into()),
         hasinitial: 0,
-    })
+    }
 }
 
 // [spec:foma:def:dynarray.fsm-construct-check-size-fn]
@@ -716,7 +716,7 @@ pub fn fsm_construct_convert_sigma(handle: &FsmConstructHandle) -> Vec<Sigma> {
 // [spec:foma:sem:dynarray.fsm-construct-done-fn+1]
 // [spec:foma:def:fomalib.fsm-construct-done-fn+1]
 // [spec:foma:sem:fomalib.fsm-construct-done-fn+1]
-pub fn fsm_construct_done(handle: Box<FsmConstructHandle>) -> Fsm {
+pub fn fsm_construct_done(handle: FsmConstructHandle) -> Fsm {
     let mut handle = handle;
     if handle.maxstate == -1 || handle.numfinals == 0 || handle.hasinitial == 0 {
         // C leaked the handle and its contents on this early-return path;
@@ -812,7 +812,7 @@ pub fn fsm_read_is_initial(h: &FsmReadHandle, state: i32) -> bool {
 // [spec:foma:sem:dynarray.fsm-read-init-fn]
 // [spec:foma:def:fomalib.fsm-read-init-fn]
 // [spec:foma:sem:fomalib.fsm-read-init-fn]
-pub fn fsm_read_init(net: Fsm) -> Box<FsmReadHandle> {
+pub fn fsm_read_init(net: Fsm) -> FsmReadHandle {
     // DEVIATION from C (the C handle borrows the caller's net pointer; the
     // Rust handle owns the net for its lifetime and fsm_read_done returns it)
     let num_states = net.statecount;
@@ -882,7 +882,7 @@ pub fn fsm_read_init(net: Fsm) -> Box<FsmReadHandle> {
     let sigma_list_size = sigma_max(&net.sigma) + 1;
 
     /* handle = calloc(1, ...): all cursors NULL, current_state 0 */
-    Box::new(FsmReadHandle {
+    FsmReadHandle {
         finals_head,
         initials_head,
         states_head,
@@ -899,7 +899,7 @@ pub fn fsm_read_init(net: Fsm) -> Box<FsmReadHandle> {
         has_unknowns,
         net: Some(net),
         rows: fsm,
-    })
+    }
 }
 
 // [spec:foma:def:dynarray.fsm-read-reset-fn]
@@ -1205,7 +1205,7 @@ pub fn fsm_get_next_state(handle: &mut FsmReadHandle) -> i32 {
 // [spec:foma:sem:dynarray.fsm-read-done-fn]
 // [spec:foma:def:fomalib.fsm-read-done-fn]
 // [spec:foma:sem:fomalib.fsm-read-done-fn]
-pub fn fsm_read_done(handle: Box<FsmReadHandle>) -> Fsm {
+pub fn fsm_read_done(handle: FsmReadHandle) -> Fsm {
     /* frees lookuptable, fsm_sigma_list (array only — the symbol strings
     are copies here where C borrows net->sigma's), finals_head,
     initials_head, states_head, and the handle — all dropped here.
@@ -1762,7 +1762,7 @@ mod tests {
         assert_eq!(fsm_get_next_final(&mut h), -1);
         assert_eq!(fsm_get_next_final(&mut h), -1);
         /* reset restarts every iterator */
-        fsm_read_reset(Some(&mut *h));
+        fsm_read_reset(Some(&mut h));
         assert_eq!(fsm_get_next_initial(&mut h), 0);
         assert_eq!(fsm_get_next_final(&mut h), 1);
         /* reset(None) is a no-op, not a crash */
