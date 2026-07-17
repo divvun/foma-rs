@@ -214,7 +214,7 @@ pub fn fsm_sigma_net(net: Box<Fsm>) -> Box<Fsm> {
     fsm_state_set_current_state(&mut builder, 1, 1, 0);
     fsm_state_end_state(&mut builder);
     /* free(net->states) */
-    net.states = Vec::new();
+    net.states = Vec::new().into();
     fsm_state_close(&mut builder, &mut net);
     net.is_minimized = Tern::Yes;
     net.is_loop_free = Tern::Yes;
@@ -259,7 +259,7 @@ pub fn fsm_sigma_pairs_net(net: Box<Fsm>) -> Box<Fsm> {
 
     /* free(pairs); free(net->states) */
     drop(pairs);
-    net.states = Vec::new();
+    net.states = Vec::new().into();
 
     fsm_state_close(&mut builder, &mut net);
     if pathcount == 0 {
@@ -298,7 +298,7 @@ pub fn fsm_destroy(net: Box<Fsm>) {
     fsm_sigma_destroy(core::mem::take(&mut net.sigma));
     if !net.states.is_empty() {
         /* free(net->states) */
-        net.states = Vec::new();
+        net.states = Vec::new().into();
     }
     /* free(net) — drop */
 }
@@ -332,7 +332,7 @@ pub fn fsm_create(name: &str) -> Box<Fsm> {
         arcs_sorted_in: false,
         arcs_sorted_out: false,
         sigma: sigma_create(),
-        states: Vec::new(),
+        states: crate::line_table::LineTable::new(),
         medlookup: None,
     })
 }
@@ -355,7 +355,8 @@ pub fn fsm_empty_string() -> Box<Fsm> {
             start_state: 0,
         };
         2
-    ];
+    ]
+    .into();
     add_fsm_arc(&mut net.states, 0, 0, -1, -1, -1, 1, 1);
     add_fsm_arc(&mut net.states, 1, -1, -1, -1, -1, -1, -1);
     fsm_update_flags(&mut net, YES, YES, YES, YES, YES, NO);
@@ -384,7 +385,8 @@ pub fn fsm_identity() -> Box<Fsm> {
             start_state: 0,
         };
         3
-    ];
+    ]
+    .into();
     add_fsm_arc(&mut net.states, 0, 0, 2, 2, 1, 0, 1);
     add_fsm_arc(&mut net.states, 1, 1, -1, -1, -1, 1, 0);
     add_fsm_arc(&mut net.states, 2, -1, -1, -1, -1, -1, -1);
@@ -407,7 +409,7 @@ pub fn fsm_identity() -> Box<Fsm> {
 // [spec:foma:sem:fomalib.fsm-empty-set-fn]
 pub fn fsm_empty_set() -> Box<Fsm> {
     let mut net = fsm_create("");
-    net.states = fsm_empty();
+    net.states = fsm_empty().into();
     fsm_update_flags(&mut net, YES, YES, YES, YES, YES, NO);
     net.statecount = 1;
     net.finalcount = 0;
@@ -1202,7 +1204,7 @@ pub fn fsm_copy(net: &mut Fsm) -> Box<Fsm> {
         is_completed: net.is_completed,
         arcs_sorted_in: net.arcs_sorted_in,
         arcs_sorted_out: net.arcs_sorted_out,
-        states: Vec::new(),
+        states: crate::line_table::LineTable::new(),
         sigma: Vec::new(),
         // The C memcpy left medlookup SHARED between source and copy (a
         // double-free hazard); a deep clone here keeps them independent, as
@@ -1211,7 +1213,7 @@ pub fn fsm_copy(net: &mut Fsm) -> Box<Fsm> {
     });
 
     net_copy.sigma = sigma_copy(&net.sigma);
-    net_copy.states = fsm_state_copy(&net.states, net.linecount);
+    net_copy.states = fsm_state_copy(&net.states, net.linecount).into();
     net_copy
 }
 
@@ -1316,7 +1318,8 @@ pub fn union_quantifiers(quantifiers: &Quantifiers) -> Box<Fsm> {
             start_state: 0,
         };
         (syms + 1) as usize
-    ];
+    ]
+    .into();
     let mut i: i32 = 0;
     while i < syms {
         add_fsm_arc(&mut net.states, i, 0, symlo + i, symlo + i, 0, 1, 1);
@@ -1523,7 +1526,7 @@ mod tests {
 
     fn raw_fsm(states: Vec<FsmState>, arity: i32) -> Box<Fsm> {
         let mut net = fsm_create("");
-        net.states = states;
+        net.states = states.into();
         net.arity = arity;
         net
     }

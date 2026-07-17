@@ -1064,7 +1064,7 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Result<Option<Box<Fsm>>, FomaError
     each row instead: a well-formed file yields exactly linecount rows, a
     malformed one can't overrun a fixed buffer, and a negative/huge linecount no
     longer mis-sizes anything. */
-    net.states = Vec::new();
+    net.states = Vec::new().into();
     let mut laststate: i32 = -1;
     loop {
         io_gets(iobh, &mut buf);
@@ -1705,7 +1705,8 @@ mod tests {
                 start_state: 0,
             },
             sent(),
-        ];
+        ]
+        .into();
         net
     }
 
@@ -2234,7 +2235,8 @@ mod tests {
                 start_state: 0,
             },
             sent(),
-        ];
+        ]
+        .into();
         let f = Scratch::new("prologbug");
         foma_write_prolog(&mut net, Some(f.path())).expect("write prolog to scratch file");
         let s = std::fs::read_to_string(f.path()).unwrap();

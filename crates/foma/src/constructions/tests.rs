@@ -144,7 +144,8 @@ fn fsm_sort_lines_groups_by_state_keeps_sentinel_last() {
         st(0, 3, 3, 1, 0, 1),
         st(1, 5, 5, 0, 0, 0),
         sentinel(),
-    ];
+    ]
+    .into();
     fsm_sort_lines(&mut net);
     let states: Vec<i32> = lines(&net).iter().map(|l| l.0).collect();
     assert_eq!(states, vec![0, 1, 1], "grouped by ascending state_no");
@@ -193,7 +194,7 @@ fn add_fsm_arc_writes_line_with_truncation_and_returns_next() {
 #[test]
 fn fsm_add_to_states_shifts_state_and_target_but_not_minus_one() {
     let mut net = fsm_create("");
-    net.states = vec![st(0, 3, 3, 1, 0, 1), st(1, -1, -1, -1, 1, 0), sentinel()];
+    net.states = vec![st(0, 3, 3, 1, 0, 1), st(1, -1, -1, -1, 1, 0), sentinel()].into();
     fsm_add_to_states(&mut net, 5);
     assert_eq!(lines(&net), vec![(5, 3, 3, 6, 0, 1), (6, -1, -1, -1, 1, 0)]);
 }
@@ -235,7 +236,8 @@ fn fsm_count_recomputes_bookkeeping_with_grouped_finalcount() {
         st(1, 5, 5, 0, 1, 0), // second final line of state 1 -> NOT double counted
         st(2, -1, -1, -1, 1, 0),
         sentinel(),
-    ];
+    ]
+    .into();
     fsm_count(&mut net);
     assert_eq!(net.statecount, 3, "maxstate + 1");
     assert_eq!(net.linecount, 5, "non-sentinel lines + 1");

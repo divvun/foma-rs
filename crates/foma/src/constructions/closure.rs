@@ -119,7 +119,7 @@ pub fn fsm_kleene_closure(opts: &FomaOptions, net: Box<Fsm>, operation: i32) -> 
     net.arccount = arccount;
     net.pathcount = PATHCOUNT_UNKNOWN;
     /* free(net->states) */
-    net.states = new_fsm;
+    net.states = new_fsm.into();
     if sigma_find_number(EPSILON, &net.sigma).is_none() {
         sigma_add_special(EPSILON, &mut net.sigma);
     }

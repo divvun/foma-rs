@@ -610,7 +610,7 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
     }
 
     /* free(net1->states) */
-    net1.states = Vec::new();
+    net1.states = Vec::new().into();
     fsm_destroy(net2);
     fsm_state_close(&mut builder, &mut net1);
     /* free(point_a); free(point_b); free(index); free(outarray) */
@@ -829,7 +829,7 @@ pub fn fsm_cross_product(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> 
     }
 
     /* free(net1->states) */
-    net1.states = Vec::new();
+    net1.states = Vec::new().into();
     fsm_state_close(&mut builder, &mut net1);
 
     let mut epsilon = 0;

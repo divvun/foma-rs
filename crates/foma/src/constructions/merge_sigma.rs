@@ -273,7 +273,7 @@ fn expand_unknowns(net: &mut Fsm, mergesigma: &[Mergesigma], presence: u8) {
 
     add_fsm_arc(&mut new_state, j, -1, -1, -1, -1, -1, -1);
     /* free(net->states); net->states = new_state */
-    net.states = new_state;
+    net.states = new_state.into();
 }
 
 // [spec:foma:def:constructions.fsm-merge-sigma-fn]

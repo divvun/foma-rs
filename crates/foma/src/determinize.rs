@@ -254,7 +254,7 @@ pub(crate) fn fsm_subset(net: Box<Fsm>, operation: SubsetOp) -> Box<Fsm> {
         let builder = fsm_state_init(sm);
         /* consume the old line table; fsm_state_close installs the rebuilt
         one at the end */
-        net.states = Vec::new();
+        net.states = Vec::new().into();
         builder
     };
 

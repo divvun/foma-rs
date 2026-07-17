@@ -110,7 +110,7 @@ pub fn fsm_concat(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm
     add_fsm_arc(&mut new_fsm, j, -1, -1, -1, -1, -1, -1);
     /* free(net1->states) */
     fsm_destroy(net2);
-    net1.states = new_fsm;
+    net1.states = new_fsm.into();
     if sigma_find_number(EPSILON, &net1.sigma).is_none() {
         sigma_add_special(EPSILON, &mut net1.sigma);
     }
@@ -415,7 +415,7 @@ pub fn fsm_completes(opts: &FomaOptions, net: Box<Fsm>, operation: i32) -> Box<F
     add_fsm_arc(&mut new_fsm, offset, -1, -1, -1, -1, -1, -1);
     /* offset++ — the C bumps the counter one final time (unused) */
     /* free(net->states) */
-    net.states = new_fsm;
+    net.states = new_fsm.into();
     /* free(starts); free(finals); free(sinks); free(state_table) */
     drop(starts);
     drop(finals);
@@ -581,7 +581,7 @@ pub fn fsm_minus(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fsm>
 
     let _ = statecount;
     /* free(net1->states) */
-    net1.states = Vec::new();
+    net1.states = Vec::new().into();
     fsm_state_close(&mut builder, &mut net1);
     /* free(point_a); free(point_b) */
     drop(point_a);

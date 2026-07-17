@@ -134,7 +134,7 @@ pub fn fsm_coaccessible(net: Box<Fsm>) -> Box<Fsm> {
         // component into a startless net; a pruned start makes L empty regardless
         // of a disconnected component, so the empty machine is the correct result.
         if coacc.is_empty() || coacc[0] == 0 {
-            net.states = fsm_empty();
+            net.states = fsm_empty().into();
             fsm_sigma_destroy(core::mem::take(&mut net.sigma));
             net.sigma = sigma_create();
             net.statecount = 1;
@@ -408,7 +408,8 @@ mod tests {
                 start_state: 0,
             };
             3
-        ];
+        ]
+        .into();
         add_fsm_arc(&mut net.states, 0, 0, 3, 3, 1, 0, 1);
         add_fsm_arc(&mut net.states, 1, 1, -1, -1, -1, 0, 0);
         add_fsm_arc(&mut net.states, 2, -1, -1, -1, -1, -1, -1);

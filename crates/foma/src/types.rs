@@ -234,8 +234,9 @@ pub struct Fsm {
     pub arcs_sorted_in: bool,
     pub arcs_sorted_out: bool,
     /// The line table: sentinel-terminated (final line has state_no == -1),
-    /// exactly as in C (pointer to first line). Empty vec ↔ NULL.
-    pub states: Vec<FsmState>,
+    /// exactly as in C (pointer to first line). Empty ↔ NULL. See
+    /// [`LineTable`](crate::line_table::LineTable) for the storage seam.
+    pub states: crate::line_table::LineTable,
     pub sigma: Vec<Sigma>,
     // DEVIATION from C (aliased pointer; fsm_copy shares medlookup between copies and C double-frees)
     pub medlookup: Option<Box<Medlookup>>,

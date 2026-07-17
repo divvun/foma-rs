@@ -242,7 +242,7 @@ impl FsmBuilder {
         net.is_completed = Tern::Unk;
         net.arcs_sorted_in = false;
         net.arcs_sorted_out = false;
-        net.states = states;
+        net.states = states.into();
         /* free(slookup) */
         self.slookup = Vec::new();
     }

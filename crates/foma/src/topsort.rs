@@ -200,7 +200,7 @@ pub fn fsm_topsort(net: Box<Fsm>) -> Box<Fsm> {
         add_fsm_arc(&mut new_fsm, j, -1, -1, -1, -1, -1, -1);
         /* net->states = new_fsm; ... free(fsm) — the old array is dropped
         by the assignment */
-        net.states = new_fsm;
+        net.states = new_fsm.into();
         net.pathcount = grand_pathcount;
         net.is_loop_free = Tern::Yes;
         if overflow == 1 {
@@ -279,7 +279,7 @@ mod tests {
             /* state numbers equal topological rank: lines stay grouped in
             ascending new order and every arc goes low -> high */
             let mut prev = 0i32;
-            for l in &net.states {
+            for l in net.states.iter() {
                 if l.state_no == -1 {
                     break;
                 }

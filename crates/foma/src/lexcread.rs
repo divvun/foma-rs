@@ -1571,7 +1571,7 @@ fn lexc_to_fsm(lx: &mut LexcCompiler) -> Box<Fsm> {
         }
     }
     add_fsm_arc(&mut fsm, i, -1, -1, -1, -1, -1, -1);
-    net.states = fsm;
+    net.states = fsm.into();
     net.statecount = lx.lexc_statecount;
     fsm_update_flags(&mut net, UNK, UNK, UNK, UNK, UNK, UNK);
     /* lexsigma is now net.sigma (aliased in C); operate on net.sigma */

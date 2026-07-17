@@ -978,7 +978,7 @@ mod tests {
         sigma_add_number(&mut net.sigma, "c", 3);
         sigma_add_number(&mut net.sigma, "a", 4);
         sigma_add_number(&mut net.sigma, "b", 5);
-        net.states = vec![line(0, 3, 4, 0), line(0, 5, 0, 0), sentinel_line()];
+        net.states = vec![line(0, 3, 4, 0), line(0, 5, 0, 0), sentinel_line()].into();
         sigma_sort(&mut net);
         /* specials keep number/position; k-th non-special node gets the
         k-th smallest symbol and number k+3 */
@@ -1005,7 +1005,7 @@ mod tests {
         let mut net = fsm_create("t");
         sigma_add_number(&mut net.sigma, "b", 3);
         sigma_add_number(&mut net.sigma, "a", 5);
-        net.states = vec![line(0, 4, 3, 0), sentinel_line()];
+        net.states = vec![line(0, 4, 3, 0), sentinel_line()].into();
         sigma_sort(&mut net);
         assert_eq!(syms(&net.sigma), vec![pair(3, "a"), pair(4, "b")]);
         /* in=4 is absent from sigma → replacearray[4] == 4 (identity, kept);
@@ -1023,7 +1023,7 @@ mod tests {
         sigma_add("@_IDENTITY_SYMBOL_@", &mut net.sigma);
         sigma_add("a", &mut net.sigma);
         sigma_add("b", &mut net.sigma); /* unused, but kept: IDENTITY blocks cleanup */
-        net.states = vec![line(0, 3, 3, 0), sentinel_line()];
+        net.states = vec![line(0, 3, 3, 0), sentinel_line()].into();
         sigma_cleanup(&mut net, 0);
         assert_eq!(
             syms(&net.sigma),
@@ -1033,7 +1033,7 @@ mod tests {
         let mut net = fsm_create("t");
         sigma_add("@_UNKNOWN_SYMBOL_@", &mut net.sigma);
         sigma_add("a", &mut net.sigma);
-        net.states = vec![line(0, 3, 3, 0), sentinel_line()];
+        net.states = vec![line(0, 3, 3, 0), sentinel_line()].into();
         sigma_cleanup(&mut net, 0);
         assert_eq!(
             syms(&net.sigma),
@@ -1048,7 +1048,7 @@ mod tests {
         let mut net = fsm_create("t");
         sigma_add("a", &mut net.sigma);
         sigma_add("b", &mut net.sigma);
-        net.states = vec![line(0, 3, 3, 0), sentinel_line()];
+        net.states = vec![line(0, 3, 3, 0), sentinel_line()].into();
         sigma_cleanup(&mut net, 0);
         assert_eq!(syms(&net.sigma), vec![pair(3, "a")]);
     }
@@ -1064,7 +1064,7 @@ mod tests {
         sigma_add("a", &mut net.sigma); /* 3, used */
         sigma_add("b", &mut net.sigma); /* 4, unused */
         sigma_add("c", &mut net.sigma); /* 5, used → renumbered 4 */
-        net.states = vec![line(0, 3, 5, 0), sentinel_line()];
+        net.states = vec![line(0, 3, 5, 0), sentinel_line()].into();
         sigma_cleanup(&mut net, 1);
         /* unattested reserved 0–2 entries are removed too */
         assert_eq!(syms(&net.sigma), vec![pair(3, "a"), pair(4, "c")]);
@@ -1079,7 +1079,7 @@ mod tests {
         let mut net = fsm_create("t");
         sigma_add("@_EPSILON_SYMBOL_@", &mut net.sigma); /* 0, used on an arc */
         sigma_add("a", &mut net.sigma); /* 3, used */
-        net.states = vec![line(0, 0, 3, 0), sentinel_line()];
+        net.states = vec![line(0, 0, 3, 0), sentinel_line()].into();
         sigma_cleanup(&mut net, 1);
         assert_eq!(
             syms(&net.sigma),

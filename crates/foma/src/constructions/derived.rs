@@ -153,7 +153,8 @@ pub fn fsm_symbol(symbol: &str) -> Box<Fsm> {
                 start_state: 0,
             };
             2
-        ];
+        ]
+        .into();
         add_fsm_arc(&mut net.states, 0, 0, -1, -1, -1, 1, 1);
         add_fsm_arc(&mut net.states, 1, -1, -1, -1, -1, -1, -1);
         net.arccount = 0;
@@ -180,7 +181,8 @@ pub fn fsm_symbol(symbol: &str) -> Box<Fsm> {
                 start_state: 0,
             };
             3
-        ];
+        ]
+        .into();
         add_fsm_arc(&mut net.states, 0, 0, symbol_no, symbol_no, 1, 0, 1);
         add_fsm_arc(&mut net.states, 1, 1, -1, -1, -1, 1, 0);
         add_fsm_arc(&mut net.states, 2, -1, -1, -1, -1, -1, -1);
@@ -538,7 +540,7 @@ pub fn fsm_unflatten(
         fsm_state_end_state(&mut builder);
     }
     /* free(net->states) */
-    net.states = Vec::new();
+    net.states = Vec::new().into();
     fsm_state_close(&mut builder, &mut net);
     /* free(point_a) */
     drop(point_a);
@@ -667,7 +669,7 @@ pub fn fsm_shuffle(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>) -> Box<Fs
     }
 
     /* free(net1->states) */
-    net1.states = Vec::new();
+    net1.states = Vec::new().into();
     fsm_state_close(&mut builder, &mut net1);
     /* free(point_a); free(point_b) */
     drop(point_a);
@@ -811,7 +813,8 @@ pub fn fsm_universal() -> Box<Fsm> {
             start_state: 0,
         };
         2
-    ];
+    ]
+    .into();
     let s = sigma_add_special(IDENTITY, &mut net.sigma);
     add_fsm_arc(&mut net.states, 0, 0, s, s, 0, 1, 1);
     add_fsm_arc(&mut net.states, 1, -1, -1, -1, -1, -1, -1);
@@ -1338,7 +1341,7 @@ pub fn fsm_ignore(opts: &FomaOptions, net1: Box<Fsm>, net2: Box<Fsm>, operation:
     drop(return_state);
     /* free(net1->states) */
     fsm_destroy(net2);
-    net1.states = new_fsm;
+    net1.states = new_fsm.into();
     fsm_update_flags(&mut net1, NO, NO, NO, NO, NO, NO);
     fsm_count(&mut net1);
     net1

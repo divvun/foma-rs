@@ -18,6 +18,7 @@ pub mod iface;
 pub mod int_stack;
 pub mod io;
 pub mod lexcread;
+pub mod line_table;
 pub mod mem;
 pub mod minimize;
 pub mod options;
