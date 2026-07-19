@@ -88,6 +88,13 @@ fn expand_unknowns(net: &mut Fsm, mergesigma: &[Mergesigma], presence: u8) {
         if line_in == UNKNOWN && line_out == UNKNOWN {
             net_adds += net_unk * net_unk - net_unk + 2 * net_unk;
         }
+        /* @:? (IDENTITY input, UNKNOWN output) is the one label that matches
+        BOTH the IDENTITY block and the (in != UNKNOWN && out == UNKNOWN) block
+        in the write pass below — each emits its own base arc, so the single
+        base line counted in net_lines is one short. Budget the second base. */
+        if line_in == IDENTITY && line_out == UNKNOWN {
+            net_adds += 1;
+        }
         i += 1;
     }
 
@@ -458,5 +465,57 @@ pub fn fsm_merge_sigma(opts: &FomaOptions, net1: &mut Fsm, net2: &mut Fsm) {
 
     if unknown_2 != 0 && equal == 0 {
         expand_unknowns(net2, &mergesigma, 1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn terminator() -> FsmState {
+        FsmState {
+            state_no: -1,
+            r#in: -1,
+            out: -1,
+            target: -1,
+            final_state: -1,
+            start_state: -1,
+        }
+    }
+
+    /// Regression: an `@:?` arc (IDENTITY input, UNKNOWN output) is the one
+    /// label matching BOTH the IDENTITY and the `x:?` write-pass blocks, so it
+    /// emits two base arcs while the sizing pass budgeted one — the arc buffer
+    /// was one row short and `add_fsm_arc` panicked writing the terminator.
+    /// Reachable via sigma-merging compose (e.g. pmatch UpCase).
+    #[test]
+    fn expand_unknowns_identity_unknown_arc_does_not_overflow() {
+        let mut net = fsm_create("id-unk");
+        net.states = vec![
+            FsmState {
+                state_no: 0,
+                r#in: IDENTITY as i16,
+                out: UNKNOWN as i16,
+                target: 0,
+                final_state: 1,
+                start_state: 1,
+            },
+            terminator(),
+        ]
+        .into();
+        // one presence-2 real symbol → net_unk == 1
+        let mergesigma = vec![Mergesigma {
+            symbol: Some("a".into()),
+            presence: 2,
+            number: 3,
+        }];
+
+        // Before the fix this panicked with an out-of-bounds arc write.
+        expand_unknowns(&mut net, &mergesigma, 2);
+
+        let rows = net.states.rows();
+        let arc_rows = rows.iter().take_while(|r| r.state_no != -1).count();
+        // IDENTITY block: `@:?` base + `a:a`; `x:?` block: `@:?` base + `@:a`.
+        assert_eq!(arc_rows, 4);
     }
 }
