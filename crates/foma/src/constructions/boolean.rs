@@ -162,9 +162,6 @@ pub fn fsm_union(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
 // [spec:foma:def:constructions.fsm-completes-fn]
 // [spec:foma:sem:constructions.fsm-completes-fn]
 pub fn fsm_completes(opts: &FomaOptions, net: Fsm, operation: i32) -> Fsm {
-    /* TODO: this currently relies on that the sigma is gap-free in its numbering  */
-    /* which can't always be counted on, especially when reading external machines */
-
     /* TODO: check arity */
 
     let mut net = net;
@@ -286,6 +283,18 @@ pub fn fsm_completes(opts: &FomaOptions, net: Fsm, operation: i32) -> Fsm {
     /* of the completed machine will be |Sigma| * |States| in all cases */
 
     sigsize += 2;
+
+    /* The state table below is indexed by symbol NUMBER (an arc's `r#in`, and
+    the `2..=last_sigma` completion loops), but `sigsize` derives from sigma
+    SIZE. For gap-free numbering the two agree (sigsize always exceeds
+    last_sigma by ≥1), but a sparse sigma — a hole in the symbol numbers, e.g.
+    an externally-read machine, or the UNKNOWN removal above — can push
+    last_sigma past sigsize and run the indexing off the table (C overran the
+    malloc). Widen the stride to cover the largest symbol number; this is a
+    no-op (byte-identical) for gap-free sigma. */
+    if sigsize < last_sigma + 1 {
+        sigsize = last_sigma + 1;
+    }
 
     /* C: malloc'd (uninitialized); initialized to -1 just below */
     let mut state_table: Vec<i32> = vec![0; (sigsize * statecount) as usize];
@@ -593,4 +602,59 @@ pub fn fsm_invert(net: Fsm) -> Fsm {
     }
     std::mem::swap(&mut net.arcs_sorted_in, &mut net.arcs_sorted_out);
     net
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{FsmState, Sigma, Tern};
+
+    /// Regression: `fsm_completes` strides its state table by `sigsize` (from
+    /// sigma SIZE) but indexes it by symbol NUMBER (up to `sigma_max`). A sparse
+    /// sigma — a gap in the symbol numbers — makes the max number exceed the
+    /// stride and the completion loops ran off the table (C overran the malloc).
+    /// A single-state net over symbols {3, 7} with an arc on 7 reproduces it.
+    #[test]
+    fn fsm_complete_survives_gap_numbered_sigma() {
+        let opts = &FomaOptions::default();
+        let mut net = fsm_create("gap");
+        net.arity = 1;
+        // Real symbols numbered 3 and 7 — a hole at 4,5,6, so sigma_max (7)
+        // outruns sigma_size (2).
+        net.sigma = vec![
+            Sigma {
+                number: 3,
+                symbol: "a".into(),
+            },
+            Sigma {
+                number: 7,
+                symbol: "b".into(),
+            },
+        ];
+        // Skip the leading minimize so the sparse numbering reaches the table.
+        net.is_minimized = Tern::Yes;
+        net.states = vec![
+            FsmState {
+                state_no: 0,
+                r#in: 7,
+                out: 7,
+                target: 0,
+                final_state: 1,
+                start_state: 1,
+            },
+            FsmState {
+                state_no: -1,
+                r#in: -1,
+                out: -1,
+                target: -1,
+                final_state: -1,
+                start_state: -1,
+            },
+        ]
+        .into();
+
+        // Before the fix this panicked with an out-of-bounds state-table write.
+        let out = fsm_complete(opts, net);
+        assert!(out.statecount >= 2); // original state + invented sink
+    }
 }

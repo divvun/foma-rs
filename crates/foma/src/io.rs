@@ -37,7 +37,7 @@ use crate::trie::{
     fsm_trie_add_word, fsm_trie_done, fsm_trie_end_word, fsm_trie_init, fsm_trie_symbol,
 };
 use crate::types::{
-    DefinedNetworks, Fsm, FsmConstructHandle, FsmReadBinaryHandle, FsmState, IDENTITY, Tern,
+    DefinedNetworks, Fsm, FsmConstructHandle, FsmReadBinaryHandle, FsmState, IDENTITY, Sigma, Tern,
     UNKNOWN,
 };
 use smol_str::SmolStr;
@@ -908,6 +908,55 @@ pub(crate) fn explode_line(buf: &str, values: &mut Vec<i32>) -> i32 {
     items
 }
 
+/// Validate the just-parsed states rows of an untrusted image before they
+/// become the net's line table. Downstream consumers index arrays by these
+/// values without re-checking — net_print_att `sl[in/out]` (sized sigma_max+1),
+/// foma_write_prolog `finals[state_no]` (sized statecount) and
+/// `used_symbols[in/out]`, apply's per-state tables (statecount), etc. C
+/// trusted the file and read/wrote out of bounds; reject an inconsistent net
+/// here so a crafted image can't drive an out-of-bounds index later. A
+/// well-formed image always passes (arc labels are sigma members, states are
+/// 0..statecount, and the section ends with the -1 sentinel row).
+fn validate_loaded_states(
+    rows: &[FsmState],
+    statecount: i32,
+    sigma: &[Sigma],
+) -> Result<(), FomaError> {
+    // A non-empty section must carry the -1 sentinel row, or LineTable::from
+    // (which locates the terminator) would panic.
+    if !rows.is_empty() && !rows.iter().any(|r| r.state_no == -1) {
+        return Err(FomaError::Format(
+            "states section not sentinel-terminated".to_string(),
+        ));
+    }
+    let maxsig = sigma_max(sigma);
+    for r in rows {
+        if r.state_no == -1 {
+            break; // sentinel; from_rows drops anything past it
+        }
+        if r.state_no < 0 || r.state_no >= statecount {
+            return Err(FomaError::Format(
+                "state number outside declared statecount".to_string(),
+            ));
+        }
+        // Arc rows carry symbol/target; arc-less state markers are in==out==target==-1.
+        if r.r#in != -1 {
+            let (rin, rout) = (r.r#in as i32, r.out as i32);
+            if rin < 0 || rin > maxsig || rout < 0 || rout > maxsig {
+                return Err(FomaError::Format(
+                    "arc symbol number outside sigma".to_string(),
+                ));
+            }
+            if r.target < 0 || r.target >= statecount {
+                return Err(FomaError::Format(
+                    "arc target outside declared statecount".to_string(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /* The file format we use is an extremely simple text format */
 /* which is gzip compressed through libz and consists of the following sections: */
 /* ##foma-net VERSION## / ##props## / PROPERTIES LINE / ##sigma## / ...SIGMA... */
@@ -1126,16 +1175,7 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Result<Option<Fsm>, FomaError> {
         };
         v.push(st);
     }
-    /* A well-formed states section ends with the `-1 -1 -1 -1 -1` sentinel row,
-    which the loop above pushes into `v`. A truncated/malformed section (real
-    rows, then a `#` marker with no sentinel) leaves `v` unterminated, and
-    `LineTable::from` cannot locate the terminator — reject it here rather than
-    let the conversion panic. (Empty section ↔ empty `v` ↔ NULL table is fine.) */
-    if !v.is_empty() && !v.iter().any(|r| r.state_no == -1) {
-        return Err(FomaError::Format(
-            "states section not sentinel-terminated".to_string(),
-        ));
-    }
+    validate_loaded_states(&v, net.statecount, &net.sigma)?;
     net.states = v.into();
 
     if buf == "##cmatrix##" {
@@ -2524,6 +2564,31 @@ mod tests {
         // cannot locate. io_net_read must return Format, not panic on the
         // conversion (regression: it used to `.expect()` the sentinel).
         let text = AB_FOMA_TEXT.replace("-1 -1 -1 -1 -1\n", "");
+        let mut iobh = io_init();
+        iobh.io_buf = Some(text.into_bytes());
+        iobh.io_buf_ptr = 0;
+        assert!(matches!(io_net_read(&mut iobh), Err(FomaError::Format(_))));
+    }
+
+    // [spec:foma:sem:io.io-net-read-fn+5/test]
+    #[test]
+    fn io_net_read_rejects_arc_symbol_outside_sigma() {
+        // Arc input symbol 99 against a sigma whose max is 4: net_print_att would
+        // index sl[99] and foma_write_prolog used_symbols[99] out of bounds.
+        // io_net_read must reject rather than load a net that crashes on print.
+        let text = AB_FOMA_TEXT.replace("0 3 4 1 0", "0 99 4 1 0");
+        let mut iobh = io_init();
+        iobh.io_buf = Some(text.into_bytes());
+        iobh.io_buf_ptr = 0;
+        assert!(matches!(io_net_read(&mut iobh), Err(FomaError::Format(_))));
+    }
+
+    // [spec:foma:sem:io.io-net-read-fn+5/test]
+    #[test]
+    fn io_net_read_rejects_arc_target_outside_statecount() {
+        // Arc target 9 against a declared statecount of 2: foma_write_prolog
+        // finals[.] and apply's per-state tables index by state numbers.
+        let text = AB_FOMA_TEXT.replace("0 3 4 1 0", "0 3 4 9 0");
         let mut iobh = io_init();
         iobh.io_buf = Some(text.into_bytes());
         iobh.io_buf_ptr = 0;
