@@ -136,6 +136,15 @@ children (
                 )
             }
         )
+        sealed true
+        log (
+            {
+                at 2026-07-19T21:36:16.223288Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "sealed — decomposition asserted complete (nplan seal)"
+            }
+        )
     }
 
     {
@@ -296,6 +305,15 @@ children (
                 )
             }
         )
+        sealed true
+        log (
+            {
+                at 2026-07-19T21:36:16.384581Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "sealed — decomposition asserted complete (nplan seal)"
+            }
+        )
     }
 
     {
@@ -426,6 +444,15 @@ children (
                         text "Todo → Done (nplan complete)"
                     }
                 )
+            }
+        )
+        sealed true
+        log (
+            {
+                at 2026-07-19T21:36:16.468379Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "sealed — decomposition asserted complete (nplan seal)"
             }
         )
     }
@@ -603,17 +630,34 @@ children (
                 )
             }
         )
+        sealed true
+        log (
+            {
+                at 2026-07-19T21:36:16.551664Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "sealed — decomposition asserted complete (nplan seal)"
+            }
+        )
     }
 
     {
         id foma-mono-io
         title "Monomorphise foma io writers (kill dyn Write): static-dispatch Output enum + generic W/R params; add generic fsm_read_binary/fsm_write_binary stream APIs"
+        sealed true
         log (
             {
                 at 2026-07-06T15:51:27.700318Z
                 author "brendan@necessary.nu"
                 kind @status
                 text "Todo → Done (nplan_complete)"
+            }
+
+            {
+                at 2026-07-19T21:36:13.337114Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "sealed — decomposition asserted complete (nplan seal)"
             }
         )
     }
@@ -626,6 +670,7 @@ children (
                 id w5-correctness
                 title "Tier A: wrong output on valid input (6 correctness bugs)"
                 priority 0
+                sealed true
                 log (
                     {
                         at 2026-07-06T23:32:28.196678Z
@@ -647,6 +692,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:14.634407Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -654,6 +706,7 @@ children (
                 id w5-robustness
                 title "Tier C: crash/hang on malformed input → graceful errors (4 bugs)"
                 priority 1
+                sealed true
                 log (
                     {
                         at 2026-07-06T23:32:34.860065Z
@@ -675,6 +728,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:14.786649Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -682,6 +742,7 @@ children (
                 id w5-cli
                 title "Tier B: CLI/UX papercuts on valid input (5 bugs)"
                 priority 2
+                sealed true
                 log (
                     {
                         at 2026-07-06T23:32:43.143589Z
@@ -703,6 +764,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:14.549964Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -710,6 +778,7 @@ children (
                 id w5-degenerate
                 title "Tier D: dead code + degenerate-only correctness (4 bugs)"
                 priority 3
+                sealed true
                 log (
                     {
                         at 2026-07-06T23:32:46.946807Z
@@ -731,6 +800,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:14.714782Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -738,6 +814,7 @@ children (
                 id w5-cleanup
                 title "Tier E: heuristics, leaks, harmless (verify + tidy, ~9 items)"
                 priority 4
+                sealed true
                 log (
                     {
                         at 2026-07-06T23:32:55.287344Z
@@ -766,7 +843,23 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:14.47701Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
+            }
+        )
+        sealed true
+        log (
+            {
+                at 2026-07-19T21:36:16.64176Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "sealed — decomposition asserted complete (nplan seal)"
             }
         )
     }
@@ -774,6 +867,7 @@ children (
     {
         id wave-6-harden
         title "Wave 6: harden latent panics → graceful failures (C-faithfulness dropped; +N divergences). fsm_coaccessible re-prune crash, print dot/cmatrix + read prolog + io_net_read + mystrncpy panics on unwritable/malformed input."
+        sealed true
         log (
             {
                 at 2026-07-07T14:36:21.431635Z
@@ -795,6 +889,13 @@ children (
                 kind @status
                 text "Doing → Done (nplan_complete)"
             }
+
+            {
+                at 2026-07-19T21:36:16.75339Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "sealed — decomposition asserted complete (nplan seal)"
+            }
         )
     }
 
@@ -806,6 +907,7 @@ children (
                 id w7-lexcread
                 title "Tier 1: lexcread tokenizer → &str/char/iterators. Delete mystrncpy/cstrlen/cstrdup/cstr/sym_eq/lexc_find_delim/lexc_deescape_string/to_cbuf/foma_reescape; fuse de-escape into tokenizer (0xff marker gone); feed nfst-lexc EntrySpec strings directly."
                 priority 0
+                sealed true
                 log (
                     {
                         at 2026-07-07T14:58:48.037171Z
@@ -827,6 +929,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:14.950927Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -834,6 +943,7 @@ children (
                 id w7-utf8-io
                 title "Tier 2: utf8.rs std swaps (utf8strlen/ishexstr/streqrep/strip_newline/dequote_string); rewrite fsm_read_prolog parser (kill field! wall); FSM_NAME_LEN char-boundary truncation (fix codepoint splitting)."
                 priority 1
+                sealed true
                 log (
                     {
                         at 2026-07-07T15:17:26.013793Z
@@ -855,6 +965,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:15.083183Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -862,6 +979,7 @@ children (
                 id w7-apply-runtime
                 title "Tier 3: apply/spelling runtime — ApplyHandle instring/outstring Vec<u8>→String; delete buf_strcpy/buf_memcpy/buf_sprintf/outstring_result/cstr/wtail; MED print_match via char_indices; sigma-trie stays byte-level on .as_bytes()."
                 priority 2
+                sealed true
                 log (
                     {
                         at 2026-07-07T19:26:13.89152Z
@@ -876,7 +994,23 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:14.867566Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
+            }
+        )
+        sealed true
+        log (
+            {
+                at 2026-07-19T21:36:16.829072Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "sealed — decomposition asserted complete (nplan seal)"
             }
         )
     }
@@ -889,6 +1023,7 @@ children (
                 id w8-stack
                 title "Tier 1: network stack → Session.stack. Create Session; move MAIN_STACK/ARENA in; stack_* wrappers take &mut Session; thread &mut Session through dispatch, ~100 iface_* fns, bins, and iface tests. Remove the stack thread_locals."
                 priority 0
+                sealed true
                 log (
                     {
                         at 2026-07-08T16:39:29.93291Z
@@ -924,6 +1059,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:15.313907Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -931,6 +1073,7 @@ children (
                 id w8-options
                 title "Tier 2: 21 G_* options (mem.rs) → Session fields. Reads are mostly at iface entry points + a few library sites (fsm_minimize G_MINIMAL/hopcroft, io G_ATT_EPSILON, lexc G_LEXC_ALIGN) — pass those as params where the cascade is small."
                 priority 1
+                sealed true
                 log (
                     {
                         at 2026-07-09T14:38:21.504551Z
@@ -952,6 +1095,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:15.238654Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -959,6 +1109,7 @@ children (
                 id w8-defines
                 title "Tier 3: G_DEFINES/G_DEFINES_F (define registry) → Session. Already ~90% threaded (fsm_parse_regex takes a defines param); replace the ~21 iface/lexc thread_local reads with Session.defines. Fold in FSM_OPTIONS."
                 priority 2
+                sealed true
                 log (
                     {
                         at 2026-07-09T15:03:16.781201Z
@@ -980,7 +1131,23 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:15.158712Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
+            }
+        )
+        sealed true
+        log (
+            {
+                at 2026-07-19T21:36:16.909025Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "sealed — decomposition asserted complete (nplan seal)"
             }
         )
     }
@@ -993,6 +1160,7 @@ children (
                 id w9-state
                 title "Tier 1: leftover hidden state. QUANTIFIERS registry → Session field (sibling of defines); regex G_INTERNAL_SYM → Session counter + G_PARSE_DEPTH → local/param; dynarray BUILDER thread_local → threaded FsmBuilder handle through the fsm_state_* veneer; int_stack/ptr_stack thread_locals → owned per-algorithm scratch structs (coaccessible, fsm_count/fsm_isidentity, spelling); dynarray RAND_NEXT LCG → owned state (Session/handle)."
                 priority 0
+                sealed true
                 log (
                     {
                         at 2026-07-10T14:06:41.548547Z
@@ -1014,6 +1182,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:16.144941Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1022,6 +1197,7 @@ children (
                 title "Tier 2: i32-as-bool → bool. ~19 predicate fns (fsm_isempty/isuniversal/isfunctional/isidentity/issequential/isunambiguous, fsm_equivalent, stack_isempty, apply_stack_isempty, int/ptr_stack_isempty/isfull/find, flag_check, iface_stack_check, fsm_read_is_final/is_initial, apply_at_last_arc/binarysearch/follow_next_arc, ishexstr) return bool; ~117 == 0 / != 0 call sites cleaned. Genuine value-codes (sigma_find -1, stack_rotate -1) stay i32."
                 priority 1
                 deps (w9-state)
+                sealed true
                 log (
                     {
                         at 2026-07-10T14:38:58.504102Z
@@ -1043,6 +1219,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:15.395165Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1051,6 +1234,7 @@ children (
                 title "Tier 3: silent library — Result + tracing. io save_defined/load_defined/foma_net_print/foma_write_prolog/fsm_write_binary_file/io_net_read → Result<_, FomaError>; user-facing success/error text moves up to iface/bins (byte-exact transcripts preserved); library diagnostics (lexc warnings, flag_eliminate skips, add_defined_function redefined, compose flag warning, apply flag messages) become tracing events (tracing dep in lib; bins install a stderr tracing-subscriber formatted to keep CLI output identical). High-risk unwraps on valid inputs (sigma_remove*, lexc trans, med confusion case) → graceful."
                 priority 2
                 deps (w9-bools)
+                sealed true
                 log (
                     {
                         at 2026-07-10T16:59:08.584263Z
@@ -1065,6 +1249,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:15.800863Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1073,6 +1264,7 @@ children (
                 title "Tier 4: ergonomics. ApplyHandle FlagList assoc-list → HashMap (hot apply path); Iterator impls over FsmReadHandle arcs/states/finals/initials and Sigma traversal (mirroring the proven ApplyIter pattern); internal while-let sigma walks migrate where it simplifies."
                 priority 3
                 deps (w9-results)
+                sealed true
                 log (
                     {
                         at 2026-07-10T22:18:45.370349Z
@@ -1087,6 +1279,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:15.562193Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1094,12 +1293,20 @@ children (
                 id w9-harden
                 title "Tier: robustness — no bare unwrap/panic/unsafe. Delete the 3 dead-prototype panics (save_stack_att, fsm_find/mark_ambiguous); convert every non-test bare .unwrap() (~500) to .expect(\"invariant\") for structural invariants or Result<_, FomaError> for input-reachable errors. unsafe already 0."
                 priority 2
+                sealed true
                 log (
                     {
                         at 2026-07-10T21:55:55.442955Z
                         author "brendan@necessary.nu"
                         kind @status
                         text "Todo → Done (nplan_complete)"
+                    }
+
+                    {
+                        at 2026-07-19T21:36:15.645386Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
                     }
                 )
             }
@@ -1108,12 +1315,20 @@ children (
                 id w9-sigma
                 title "Sigma linked list → Vec. Replace Option<Box<Sigma>>/next-chain with Vec<Sigma> (Sigma { number, symbol }); Fsm.sigma becomes a non-Option Vec; delete the -1 empty-sentinel head + special-casing. Kills ~180 unwraps and the sentinel. Preserve list/insertion order (wire format), sparse independent numbers, sigma_sort reorder. Re-verify transcripts; then fix the hfst backend (reads n.number/symbol/next) on its branch."
                 priority 2
+                sealed true
                 log (
                     {
                         at 2026-07-10T19:30:42.570971Z
                         author "brendan@necessary.nu"
                         kind @status
                         text "Todo → Done (nplan_complete)"
+                    }
+
+                    {
+                        at 2026-07-19T21:36:15.991814Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
                     }
                 )
             }
@@ -1122,6 +1337,7 @@ children (
                 id w9-io-errors
                 title "Kill error-swallowing `let _ =`. ~108 non-test `let _ =` on IO write/read/flush/finish/seek discard the error silently (iface/common.rs print_* writers 44, io.rs foma_net_print/write_prolog/net_print_att/binary-read 37, apply_cmds 14, spelling 4, bins 9). Each → `?`/Result where it can meaningfully fail and propagates, else `.expect(\\\"why success is expected\\\")`. Never leave `let _ =` on a Result. Keep genuine value-drops (stack_pop, unused-var). Completes the silent-library goal w9-results only half-did."
                 priority 2
+                sealed true
                 log (
                     {
                         at 2026-07-10T23:03:20.819698Z
@@ -1136,6 +1352,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:15.720794Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1143,6 +1366,7 @@ children (
                 id w9-return-types
                 title "De-C-ify remaining i32 return types (4 categories): vestigial always-1 → () (stack_init/clear/print, fsm_destroy, fsm_sigma_destroy, print_net/stats/sigma/dot/view_net); comparators -1/0/1 → std::cmp::Ordering (ssortcmp, trans_sort_cmp×2, sort_cmp, linesortcompin/out) + namecmp → bool; -1-not-found → Option (sigma_find/find_number/substitute, lexc_find_sigma_hash/find_mc, triplet_hash_find); read/write status → Result (fsm_write_binary_file, iface_read_att/prolog/spaced_text/text, iface_write_att, add_defined/remove_defined). Genuine i32 VALUES stay. hfst-facing changes (fsm_write_binary_file) flagged for the backend catch-up."
                 priority 2
+                sealed true
                 log (
                     {
                         at 2026-07-11T00:15:11.359723Z
@@ -1157,6 +1381,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:15.908896Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1164,6 +1395,7 @@ children (
                 id w9-smolstr
                 title "Tier 8: owned symbol/name/value String fields → smol_str::SmolStr (small-string-optimized, cheap clone, immutable), matching nfst's SmolStr migration. Sigma.symbol, Fsm.name, defined-net/function names, mergesigma symbol, apply/MED handle symbol/name/flag/value fields, iface option strings → SmolStr / Option<SmolStr>. The 4 mutable accumulator buffers (Apply/MED instring/outstring, built via push_str/truncate/clear) STAY String — SmolStr is immutable; results convert to SmolStr at return points. nfst boundary (EntrySpec String/Pair) converts via .into(), forward-compatible with nfst's own SmolStr landing. Public API shift → hfst-backend catch-up item."
                 priority 8
+                sealed true
                 log (
                     {
                         at 2026-07-11T11:58:09.728756Z
@@ -1178,6 +1410,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:16.069719Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1185,6 +1424,7 @@ children (
                 id w9-cstring
                 title "Tier 9: kill the remaining byte-level C-string helpers in utf8.rs and friends. Delete dead ones (remove_trailing/trim/strip_newline — zero live callers); idiomatize the utf8skip byte-walk (13 sites) to char_indices()/chars() on &str; consider atoi/atoll → parse and xstrrev → chars().rev(). Keep genuine wire/byte-domain (the \\uXXXX decode chain, escape_string, streqrep, cstrlen/cstr_at NUL-field readers, utf8iscombining)."
                 priority 9
+                sealed true
                 log (
                     {
                         at 2026-07-11T13:10:09.861493Z
@@ -1199,7 +1439,23 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:15.469449Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
+            }
+        )
+        sealed true
+        log (
+            {
+                at 2026-07-19T21:36:16.987061Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "sealed — decomposition asserted complete (nplan seal)"
             }
         )
     }
@@ -1212,6 +1468,7 @@ children (
                 id w10-io-panics
                 title "Fix io_net_read OOB panics on malformed binary files (states loop sized to untrusted linecount io.rs:1064; cmatrix confusion_matrix[cm] io.rs:1142) — bound-check and return FomaError::Format like the sibling sigma-section errors"
                 priority 0
+                sealed true
                 log (
                     {
                         at 2026-07-12T22:51:53.041157Z
@@ -1226,6 +1483,13 @@ children (
                         kind @status
                         text "Todo → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:14.098353Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1233,6 +1497,7 @@ children (
                 id w10-unwrap-sweep
                 title "Guard-then-unwrap sweep: kill the 2 bare non-test unwraps (flags.rs:638/659) by binding start in the pattern; drop/bind 8 redundant is_some guards (products.rs:723/768/797, derived.rs:503, stack.rs:372/480, flookup.rs:602, cgflookup.rs:499)"
                 priority 1
+                sealed true
                 log (
                     {
                         at 2026-07-12T22:52:33.655258Z
@@ -1247,6 +1512,13 @@ children (
                         kind @status
                         text "Todo → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:14.337283Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1254,6 +1526,7 @@ children (
                 id w10-i32-enums-plain
                 title "Magic-i32 → plain enums (mutually-exclusive, no wire impact): ReplaceDir (rewrite rule_direction), SubsetOp (determinize), ApplyDir (iface AP_D/U/M), WordSide (words-file 0/1/2), FlagBuildResult (flags FAIL/SUCCEED/NONE), FlagCheck (apply FAIL/SUCCEED)"
                 priority 1
+                sealed true
                 log (
                     {
                         at 2026-07-12T23:36:14.203463Z
@@ -1268,6 +1541,13 @@ children (
                         kind @status
                         text "Todo → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:13.674768Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1275,6 +1555,7 @@ children (
                 id w10-i32-bitflags
                 title "Magic-i32 → bitflags (set semantics, +→| and &-tests preserved): ApplyMode (mode UP/DOWN/LOWER/UPPER/ENUMERATE/RANDOM/…), ArrowType (rewrite arrow_type), Sides (M_UPPER/M_LOWER)"
                 priority 1
+                sealed true
                 log (
                     {
                         at 2026-07-12T23:57:48.272528Z
@@ -1289,6 +1570,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:13.521691Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1296,6 +1584,7 @@ children (
                 id w10-i32-flagtype
                 title "Magic-i32 → FlagType bitflags: FLAG_* type domain (Flags.type, FlagLookup.type, flag_get_type/flag_type_to_char/flag_create_symbol/flag_build/apply_check_flag). Must stay bitflags to keep the set-membership &-test at flags.rs:104 and apply.rs:997/1119"
                 priority 2
+                sealed true
                 log (
                     {
                         at 2026-07-12T22:52:19.976958Z
@@ -1317,6 +1606,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:13.848529Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1324,6 +1620,7 @@ children (
                 id w10-i32-bool-block
                 title "Magic-i32 → bool: ApplyHandle has_flags/obey_flags/show_flags/print_space/print_pairs/binsearch/indexed/state_has_index/iterate_old + Searchstack mirrors + FlagState.neg/oldflagneg; flags/determinize locals (found/flag/change/has_trans/fs, isflag/ftable→Vec<bool>). Keep C-ABI setter params value:i32 (do !=0 inside)"
                 priority 2
+                sealed true
                 log (
                     {
                         at 2026-07-13T00:10:01.902113Z
@@ -1338,6 +1635,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:13.597586Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1345,6 +1649,7 @@ children (
                 id w10-i32-tern
                 title "Magic-i32 → Tern{No,Yes,Unk} #[repr(i32)]: the tri-state Fsm property flags is_deterministic/is_pruned/is_minimized/is_epsilon_free/is_loop_free (NOT bool — they carry UNK=2). Props-line read/write shim keeps the wire byte-identical; gated by the io round-trip test + a golden-file check"
                 priority 2
+                sealed true
                 log (
                     {
                         at 2026-07-12T22:52:06.247013Z
@@ -1359,6 +1664,13 @@ children (
                         kind @status
                         text "Todo → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:14.011758Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1367,6 +1679,7 @@ children (
                 title "Magic-i32 → Props newtype for the 2-bit-packed extras byte: is_completed (quad-state 0..3) + arcs_sorted_in/out, owning pack/unpack that reproduces io.rs:999-1001/:1203 bit math exactly (extras = is_completed | in<<2 | out<<4)"
                 priority 2
                 deps (w10-i32-tern)
+                sealed true
                 log (
                     {
                         at 2026-07-13T12:05:51.523496Z
@@ -1381,6 +1694,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:13.758605Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1388,6 +1708,7 @@ children (
                 id w10-structural-smells
                 title "Structural smells: decompose fsm_merge_sigma (extract expand_unknowns(net,mergesigma,presence) to collapse the two ~110-line copy-paste blocks, halving CC-123); guard fsm_left_rewr against a degenerate rewr net (derived.rs:1849 reads states[0].in/out with no first-arc guard → silent wrong machine)"
                 priority 2
+                sealed true
                 log (
                     {
                         at 2026-07-13T12:49:00.237291Z
@@ -1402,6 +1723,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:14.235891Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1409,6 +1737,7 @@ children (
                 id w10-dead-cruft
                 title "Delete dead C-residue + trim hot-path allocs: FsmBuilder.current_fsm_size (Vec self-grows), determinize::Subset write-only mirror fields, RewriteBatch always-None iopen/iclose/rewrite_set, int_stack is_full()/find(); apply_append astring/bstring borrow instead of to_string; fsm_substitute_label needless net clones; drop the \"Wave 4\" comment tag + honest the io.rs last_final=49 magic int"
                 priority 3
+                sealed true
                 log (
                     {
                         at 2026-07-13T12:58:38.631481Z
@@ -1423,6 +1752,13 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:13.458516Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
 
@@ -1430,6 +1766,7 @@ children (
                 id w10-i32-option-sentinels
                 title "Optional: local -1 sentinels → Option (iface shortest_acyclic_length start/dist apply_cmds.rs:496/515, print_net previous_state common.rs:111). Low value, purely local; the Fsm line-table state_no/target -1 sentinel stays (kept design)"
                 priority 3
+                sealed true
                 log (
                     {
                         at 2026-07-13T14:41:47.874324Z
@@ -1444,9 +1781,17 @@ children (
                         kind @status
                         text "Doing → Done (nplan_complete)"
                     }
+
+                    {
+                        at 2026-07-19T21:36:13.93957Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "sealed — decomposition asserted complete (nplan seal)"
+                    }
                 )
             }
         )
+        sealed true
         log (
             {
                 at 2026-07-12T22:51:40.581352Z
@@ -1454,12 +1799,20 @@ children (
                 kind @decision
                 text "Keep-i32 boundary (explicitly NOT magic, do not convert): genuine counts/sizes/positions (arity, arccount, statecount, linecount, finalcount, ipos/opos/ptr, sigma numbers, hashes); the fsm_get_* hfst C-ABI extraction family (i32 returns mirror exported C prototypes) and the -1-terminated finals_head/initials_head arrays; the fomalib setter param convention apply_set_*(h, value: i32) — the FIELD becomes bool but the published param stays i32 doing !=0; arithmetic sentinels that participate in math not just presence (apply_match_length/str -1, statemap unset -1); and the deliberately-kept Fsm line-table row sentinel (state_no/target == -1 terminating states Vec). Out of the i32 mandate but noted: pathcount's -1/-2/-3 overload is i64 (PATHCOUNT_CYCLIC/OVERFLOW/UNKNOWN) — a future enum PathCount candidate if the sweep ever extends past i32."
             }
+
+            {
+                at 2026-07-19T21:36:16.297335Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "sealed — decomposition asserted complete (nplan seal)"
+            }
         )
     }
 
     {
         id w11-build-perf
         title "Build-path performance: profile FST construction and cut the hot spots (merge_sigma identical-alphabet fast-path, Copy line-table/determinize structs). Behaviour-preserving; gated by the full test suite + the build_bench harness."
+        sealed true
         log (
             {
                 at 2026-07-15T20:50:19.590759Z
@@ -1473,6 +1826,13 @@ children (
                 author "brendan@necessary.nu"
                 kind @status
                 text "Doing → Done (nplan_complete)"
+            }
+
+            {
+                at 2026-07-19T21:36:14.405152Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "sealed — decomposition asserted complete (nplan seal)"
             }
         )
     }
