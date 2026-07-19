@@ -1110,14 +1110,15 @@ pub fn cmatrix_init(net: &mut Fsm) {
         });
     }
     let maxsigma: i32 = sigma_max(&net.sigma) + 1;
-    let mut cm = vec![0i32; (maxsigma * maxsigma) as usize];
-    for i in 0..maxsigma {
-        for j in 0..maxsigma {
-            if i == j {
-                cm[(i * maxsigma + j) as usize] = 0;
-            } else {
-                cm[(i * maxsigma + j) as usize] = 1;
-            }
+    // Widen before multiplying: `maxsigma` derives from a sigma number that can
+    // come from an untrusted file, and `maxsigma * maxsigma` in i32 overflows —
+    // mis-sizing `cm` so the fill loop below writes out of bounds. Sizing and
+    // indexing in usize matches the loop bounds and can't wrap.
+    let ms = maxsigma as usize;
+    let mut cm = vec![0i32; ms * ms];
+    for i in 0..ms {
+        for j in 0..ms {
+            cm[i * ms + j] = if i == j { 0 } else { 1 };
         }
     }
     net.medlookup

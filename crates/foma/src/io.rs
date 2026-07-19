@@ -1126,6 +1126,16 @@ pub fn io_net_read(iobh: &mut IoBufHandle) -> Result<Option<Fsm>, FomaError> {
         };
         v.push(st);
     }
+    /* A well-formed states section ends with the `-1 -1 -1 -1 -1` sentinel row,
+    which the loop above pushes into `v`. A truncated/malformed section (real
+    rows, then a `#` marker with no sentinel) leaves `v` unterminated, and
+    `LineTable::from` cannot locate the terminator — reject it here rather than
+    let the conversion panic. (Empty section ↔ empty `v` ↔ NULL table is fine.) */
+    if !v.is_empty() && !v.iter().any(|r| r.state_no == -1) {
+        return Err(FomaError::Format(
+            "states section not sentinel-terminated".to_string(),
+        ));
+    }
     net.states = v.into();
 
     if buf == "##cmatrix##" {
@@ -2502,6 +2512,20 @@ mod tests {
         let cut = s.find("##states##").expect("net text has a states section");
         let mut iobh = io_init();
         iobh.io_buf = Some(s.as_bytes()[..cut].to_vec());
+        iobh.io_buf_ptr = 0;
+        assert!(matches!(io_net_read(&mut iobh), Err(FomaError::Format(_))));
+    }
+
+    // [spec:foma:sem:io.io-net-read-fn+5/test]
+    #[test]
+    fn io_net_read_bails_on_unterminated_states_section() {
+        // AB_FOMA_TEXT with the `-1 -1 -1 -1 -1` sentinel row removed: the states
+        // section holds real rows but no terminator, which `LineTable::from`
+        // cannot locate. io_net_read must return Format, not panic on the
+        // conversion (regression: it used to `.expect()` the sentinel).
+        let text = AB_FOMA_TEXT.replace("-1 -1 -1 -1 -1\n", "");
+        let mut iobh = io_init();
+        iobh.io_buf = Some(text.into_bytes());
         iobh.io_buf_ptr = 0;
         assert!(matches!(io_net_read(&mut iobh), Err(FomaError::Format(_))));
     }
