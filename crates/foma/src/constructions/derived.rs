@@ -340,6 +340,91 @@ pub fn fsm_substitute_label(
     fsm_construct_done(outh)
 }
 
+// [spec:foma:def:constructions.fsm-substitute-pair-fn]
+// [spec:foma:sem:constructions.fsm-substitute-pair-fn]
+/// Splice `substitute` in place of every arc labeled exactly `upper:lower`.
+///
+/// The pair counterpart of [`fsm_substitute_label`], which matches a single
+/// symbol on either side and therefore cannot express "replace the a:b arcs".
+/// A pair matches as a unit or not at all, so there is no one-sided case: an
+/// arc whose sides only partly match is copied through untouched.
+pub fn fsm_substitute_pair(
+    opts: &FomaOptions,
+    net: &mut Fsm,
+    upper: &str,
+    lower: &str,
+    substitute: &mut Fsm,
+) -> Fsm {
+    fsm_merge_sigma(opts, net, substitute);
+    let mut addstate1 = net.statecount;
+    let addstate2 = substitute.statecount;
+
+    let mut inh = fsm_read_init(net.clone());
+    let mut subh = fsm_read_init(substitute.clone());
+    let upsym = fsm_get_symbol_number(&inh, upper);
+    let lowsym = fsm_get_symbol_number(&inh, lower);
+    // Either side absent from the merged sigma means no arc can carry the
+    // pair, so there is nothing to splice.
+    if upsym == -1 || lowsym == -1 {
+        let _ = fsm_read_done(inh);
+        let _ = fsm_read_done(subh);
+        return net.clone();
+    }
+
+    let name = net.name.clone();
+    let mut outh = fsm_construct_init(&name);
+    fsm_construct_copy_sigma(&mut outh, &net.sigma);
+    while fsm_get_next_arc(&mut inh) != 0 {
+        let mut source = fsm_get_arc_source(&inh);
+        let mut target = fsm_get_arc_target(&inh);
+        let r#in = fsm_get_arc_num_in(&inh);
+        let out = fsm_get_arc_num_out(&inh);
+
+        if r#in == upsym && out == lowsym {
+            fsm_read_reset(Some(&mut subh));
+            fsm_construct_add_arc_nums(&mut outh, source, addstate1, EPSILON, EPSILON);
+            while fsm_get_next_arc(&mut subh) != 0 {
+                source = fsm_get_arc_source(&subh);
+                target = fsm_get_arc_target(&subh);
+                let subin = fsm_get_arc_in(&subh)
+                    .expect("arc label present on the positioned cursor")
+                    .to_string();
+                let subout = fsm_get_arc_out(&subh)
+                    .expect("arc label present on the positioned cursor")
+                    .to_string();
+                fsm_construct_add_arc(
+                    &mut outh,
+                    source + addstate1,
+                    target + addstate1,
+                    &subin,
+                    &subout,
+                );
+            }
+            loop {
+                let i = fsm_get_next_final(&mut subh);
+                if i == -1 {
+                    break;
+                }
+                target = fsm_get_arc_target(&inh);
+                fsm_construct_add_arc_nums(&mut outh, addstate1 + i, target, EPSILON, EPSILON);
+            }
+            addstate1 += addstate2;
+        } else {
+            fsm_construct_add_arc_nums(&mut outh, source, target, r#in, out);
+        }
+    }
+
+    for i in inh.finals() {
+        fsm_construct_set_final(&mut outh, i);
+    }
+    for i in inh.initials() {
+        fsm_construct_set_initial(&mut outh, i);
+    }
+    let _ = fsm_read_done(inh);
+    let _ = fsm_read_done(subh);
+    fsm_construct_done(outh)
+}
+
 // [spec:foma:def:constructions.fsm-substitute-symbol-fn]
 // [spec:foma:sem:constructions.fsm-substitute-symbol-fn]
 // [spec:foma:def:fomalib.fsm-substitute-symbol-fn]

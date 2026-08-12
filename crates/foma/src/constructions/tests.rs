@@ -947,6 +947,44 @@ fn fsm_substitute_label_splices_network_for_double_sided_arc() {
     assert_eq!(words(&r), ws(&["xyb"]));
 }
 
+// [spec:foma:sem:constructions.fsm-substitute-pair-fn/test]
+#[test]
+fn fsm_substitute_pair_splices_network_for_exact_pair() {
+    let opts = &FomaOptions::default();
+    // Replace the a:b arc of "a:b c" with the relation "x:y": the net maps
+    // "xc" -> "yc", which words() renders in upper:lower form.
+    let mut net = re("a:b c");
+    let mut sub = re("x:y");
+    let r = fsm_substitute_pair(opts, &mut net, "a", "b", &mut sub);
+    assert_eq!(words(&r), ws(&["x:yc"]));
+}
+
+// A pair matches as a unit: an arc agreeing on only one side is left alone,
+// which is exactly what fsm_substitute_label cannot express (it would rewrite
+// the arc via a cross-product with the other side).
+// [spec:foma:sem:constructions.fsm-substitute-pair-fn/test]
+#[test]
+fn fsm_substitute_pair_leaves_partially_matching_arcs_untouched() {
+    let opts = &FomaOptions::default();
+    // net has a:c, not a:b — the upper side matches, the lower does not.
+    let mut net = re("a:c");
+    let mut sub = re("x");
+    let r = fsm_substitute_pair(opts, &mut net, "a", "b", &mut sub);
+    assert_eq!(words(&r), ws(&["a:c"]));
+}
+
+// A side absent from the merged sigma cannot appear on any arc, so the net
+// comes back unchanged rather than empty.
+// [spec:foma:sem:constructions.fsm-substitute-pair-fn/test]
+#[test]
+fn fsm_substitute_pair_absent_symbol_returns_net_unchanged() {
+    let opts = &FomaOptions::default();
+    let mut net = re("a b");
+    let mut sub = re("x");
+    let r = fsm_substitute_pair(opts, &mut net, "q", "b", &mut sub);
+    assert_eq!(words(&r), ws(&["ab"]));
+}
+
 // [spec:foma:sem:constructions.fsm-substitute-label-fn/test]
 // [spec:foma:sem:fomalib.fsm-substitute-label-fn/test]
 #[test]

@@ -1162,6 +1162,33 @@
 > init_state_pointers and most algorithms require. Touches no counts, flags or
 > sigma (in particular arcs_sorted_in/out are NOT updated).
 
+> [spec:foma:def:constructions.fsm-substitute-pair-fn]
+> struct fsm *fsm_substitute_pair(struct fsm *net, char *upper, char *lower, struct fsm *substitute)
+
+> [spec:foma:sem:constructions.fsm-substitute-pair-fn]
+> PORT ADDITION (no upstream C counterpart). Splices `substitute` in place of
+> every arc of `net` labeled exactly `upper:lower`. `fsm_substitute_label`
+> matches a single symbol on either side and so cannot express "replace the
+> a:b arcs"; the arc loop already reads the two sides separately, and this is
+> that loop's double-sided branch generalised to two distinct symbol numbers.
+> Steps:
+> - fsm_merge_sigma(net, substitute) first, as fsm_substitute_label does.
+>   addstate1 = net->statecount; addstate2 = substitute->statecount.
+> - upsym / lowsym = fsm_get_symbol_number for `upper` / `lower`. If EITHER is
+>   absent from the merged sigma, no arc can carry the pair: free both read
+>   handles and return net unchanged. (Unlike fsm_substitute_label, which leaks
+>   subh on its early return, both handles are released here.)
+> - Otherwise construct with net's name and sigma, and for each arc (s, t,
+>   in, out):
+>   - in == upsym && out == lowsym: emit s --EPSILON:EPSILON--> addstate1, copy
+>     every substitute arc offset by addstate1, then emit
+>     addstate1+f --EPSILON:EPSILON--> t for each final f of substitute;
+>     advance addstate1 by addstate2.
+>   - otherwise: copy the arc verbatim. There is deliberately NO one-sided
+>     case — a pair matches as a unit, so an arc matching on only one side is
+>     left alone.
+> - Finals and initials of net are carried over unchanged.
+
 > [spec:foma:def:constructions.fsm-substitute-label-fn]
 > struct fsm *fsm_substitute_label(struct fsm *net, char *original, struct fsm *substitute)
 
