@@ -151,7 +151,7 @@ checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "foma"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "bitflags",
  "flate2",
@@ -243,9 +243,9 @@ dependencies = [
 
 [[package]]
 name = "nfst-lexc"
-version = "0.1.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e032228b31153fa2e504f3e9a1f289598db1c6035ef02c52898cf768e9812c4"
+checksum = "e66a7ce7369eab2aaee334b28ef094f5c9757288b526bbcb9a48ff9fb683d5ef"
 dependencies = [
  "logos",
  "nfst-syntax",
@@ -255,15 +255,15 @@ dependencies = [
 
 [[package]]
 name = "nfst-syntax"
-version = "0.1.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4441ec0e57add49cd8fe5a81f10c57e1031c6c09f6c62b923ff97e8b1671ee1b"
+checksum = "edc43cb7a0df0723017947e6fe7056c8ede64a471d5f4ca9ddd89c1bc5f71e8b"
 
 [[package]]
 name = "nfst-xre"
-version = "0.1.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c1c59292c33c651faa5bfcd34b07e2761d41f8b06596bcf1361c58693446e9e"
+checksum = "ab813335fcf4d3faaf8808fce69b39ba127ed037b257ee38554f7c69462fcdae"
 dependencies = [
  "ariadne",
  "chumsky",
