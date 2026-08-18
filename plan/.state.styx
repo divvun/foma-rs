@@ -131,4 +131,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name target-impl, rule constructions.compose-virtual-flags}
     )}
+    {id compose-memory-budget, covered_rules (
+        constructions.compose-memory-budget
+    ), covered_claims (
+        {impl_name target-impl, rule constructions.compose-memory-budget}
+    )}
 )

@@ -49,6 +49,7 @@ pub(crate) use crate::types::{
 
 mod boolean;
 mod closure;
+mod compose_storage;
 mod derived;
 mod helpers;
 mod merge_sigma;
@@ -57,6 +58,7 @@ mod triplet_hash;
 
 pub use boolean::*;
 pub use closure::*;
+pub use compose_storage::*;
 pub use derived::*;
 pub use helpers::*;
 pub use merge_sigma::*;

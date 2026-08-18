@@ -1917,6 +1917,14 @@ children (
                     target-impl ([spec:foma:req:constructions.compose-memory-budget])
                 }
                 deps (compose-virtual-overlay)
+                log (
+                    {
+                        at 2026-08-18T08:31:53.104016Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
             }
         )
     }

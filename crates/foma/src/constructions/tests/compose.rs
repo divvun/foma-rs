@@ -1,5 +1,27 @@
 use super::*;
 use smol_str::SmolStr;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static SCRATCH_NONCE: AtomicU64 = AtomicU64::new(0);
+
+struct ScratchParent(PathBuf);
+
+impl ScratchParent {
+    fn new() -> Self {
+        let nonce = SCRATCH_NONCE.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("foma-compose-test-{}-{nonce}", std::process::id()));
+        std::fs::create_dir(&path).expect("create compose test scratch parent");
+        Self(path)
+    }
+}
+
+impl Drop for ScratchParent {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
 
 // [spec:foma:req:constructions.compose-virtual-flags/test]
 #[test]
@@ -104,4 +126,142 @@ fn empty_overlay_and_wildcard_parity() {
         fsm_isempty(opts, &mut wildcard),
         "UNKNOWN must not expand into or match a virtual flag loop"
     );
+}
+
+// [spec:foma:req:constructions.compose-memory-budget/test]
+#[test]
+fn bounded_spill_matches_unbounded() {
+    let opts = &FomaOptions::default();
+    let left = re("a:b | c:d | e:f");
+    let right = re("b:x | d:y");
+    let expected = fsm_compose(opts, left.clone(), right.clone());
+    let scratch = ScratchParent::new();
+    let resources = ComposeResourceConfig::bounded(0, &scratch.0);
+    let actual = fsm_compose_with_config(
+        opts,
+        left,
+        right,
+        &ComposeFlagOverlay::default(),
+        &resources,
+    )
+    .expect("zero-cap composition spills and succeeds");
+
+    assert_eq!(lines(&actual), lines(&expected));
+    assert_eq!(sigma_pairs(&actual), sigma_pairs(&expected));
+    assert_eq!(actual.statecount, expected.statecount);
+    assert_eq!(actual.arccount, expected.arccount);
+    assert!(
+        std::fs::read_dir(&scratch.0)
+            .expect("read scratch parent")
+            .next()
+            .is_none(),
+        "operation-owned scratch is removed after success"
+    );
+}
+
+// [spec:foma:req:constructions.compose-memory-budget/test]
+#[test]
+fn invalid_scratch_returns_error() {
+    let scratch = ScratchParent::new();
+    let missing = scratch.0.join("missing-parent");
+    let resources = ComposeResourceConfig::bounded(0, missing);
+    let error = fsm_compose_with_config(
+        &FomaOptions::default(),
+        re("a:b"),
+        re("b:c"),
+        &ComposeFlagOverlay::default(),
+        &resources,
+    )
+    .expect_err("missing scratch parent must fail");
+    assert!(error.to_string().contains("scratch directory"));
+}
+
+// [spec:foma:req:constructions.compose-memory-budget/test]
+// [spec:foma:req:constructions.compose-virtual-flags/test]
+#[test]
+fn bounded_overlay_matches_unbounded() {
+    let opts = &FomaOptions::default();
+    let left_flag = "LEFT_FLAG_1";
+    let right_flag = "RIGHT_FLAG_2";
+    let overlay = ComposeFlagOverlay::new(vec![right_flag.into()], vec![left_flag.into()], true)
+        .expect("renamed flag sets are disjoint");
+    let left = re(&format!(r#"x "{left_flag}" | "{left_flag}" y"#));
+    let right = re(&format!(r#""{right_flag}" x | y "{right_flag}""#));
+    let expected = fsm_compose_with_flag_overlay(opts, left.clone(), right.clone(), &overlay)
+        .expect("unbounded overlay composition succeeds");
+    let scratch = ScratchParent::new();
+    let actual = fsm_compose_with_config(
+        opts,
+        left,
+        right,
+        &overlay,
+        &ComposeResourceConfig::bounded(0, &scratch.0),
+    )
+    .expect("bounded overlay composition succeeds");
+
+    assert_eq!(lines(&actual), lines(&expected));
+    assert_eq!(sigma_pairs(&actual), sigma_pairs(&expected));
+    assert_eq!(actual.statecount, expected.statecount);
+    assert_eq!(actual.arccount, expected.arccount);
+    assert!(std::fs::read_dir(&scratch.0).unwrap().next().is_none());
+}
+
+// [spec:foma:req:constructions.compose-memory-budget/test]
+#[test]
+fn bounded_cutoff_matrix_is_exact() {
+    let cases = [
+        ("a:b | c:d", "b:x | d:y"),
+        ("a:0 b:c | d:e", "0:x c:y | e:z"),
+        ("a:b | c:d | e:f", "b:x | d:y | q:r"),
+        ("a:?", "a:x | b:y"),
+    ];
+    for tristate in [false, true] {
+        let opts = FomaOptions {
+            compose_tristate: tristate,
+            ..FomaOptions::default()
+        };
+        for (left_regex, right_regex) in cases {
+            let left = re(left_regex);
+            let right = re(right_regex);
+            let expected = fsm_compose(&opts, left.clone(), right.clone());
+            for allowance in [0, 1, 200, 1024 * 1024] {
+                let scratch = ScratchParent::new();
+                let actual = fsm_compose_with_config(
+                    &opts,
+                    left.clone(),
+                    right.clone(),
+                    &ComposeFlagOverlay::default(),
+                    &ComposeResourceConfig::bounded(allowance, &scratch.0),
+                )
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "compose {left_regex:?} with {right_regex:?} at {allowance} bytes: {error}"
+                    )
+                });
+                assert_eq!(lines(&actual), lines(&expected));
+                assert_eq!(sigma_pairs(&actual), sigma_pairs(&expected));
+                assert_eq!(actual.statecount, expected.statecount);
+                assert_eq!(actual.arccount, expected.arccount);
+                assert!(std::fs::read_dir(&scratch.0).unwrap().next().is_none());
+            }
+        }
+    }
+}
+
+// [spec:foma:req:constructions.compose-memory-budget/test]
+#[test]
+fn bounded_empty_product_needs_no_scratch() {
+    let scratch = ScratchParent::new();
+    let missing_parent = scratch.0.join("unused");
+    let actual = fsm_compose_with_config(
+        &FomaOptions::default(),
+        fsm_empty_set(),
+        re("a"),
+        &ComposeFlagOverlay::default(),
+        &ComposeResourceConfig::bounded(0, &missing_parent),
+    )
+    .expect("empty operands short-circuit before scratch setup");
+    let mut actual = actual;
+    assert!(fsm_isempty(&FomaOptions::default(), &mut actual));
+    assert!(!missing_parent.exists());
 }
