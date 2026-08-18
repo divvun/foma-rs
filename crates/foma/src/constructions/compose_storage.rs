@@ -15,13 +15,9 @@ use crate::error::FomaError;
 
 use super::{Fsm, FsmState};
 
-#[path = "compose_storage_interner.rs"]
 mod interner;
-#[path = "compose_storage_output.rs"]
 mod output;
-#[path = "compose_storage_trim.rs"]
 mod trim;
-#[path = "compose_storage_work.rs"]
 mod work;
 
 use interner::ComposeInterner;
@@ -299,5 +295,4 @@ pub(super) fn state_from_bytes(bytes: [u8; 14]) -> FsmState {
 }
 
 #[cfg(test)]
-#[path = "compose_storage_tests.rs"]
 mod tests;
