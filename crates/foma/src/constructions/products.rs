@@ -4,8 +4,8 @@ use super::*;
 use crate::error::FomaError;
 use smol_str::SmolStr;
 
-/// Flag labels that composition exposes as identity self-loops without adding
-/// transitions to either operand.
+/// Flag labels that a binary product operation exposes as identity self-loops
+/// without adding transitions to either operand.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ComposeFlagOverlay {
     left_self_loops: Vec<SmolStr>,
@@ -31,7 +31,7 @@ impl ComposeFlagOverlay {
             .any(|label| right_self_loops.binary_search(label).is_ok())
         {
             return Err(FomaError::MalformedInput(
-                "compose flag-overlay label sets must be disjoint".to_string(),
+                "flag-overlay label sets must be disjoint".to_string(),
             ));
         }
 
@@ -58,6 +58,9 @@ impl ComposeFlagOverlay {
         self.left_self_loops.is_empty() && self.right_self_loops.is_empty()
     }
 }
+
+/// Operation-neutral name for the virtual identity-loop overlay.
+pub type FlagOverlay = ComposeFlagOverlay;
 
 const COMPOSE_EPSILON_MODE_COUNT: i32 = 3;
 
@@ -96,6 +99,41 @@ impl NumericFlagOverlay {
     fn is_flag(&self, label: i32) -> bool {
         label >= 0
             && (self.left_self_loops[label as usize] || self.right_self_loops[label as usize])
+    }
+
+    fn next_intersection_order(&self, output: i32, saw_right: bool) -> Option<bool> {
+        if !self.enforce_left_before_right {
+            return Some(false);
+        }
+        if output >= 0 && self.right_self_loops[output as usize] {
+            return (!saw_right).then_some(saw_right);
+        }
+        if output >= 0 && self.left_self_loops[output as usize] {
+            return Some(true);
+        }
+        if output != EPSILON {
+            return Some(false);
+        }
+        Some(saw_right)
+    }
+}
+
+fn intern_intersection_state(
+    states: &mut Triplethash,
+    work: &mut IntStack,
+    left: i32,
+    right: i32,
+    saw_right: bool,
+) -> i32 {
+    let order = i32::from(saw_right);
+    match triplet_hash_find(states, left, right, order) {
+        Some(state) => state,
+        None => {
+            work.push(order);
+            work.push(right);
+            work.push(left);
+            triplet_hash_insert(states, left, right, order)
+        }
     }
 }
 
@@ -398,6 +436,19 @@ fn emit_right_epsilon_moves(
 // [spec:foma:def:fomalib.fsm-intersect-fn]
 // [spec:foma:sem:fomalib.fsm-intersect-fn]
 pub fn fsm_intersect(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
+    fsm_intersect_with_flag_overlay(opts, net1, net2, &FlagOverlay::default())
+        .expect("ordinary intersection uses an empty, always-valid flag overlay")
+}
+
+/// Intersect owned operands while exposing configured flag labels as virtual
+/// identity self-loops.
+// [spec:foma:req:constructions.intersect-virtual-flags]
+pub fn fsm_intersect_with_flag_overlay(
+    opts: &FomaOptions,
+    net1: Fsm,
+    net2: Fsm,
+    overlay: &FlagOverlay,
+) -> Result<Fsm, FomaError> {
     let mut int_stack = IntStack::new();
     /* C: struct blookup {int mainloop; int target; } *array, *bptr; —
     function-local type */
@@ -413,10 +464,62 @@ pub fn fsm_intersect(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
     if fsm_isempty(opts, &mut net1) || fsm_isempty(opts, &mut net2) {
         fsm_destroy(net1);
         fsm_destroy(net2);
-        return fsm_empty_set();
+        return Ok(fsm_empty_set());
+    }
+
+    // Minimization may remove alphabet-only symbols. Restore every overlay
+    // label before merging sigmas so wildcard expansion cannot consume flags.
+    if !overlay.is_empty() {
+        for label in overlay
+            .left_self_loops()
+            .iter()
+            .chain(overlay.right_self_loops())
+        {
+            if sigma_find(label, &net1.sigma).is_none() {
+                sigma_add(label, &mut net1.sigma);
+            }
+            if sigma_find(label, &net2.sigma).is_none() {
+                sigma_add(label, &mut net2.sigma);
+            }
+        }
+        sigma_sort(&mut net1);
+        sigma_sort(&mut net2);
     }
 
     fsm_merge_sigma(opts, &mut net1, &mut net2);
+
+    let merged_sigma_size = (sigma_max(&net1.sigma) + 1) as usize;
+    let mut numeric_overlay = NumericFlagOverlay {
+        left_self_loops: vec![false; merged_sigma_size],
+        right_self_loops: vec![false; merged_sigma_size],
+        enforce_left_before_right: overlay.enforces_left_before_right(),
+    };
+    for label in overlay.left_self_loops() {
+        let number = sigma_find(label, &net1.sigma).ok_or_else(|| {
+            FomaError::MalformedInput(format!(
+                "left flag-overlay label {label:?} is absent from the merged sigma"
+            ))
+        })?;
+        if number <= IDENTITY {
+            return Err(FomaError::MalformedInput(format!(
+                "special symbol {label:?} cannot be a virtual flag loop"
+            )));
+        }
+        numeric_overlay.left_self_loops[number as usize] = true;
+    }
+    for label in overlay.right_self_loops() {
+        let number = sigma_find(label, &net1.sigma).ok_or_else(|| {
+            FomaError::MalformedInput(format!(
+                "right flag-overlay label {label:?} is absent from the merged sigma"
+            ))
+        })?;
+        if number <= IDENTITY {
+            return Err(FomaError::MalformedInput(format!(
+                "special symbol {label:?} cannot be a virtual flag loop"
+            )));
+        }
+        numeric_overlay.right_self_loops[number as usize] = true;
+    }
 
     fsm_update_flags(&mut net1, YES, NO, UNK, YES, UNK, UNK);
 
@@ -435,7 +538,8 @@ pub fn fsm_intersect(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
     /* Intersect two networks by the running-in-parallel method */
     /* new state 0 = {0,0} */
 
-    /* STACK_2_PUSH(0,0) */
+    /* The third state component carries the two-sided flag-order bit. */
+    int_stack.push(0);
     int_stack.push(0);
     int_stack.push(0);
 
@@ -455,8 +559,9 @@ pub fn fsm_intersect(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
 
             let a = int_stack.pop();
             let b = int_stack.pop();
+            let saw_right = int_stack.pop() != 0;
 
-            let current_state = triplet_hash_find(&th, a, b, 0)
+            let current_state = triplet_hash_find(&th, a, b, i32::from(saw_right))
                 .expect("state pair popped off the work stack was inserted into the triplet hash");
             let current_start = if point_a[a as usize].start == 1 && point_b[b as usize].start == 1
             {
@@ -504,35 +609,82 @@ pub fn fsm_intersect(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
                 }
                 let bptr = ((fsm1[ai].r#in as i32) * sigma2size + fsm1[ai].out as i32) as usize;
 
-                if array[bptr].mainloop != mainloop {
-                    ai += 1;
-                    continue;
+                let atarget = fsm1[ai].target;
+                let (ain, aout) = (fsm1[ai].r#in as i32, fsm1[ai].out as i32);
+                if array[bptr].mainloop == mainloop
+                    && let Some(next_order) =
+                        numeric_overlay.next_intersection_order(aout, saw_right)
+                {
+                    let target_number = intern_intersection_state(
+                        &mut th,
+                        &mut int_stack,
+                        atarget,
+                        array[bptr].target,
+                        next_order,
+                    );
+                    fsm_state_add_arc(
+                        &mut builder,
+                        current_state,
+                        ain,
+                        aout,
+                        target_number,
+                        current_final,
+                        current_start,
+                    );
                 }
 
-                let atarget = fsm1[ai].target;
-                let btarget = array[bptr].target;
-                let target_number = match triplet_hash_find(&th, atarget, btarget, 0) {
-                    Some(n) => n,
-                    None => {
-                        /* STACK_2_PUSH(bptr->target, machine_a->target) */
-                        int_stack.push(btarget);
-                        int_stack.push(atarget);
-                        triplet_hash_insert(&mut th, atarget, btarget, 0)
-                    }
-                };
-
-                let (ain, aout) = (fsm1[ai].r#in as i32, fsm1[ai].out as i32);
-                fsm_state_add_arc(
-                    &mut builder,
-                    current_state,
-                    ain,
-                    aout,
-                    target_number,
-                    current_final,
-                    current_start,
-                );
+                // A real left flag matches the virtual identity loop on the
+                // right without advancing the right state.
+                if ain == aout
+                    && numeric_overlay.right_self_loops[aout as usize]
+                    && let Some(next_order) =
+                        numeric_overlay.next_intersection_order(aout, saw_right)
+                {
+                    let target_number =
+                        intern_intersection_state(&mut th, &mut int_stack, atarget, b, next_order);
+                    fsm_state_add_arc(
+                        &mut builder,
+                        current_state,
+                        ain,
+                        aout,
+                        target_number,
+                        current_final,
+                        current_start,
+                    );
+                }
 
                 ai += 1;
+            }
+
+            // A real right flag matches the virtual identity loop on the left
+            // without advancing the left state.
+            let mut bi = point_b[b as usize].transitions;
+            while fsm2[bi].state_no == b {
+                let (bin, bout) = (fsm2[bi].r#in as i32, fsm2[bi].out as i32);
+                if bin >= 0
+                    && bin == bout
+                    && numeric_overlay.left_self_loops[bin as usize]
+                    && let Some(next_order) =
+                        numeric_overlay.next_intersection_order(bout, saw_right)
+                {
+                    let target_number = intern_intersection_state(
+                        &mut th,
+                        &mut int_stack,
+                        a,
+                        fsm2[bi].target,
+                        next_order,
+                    );
+                    fsm_state_add_arc(
+                        &mut builder,
+                        current_state,
+                        bin,
+                        bout,
+                        target_number,
+                        current_final,
+                        current_start,
+                    );
+                }
+                bi += 1;
             }
             fsm_state_end_state(&mut builder);
         }
@@ -548,7 +700,7 @@ pub fn fsm_intersect(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
     drop(point_b);
     drop(array);
     triplet_hash_free(Some(th));
-    fsm_coaccessible(new_net)
+    Ok(fsm_coaccessible(new_net))
 }
 
 // [spec:foma:def:constructions.fsm-compose-fn]

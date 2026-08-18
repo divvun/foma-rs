@@ -8,6 +8,7 @@ use crate::apply::{
 use crate::regex::fsm_parse_regex;
 
 mod compose;
+mod intersect;
 
 /* ---- fixtures & helpers ------------------------------------------- */
 

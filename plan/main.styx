@@ -1926,6 +1926,24 @@ children (
                     }
                 )
             }
+
+            {
+                id intersect-virtual-overlay
+                title "Intersect flag diacritics through virtual loops without graph expansion"
+                kind @perf
+                implements {
+                    target-impl ([spec:foma:req:constructions.intersect-virtual-flags])
+                }
+                deps (compose-virtual-overlay)
+                log (
+                    {
+                        at 2026-08-18T12:00:45.117322Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
+            }
         )
     }
 )

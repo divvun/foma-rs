@@ -319,6 +319,18 @@
 > reset it. Empty overlays preserve ordinary composition behavior and state/arcs
 > discovery order.
 
+> [spec:foma:req:constructions.intersect-virtual-flags]
+> A configured intersection may expose selected alphabet symbols as virtual
+> unit identity self-loops on the operand that lacks them. It must produce the
+> same language as inserting those loops at every operand state before ordinary
+> intersection, without adding them to either operand's transition table or
+> matching two virtual loops together. Overlay labels remain literal symbols:
+> UNKNOWN and IDENTITY wildcard expansion must not consume them, including when
+> they occur only in an alphabet. When both operands contribute disjoint renamed
+> flag sets, left-origin flag events must precede right-origin flag events until
+> a real non-epsilon, non-flag output resets the ordering state; epsilon output
+> does not reset it. An empty overlay preserves ordinary intersection behavior.
+
 > [spec:foma:req:constructions.compose-memory-budget]
 > The fallible owned composition API accepts an optional exact working-memory
 > allowance. `None` preserves the legacy unbounded in-memory algorithm. For a

@@ -1,9 +1,18 @@
 schema_version 7
 
-last_sync_at 2026-07-09T15:15:53.010791Z
+last_sync_at 2026-08-18T11:59:49.155422Z
+
+rule_versions (
+    {id constructions.compose-memory-budget, version 0}
+    {id constructions.compose-virtual-flags, version 0}
+)
 
 derived_priorities (
+    {id compose-memory-budget, priority 2, derived_at 2026-08-18T11:59:49.155422Z}
+    {id compose-resource-contract, priority 0, derived_at 2026-08-18T11:59:49.155422Z}
+    {id compose-virtual-overlay, priority 1, derived_at 2026-08-18T11:59:49.155422Z}
     {id foma-mono-io, priority 0, derived_at 2026-07-07T19:37:15.797696Z}
+    {id fsm-substitute-pair, priority 0, derived_at 2026-08-18T11:59:49.155422Z}
     {id w1-algorithms, priority 0, derived_at 2026-07-07T19:37:15.797696Z}
     {id w1-apply-spelling, priority 0, derived_at 2026-07-07T19:37:15.797696Z}
     {id w1-constructions, priority 0, derived_at 2026-07-07T19:37:15.797696Z}
@@ -13,6 +22,7 @@ derived_priorities (
     {id w1-io-lexc, priority 0, derived_at 2026-07-07T19:37:15.797696Z}
     {id w1-rewrite-flags-define, priority 0, derived_at 2026-07-07T19:37:15.797696Z}
     {id w1-structures, priority 0, derived_at 2026-07-07T19:37:15.797696Z}
+    {id w11-build-perf, priority 0, derived_at 2026-08-18T11:59:49.155422Z}
     {id w2-apply-spelling, priority 3, derived_at 2026-07-07T19:37:15.797696Z}
     {id w2-base-utils, priority 1, derived_at 2026-07-07T19:37:15.797696Z}
     {id w2-cli, priority 3, derived_at 2026-07-07T19:37:15.797696Z}
@@ -126,14 +136,23 @@ assertions (
 )
 
 impl_evidence (
-    {id compose-virtual-overlay, covered_rules (
-        constructions.compose-virtual-flags
-    ), covered_claims (
-        {impl_name target-impl, rule constructions.compose-virtual-flags}
-    )}
     {id compose-memory-budget, covered_rules (
         constructions.compose-memory-budget
     ), covered_claims (
         {impl_name target-impl, rule constructions.compose-memory-budget}
+    ), rule_versions_seen (
+        {id constructions.compose-memory-budget, version 0}
+    )}
+    {id compose-virtual-overlay, covered_rules (
+        constructions.compose-virtual-flags
+    ), covered_claims (
+        {impl_name target-impl, rule constructions.compose-virtual-flags}
+    ), rule_versions_seen (
+        {id constructions.compose-virtual-flags, version 0}
+    )}
+    {id intersect-virtual-overlay, covered_rules (
+        constructions.intersect-virtual-flags
+    ), covered_claims (
+        {impl_name target-impl, rule constructions.intersect-virtual-flags}
     )}
 )
