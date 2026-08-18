@@ -1,6 +1,442 @@
 //! Wave-4 split of constructions.c (see mod.rs). Cross-module and
 //! external names come via `use super::*` (re-exported by mod.rs).
 use super::*;
+use crate::dynarray::FsmBuilder;
+use crate::error::FomaError;
+use smol_str::SmolStr;
+
+/// Flag labels that composition exposes as identity self-loops without adding
+/// transitions to either operand.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ComposeFlagOverlay {
+    left_self_loops: Vec<SmolStr>,
+    right_self_loops: Vec<SmolStr>,
+    enforce_left_before_right: bool,
+}
+
+impl ComposeFlagOverlay {
+    /// Build a canonical overlay. The two sides must be disjoint so a virtual
+    /// transition can never match another virtual transition.
+    pub fn new(
+        mut left_self_loops: Vec<SmolStr>,
+        mut right_self_loops: Vec<SmolStr>,
+        enforce_left_before_right: bool,
+    ) -> Result<Self, FomaError> {
+        left_self_loops.sort_unstable();
+        left_self_loops.dedup();
+        right_self_loops.sort_unstable();
+        right_self_loops.dedup();
+
+        if left_self_loops
+            .iter()
+            .any(|label| right_self_loops.binary_search(label).is_ok())
+        {
+            return Err(FomaError::MalformedInput(
+                "compose flag-overlay label sets must be disjoint".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            left_self_loops,
+            right_self_loops,
+            enforce_left_before_right,
+        })
+    }
+
+    pub fn left_self_loops(&self) -> &[SmolStr] {
+        &self.left_self_loops
+    }
+
+    pub fn right_self_loops(&self) -> &[SmolStr] {
+        &self.right_self_loops
+    }
+
+    pub fn enforces_left_before_right(&self) -> bool {
+        self.enforce_left_before_right
+    }
+
+    fn is_empty(&self) -> bool {
+        self.left_self_loops.is_empty() && self.right_self_loops.is_empty()
+    }
+}
+
+const COMPOSE_EPSILON_MODE_COUNT: i32 = 3;
+
+fn compose_product_mode(epsilon_mode: i32, saw_right_flag: bool) -> i32 {
+    epsilon_mode + i32::from(saw_right_flag) * COMPOSE_EPSILON_MODE_COUNT
+}
+
+fn compose_epsilon_mode(product_mode: i32) -> i32 {
+    product_mode % COMPOSE_EPSILON_MODE_COUNT
+}
+
+fn compose_saw_right_flag(product_mode: i32) -> bool {
+    product_mode >= COMPOSE_EPSILON_MODE_COUNT
+}
+
+#[derive(Clone)]
+struct ComposeOutEntry {
+    symin: i16,
+    symout: i16,
+    target: i32,
+    mainloop: i32,
+}
+
+#[derive(Clone)]
+struct ComposeIndex {
+    tail: usize,
+}
+
+struct NumericFlagOverlay {
+    left_self_loops: Vec<bool>,
+    right_self_loops: Vec<bool>,
+    enforce_left_before_right: bool,
+}
+
+impl NumericFlagOverlay {
+    fn is_flag(&self, label: i32) -> bool {
+        label >= 0
+            && (self.left_self_loops[label as usize] || self.right_self_loops[label as usize])
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ComposeStateInfo {
+    left: i32,
+    right: i32,
+    epsilon_mode: i32,
+    saw_right_flag: bool,
+    output_state: i32,
+    final_state: i32,
+    start_state: i32,
+}
+
+fn intern_compose_state(
+    triples: &mut Triplethash,
+    work: &mut IntStack,
+    left: i32,
+    right: i32,
+    mode: i32,
+) -> i32 {
+    if let Some(state) = triplet_hash_find(triples, left, right, mode) {
+        return state;
+    }
+    work.push(mode);
+    work.push(right);
+    work.push(left);
+    triplet_hash_insert(triples, left, right, mode)
+}
+
+fn index_compose_right_state(
+    state: i32,
+    transitions: &[FsmState],
+    first_transition: usize,
+    max_sigma: i32,
+    mainloop: i32,
+    index: &mut [ComposeIndex],
+    entries: &mut [ComposeOutEntry],
+) {
+    let mut position = first_transition;
+    while transitions[position].state_no == state {
+        let input = if transitions[position].r#in as i32 == IDENTITY {
+            UNKNOWN
+        } else {
+            transitions[position].r#in as i32
+        };
+        if input < 0 || transitions[position].target < 0 {
+            position += 1;
+            continue;
+        }
+
+        let mut entry = index[input as usize].tail;
+        if entries[entry].mainloop != mainloop {
+            entry = (input * (max_sigma + 2)) as usize;
+        } else {
+            entry += 1;
+        }
+        entries[entry] = ComposeOutEntry {
+            symin: transitions[position].r#in,
+            symout: transitions[position].out,
+            target: transitions[position].target,
+            mainloop,
+        };
+        index[input as usize].tail = entry;
+        position += 1;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_compose_symbol_matches(
+    state: ComposeStateInfo,
+    transitions: &[FsmState],
+    first_transition: usize,
+    max_sigma: i32,
+    mainloop: i32,
+    index: &[ComposeIndex],
+    entries: &[ComposeOutEntry],
+    overlay: &NumericFlagOverlay,
+    triples: &mut Triplethash,
+    work: &mut IntStack,
+    builder: &mut FsmBuilder,
+) {
+    let mut position = first_transition;
+    while transitions[position].state_no == state.left {
+        let original_output = transitions[position].out as i32;
+        if original_output < 0 {
+            position += 1;
+            continue;
+        }
+
+        let search_label = if original_output == IDENTITY {
+            UNKNOWN
+        } else {
+            original_output
+        };
+        let mut entry = (search_label * (max_sigma + 2)) as usize;
+        let tail = index[search_label as usize].tail + 1;
+        while entry != tail && entries[entry].mainloop == mainloop {
+            let mut input = transitions[position].r#in as i32;
+            let mut left_output = original_output;
+            let mut right_input = entries[entry].symin as i32;
+            let mut output = entries[entry].symout as i32;
+
+            if left_output == IDENTITY && right_input == UNKNOWN {
+                input = UNKNOWN;
+                left_output = UNKNOWN;
+            } else if left_output == UNKNOWN && right_input == IDENTITY {
+                right_input = UNKNOWN;
+                output = UNKNOWN;
+            }
+
+            if right_input == left_output && (right_input != EPSILON || state.epsilon_mode == 0) {
+                let next_saw_right = if overlay.enforce_left_before_right
+                    && left_output != EPSILON
+                    && !overlay.is_flag(left_output)
+                {
+                    false
+                } else {
+                    state.saw_right_flag
+                };
+                let next_mode = compose_product_mode(0, next_saw_right);
+                let target = intern_compose_state(
+                    triples,
+                    work,
+                    transitions[position].target,
+                    entries[entry].target,
+                    next_mode,
+                );
+                fsm_state_add_arc(
+                    builder,
+                    state.output_state,
+                    input,
+                    output,
+                    target,
+                    state.final_state,
+                    state.start_state,
+                );
+            }
+            entry += 1;
+        }
+
+        if overlay.right_self_loops[original_output as usize]
+            && !(overlay.enforce_left_before_right && state.saw_right_flag)
+        {
+            let next_mode = compose_product_mode(0, state.saw_right_flag);
+            let target = intern_compose_state(
+                triples,
+                work,
+                transitions[position].target,
+                state.right,
+                next_mode,
+            );
+            fsm_state_add_arc(
+                builder,
+                state.output_state,
+                transitions[position].r#in as i32,
+                original_output,
+                target,
+                state.final_state,
+                state.start_state,
+            );
+        }
+        position += 1;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_virtual_left_matches(
+    state: ComposeStateInfo,
+    transitions: &[FsmState],
+    first_transition: usize,
+    overlay: &NumericFlagOverlay,
+    triples: &mut Triplethash,
+    work: &mut IntStack,
+    builder: &mut FsmBuilder,
+) {
+    let mut position = first_transition;
+    while transitions[position].state_no == state.right {
+        let input = transitions[position].r#in as i32;
+        if input >= 0 && overlay.left_self_loops[input as usize] {
+            let target = intern_compose_state(
+                triples,
+                work,
+                state.left,
+                transitions[position].target,
+                compose_product_mode(0, true),
+            );
+            fsm_state_add_arc(
+                builder,
+                state.output_state,
+                input,
+                transitions[position].out as i32,
+                target,
+                state.final_state,
+                state.start_state,
+            );
+        }
+        position += 1;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_left_epsilon_moves(
+    state: ComposeStateInfo,
+    transitions: &[FsmState],
+    first_transition: usize,
+    tristate: bool,
+    flag_is_epsilon: bool,
+    is_flag: &[bool],
+    triples: &mut Triplethash,
+    work: &mut IntStack,
+    builder: &mut FsmBuilder,
+) {
+    let mut position = first_transition;
+    while transitions[position].state_no == state.left {
+        let output = transitions[position].out as i32;
+        if output != EPSILON && !flag_is_epsilon {
+            position += 1;
+            continue;
+        }
+        let input = transitions[position].r#in as i32;
+        if flag_is_epsilon && output >= 0 && state.epsilon_mode == 0 && is_flag[output as usize] {
+            let target = intern_compose_state(
+                triples,
+                work,
+                transitions[position].target,
+                state.right,
+                compose_product_mode(0, state.saw_right_flag),
+            );
+            fsm_state_add_arc(
+                builder,
+                state.output_state,
+                input,
+                output,
+                target,
+                state.final_state,
+                state.start_state,
+            );
+        }
+
+        let next_epsilon_mode = if !tristate && state.epsilon_mode == 0 {
+            Some(0)
+        } else if tristate && state.epsilon_mode != 2 {
+            Some(1)
+        } else {
+            None
+        };
+        if output == EPSILON
+            && let Some(epsilon_mode) = next_epsilon_mode
+        {
+            let target = intern_compose_state(
+                triples,
+                work,
+                transitions[position].target,
+                state.right,
+                compose_product_mode(epsilon_mode, state.saw_right_flag),
+            );
+            fsm_state_add_arc(
+                builder,
+                state.output_state,
+                input,
+                EPSILON,
+                target,
+                state.final_state,
+                state.start_state,
+            );
+        }
+        position += 1;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_right_epsilon_moves(
+    state: ComposeStateInfo,
+    transitions: &[FsmState],
+    first_transition: usize,
+    tristate: bool,
+    flag_is_epsilon: bool,
+    is_flag: &[bool],
+    triples: &mut Triplethash,
+    work: &mut IntStack,
+    builder: &mut FsmBuilder,
+) {
+    let mut position = first_transition;
+    while transitions[position].state_no == state.right {
+        let input = transitions[position].r#in as i32;
+        if input != EPSILON && !flag_is_epsilon {
+            position += 1;
+            continue;
+        }
+        let output = transitions[position].out as i32;
+        if flag_is_epsilon && input >= 0 && is_flag[input as usize] {
+            let target = intern_compose_state(
+                triples,
+                work,
+                state.left,
+                transitions[position].target,
+                compose_product_mode(1, state.saw_right_flag),
+            );
+            fsm_state_add_arc(
+                builder,
+                state.output_state,
+                input,
+                output,
+                target,
+                state.final_state,
+                state.start_state,
+            );
+        }
+
+        let next_epsilon_mode = if !tristate {
+            Some(1)
+        } else if state.epsilon_mode != 1 {
+            Some(2)
+        } else {
+            None
+        };
+        if input == EPSILON
+            && let Some(epsilon_mode) = next_epsilon_mode
+        {
+            let target = intern_compose_state(
+                triples,
+                work,
+                state.left,
+                transitions[position].target,
+                compose_product_mode(epsilon_mode, state.saw_right_flag),
+            );
+            fsm_state_add_arc(
+                builder,
+                state.output_state,
+                EPSILON,
+                output,
+                target,
+                state.final_state,
+                state.start_state,
+            );
+        }
+        position += 1;
+    }
+}
 
 // [spec:foma:def:constructions.fsm-intersect-fn]
 // [spec:foma:sem:constructions.fsm-intersect-fn]
@@ -165,6 +601,33 @@ pub fn fsm_intersect(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
 // [spec:foma:def:fomalib.fsm-compose-fn]
 // [spec:foma:sem:fomalib.fsm-compose-fn]
 pub fn fsm_compose(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
+    compose_with_flag_overlay(opts, net1, net2, &ComposeFlagOverlay::default())
+        .expect("ordinary composition uses an empty, always-valid flag overlay")
+}
+
+/// Compose owned operands while exposing configured flag labels as virtual
+/// identity self-loops.
+// [spec:foma:req:constructions.compose-virtual-flags]
+pub fn fsm_compose_with_flag_overlay(
+    opts: &FomaOptions,
+    net1: Fsm,
+    net2: Fsm,
+    overlay: &ComposeFlagOverlay,
+) -> Result<Fsm, FomaError> {
+    if opts.flag_is_epsilon && !overlay.is_empty() {
+        return Err(FomaError::MalformedInput(
+            "virtual flag composition cannot be combined with flag-is-epsilon".to_string(),
+        ));
+    }
+    compose_with_flag_overlay(opts, net1, net2, overlay)
+}
+
+fn compose_with_flag_overlay(
+    opts: &FomaOptions,
+    net1: Fsm,
+    net2: Fsm,
+    overlay: &ComposeFlagOverlay,
+) -> Result<Fsm, FomaError> {
     let mut int_stack = IntStack::new();
     /* The composition algorithm is the basic naive composition where we lazily      */
     /* take the cross-product of states P and Q and move to a new state with symbols */
@@ -195,21 +658,6 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
     /* However, for generic cases, bistate seems to yield smaller transducers.          */
     /* The global variable g_compose_tristate is set to OFF by default                  */
 
-    /* C: struct outarray { short int symin; short int symout; int target;
-    int mainloop; } and struct index { struct outarray *tail; } —
-    function-local types; tail is an index into outarray here */
-    #[derive(Clone)]
-    struct OutarrayEntry {
-        symin: i16,
-        symout: i16,
-        target: i32,
-        mainloop: i32,
-    }
-    #[derive(Clone)]
-    struct Index {
-        tail: usize,
-    }
-
     let g_compose_tristate = opts.compose_tristate;
     let g_flag_is_epsilon = opts.flag_is_epsilon;
 
@@ -219,7 +667,7 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
     if fsm_isempty(opts, &mut net1) || fsm_isempty(opts, &mut net2) {
         fsm_destroy(net1);
         fsm_destroy(net2);
-        return fsm_empty_set();
+        return Ok(fsm_empty_set());
     }
 
     /* If flag-is-epsilon is on, we need to add the flag symbols    */
@@ -263,7 +711,61 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
         }
     }
 
+    // Minimization may remove alphabet-only symbols. Restore every configured
+    // overlay label to both sigmas before the merge: this both keeps the label
+    // addressable and prevents UNKNOWN/IDENTITY expansion from treating a flag
+    // as absent on the virtual-loop side.
+    if !overlay.is_empty() {
+        for label in overlay
+            .left_self_loops()
+            .iter()
+            .chain(overlay.right_self_loops())
+        {
+            if sigma_find(label, &net1.sigma).is_none() {
+                sigma_add(label, &mut net1.sigma);
+            }
+            if sigma_find(label, &net2.sigma).is_none() {
+                sigma_add(label, &mut net2.sigma);
+            }
+        }
+        sigma_sort(&mut net1);
+        sigma_sort(&mut net2);
+    }
+
     fsm_merge_sigma(opts, &mut net1, &mut net2);
+
+    let merged_sigma_size = (sigma_max(&net1.sigma) + 1) as usize;
+    let mut numeric_overlay = NumericFlagOverlay {
+        left_self_loops: vec![false; merged_sigma_size],
+        right_self_loops: vec![false; merged_sigma_size],
+        enforce_left_before_right: overlay.enforces_left_before_right(),
+    };
+    for label in overlay.left_self_loops() {
+        let number = sigma_find(label, &net1.sigma).ok_or_else(|| {
+            FomaError::MalformedInput(format!(
+                "left flag-overlay label {label:?} is absent from the merged sigma"
+            ))
+        })?;
+        if number <= IDENTITY {
+            return Err(FomaError::MalformedInput(format!(
+                "special symbol {label:?} cannot be a virtual flag loop"
+            )));
+        }
+        numeric_overlay.left_self_loops[number as usize] = true;
+    }
+    for label in overlay.right_self_loops() {
+        let number = sigma_find(label, &net1.sigma).ok_or_else(|| {
+            FomaError::MalformedInput(format!(
+                "right flag-overlay label {label:?} is absent from the merged sigma"
+            ))
+        })?;
+        if number <= IDENTITY {
+            return Err(FomaError::MalformedInput(format!(
+                "special symbol {label:?} cannot be a virtual flag loop"
+            )));
+        }
+        numeric_overlay.right_self_loops[number as usize] = true;
+    }
 
     let mut is_flag: Vec<bool> = Vec::new();
     if g_flag_is_epsilon {
@@ -288,9 +790,9 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
     /* UNKNOWN and IDENTITY are indexed as UNKNOWN because we need to find both */
     /* as they share some semantics */
 
-    let mut index: Vec<Index> = vec![Index { tail: 0 }; (max2sigma + 1) as usize];
-    let mut outarray: Vec<OutarrayEntry> = vec![
-        OutarrayEntry {
+    let mut index: Vec<ComposeIndex> = vec![ComposeIndex { tail: 0 }; (max2sigma + 1) as usize];
+    let mut outarray: Vec<ComposeOutEntry> = vec![
+        ComposeOutEntry {
             symin: 0,
             symout: 0,
             target: 0,
@@ -326,16 +828,20 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
 
         let a = int_stack.pop();
         let b = int_stack.pop();
-        let mode = int_stack.pop();
+        let product_mode = int_stack.pop();
+        let mode = compose_epsilon_mode(product_mode);
+        let saw_right_flag = compose_saw_right_flag(product_mode);
 
-        let current_state = triplet_hash_find(&th, a, b, mode)
+        let current_state = triplet_hash_find(&th, a, b, product_mode)
             .expect("state triple popped off the work stack was inserted into the triplet hash");
-        let current_start =
-            if point_a[a as usize].start == 1 && point_b[b as usize].start == 1 && mode == 0 {
-                1
-            } else {
-                0
-            };
+        let current_start = if point_a[a as usize].start == 1
+            && point_b[b as usize].start == 1
+            && product_mode == 0
+        {
+            1
+        } else {
+            0
+        };
         let current_final = if point_a[a as usize].r#final == 1 && point_b[b as usize].r#final == 1
         {
             1
@@ -345,272 +851,71 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
 
         fsm_state_set_current_state(&mut builder, current_state, current_final, current_start);
 
-        /* Create the index for machine b in this state */
         mainloop += 1;
-        let mut bi = point_b[b as usize].transitions;
-        while fsm2[bi].state_no == b {
-            /* Index b */
-            let bindex = if fsm2[bi].r#in as i32 == IDENTITY {
-                UNKNOWN
-            } else {
-                fsm2[bi].r#in as i32
-            };
-            if bindex < 0 || fsm2[bi].target < 0 {
-                bi += 1;
-                continue;
-            }
+        index_compose_right_state(
+            b,
+            &fsm2,
+            point_b[b as usize].transitions,
+            max2sigma,
+            mainloop,
+            &mut index,
+            &mut outarray,
+        );
 
-            let mut iptr = index[bindex as usize].tail;
-            if outarray[iptr].mainloop != mainloop {
-                iptr = (bindex * (max2sigma + 2)) as usize;
-                index[bindex as usize].tail = iptr;
-            } else {
-                iptr += 1;
-            }
-            outarray[iptr].symin = fsm2[bi].r#in;
-            outarray[iptr].symout = fsm2[bi].out;
-            outarray[iptr].mainloop = mainloop;
-            outarray[iptr].target = fsm2[bi].target;
-            index[bindex as usize].tail = iptr;
-            bi += 1;
-        }
+        let state = ComposeStateInfo {
+            left: a,
+            right: b,
+            epsilon_mode: mode,
+            saw_right_flag,
+            output_state: current_state,
+            final_state: current_final,
+            start_state: current_start,
+        };
+        emit_compose_symbol_matches(
+            state,
+            &fsm1,
+            point_a[a as usize].transitions,
+            max2sigma,
+            mainloop,
+            &index,
+            &outarray,
+            &numeric_overlay,
+            &mut th,
+            &mut int_stack,
+            &mut builder,
+        );
+        emit_virtual_left_matches(
+            state,
+            &fsm2,
+            point_b[b as usize].transitions,
+            &numeric_overlay,
+            &mut th,
+            &mut int_stack,
+            &mut builder,
+        );
 
-        let mut ai = point_a[a as usize].transitions;
-        while fsm1[ai].state_no == a {
-            /* If we have the same transition from (a,b)-> some state */
-            /* If we have x:y y:z trans to some state */
-            let aout = fsm1[ai].out as i32;
-            /* IDENTITY is indexed under UNKNOWN (see above) */
-            let asearch = if aout == IDENTITY { UNKNOWN } else { aout };
-            if aout < 0 {
-                ai += 1;
-                continue;
-            }
-            let mut iptr = (asearch * (max2sigma + 2)) as usize;
-            let currtail = index[asearch as usize].tail + 1;
-            while iptr != currtail && outarray[iptr].mainloop == mainloop {
-                let mut ain = fsm1[ai].r#in as i32;
-                let mut aout = fsm1[ai].out as i32;
-                let mut bin = outarray[iptr].symin as i32;
-                let mut bout = outarray[iptr].symout as i32;
-
-                if aout == IDENTITY && bin == UNKNOWN {
-                    ain = UNKNOWN;
-                    aout = UNKNOWN;
-                } else if aout == UNKNOWN && bin == IDENTITY {
-                    bin = UNKNOWN;
-                    bout = UNKNOWN;
-                }
-
-                /* The C branched on g_compose_tristate here, but the bistate
-                and tristate arms were byte-identical over complementary
-                conditions, so the match-and-emit runs unconditionally. */
-                if bin == aout && bin != -1 && (bin != EPSILON || mode == 0) {
-                    /* mode -> 0 */
-                    let atarget = fsm1[ai].target;
-                    let btarget = outarray[iptr].target;
-                    let target_number = match triplet_hash_find(&th, atarget, btarget, 0) {
-                        Some(n) => n,
-                        None => {
-                            /* STACK_3_PUSH(0, iptr->target, machine_a->target) */
-                            int_stack.push(0);
-                            int_stack.push(btarget);
-                            int_stack.push(atarget);
-                            triplet_hash_insert(&mut th, atarget, btarget, 0)
-                        }
-                    };
-
-                    fsm_state_add_arc(
-                        &mut builder,
-                        current_state,
-                        ain,
-                        bout,
-                        target_number,
-                        current_final,
-                        current_start,
-                    );
-                }
-
-                iptr += 1;
-            }
-            ai += 1;
-        }
-
-        /* Treat epsilon outputs on machine a (may include flags) */
-        let mut ai = point_a[a as usize].transitions;
-        while fsm1[ai].state_no == a {
-            let aout = fsm1[ai].out as i32;
-            if aout != EPSILON && !g_flag_is_epsilon {
-                ai += 1;
-                continue;
-            }
-            let ain = fsm1[ai].r#in as i32;
-
-            if g_flag_is_epsilon && aout != -1 && mode == 0 && is_flag[aout as usize] {
-                let atarget = fsm1[ai].target;
-                let target_number = match triplet_hash_find(&th, atarget, b, 0) {
-                    Some(n) => n,
-                    None => {
-                        /* STACK_3_PUSH(0, b, machine_a->target) */
-                        int_stack.push(0);
-                        int_stack.push(b);
-                        int_stack.push(atarget);
-                        triplet_hash_insert(&mut th, atarget, b, 0)
-                    }
-                };
-                fsm_state_add_arc(
-                    &mut builder,
-                    current_state,
-                    ain,
-                    aout,
-                    target_number,
-                    current_final,
-                    current_start,
-                );
-            }
-
-            if !g_compose_tristate {
-                /* Check A:0 arcs on upper side */
-                if aout == EPSILON && mode == 0 {
-                    /* mode -> 0 */
-                    let atarget = fsm1[ai].target;
-                    let target_number = match triplet_hash_find(&th, atarget, b, 0) {
-                        Some(n) => n,
-                        None => {
-                            /* STACK_3_PUSH(0, b, machine_a->target) */
-                            int_stack.push(0);
-                            int_stack.push(b);
-                            int_stack.push(atarget);
-                            triplet_hash_insert(&mut th, atarget, b, 0)
-                        }
-                    };
-
-                    fsm_state_add_arc(
-                        &mut builder,
-                        current_state,
-                        ain,
-                        EPSILON,
-                        target_number,
-                        current_final,
-                        current_start,
-                    );
-                }
-            } else if g_compose_tristate && aout == EPSILON && mode != 2 {
-                /* mode -> 1 */
-                let atarget = fsm1[ai].target;
-                let target_number = match triplet_hash_find(&th, atarget, b, 1) {
-                    Some(n) => n,
-                    None => {
-                        /* STACK_3_PUSH(1, b, machine_a->target) */
-                        int_stack.push(1);
-                        int_stack.push(b);
-                        int_stack.push(atarget);
-                        triplet_hash_insert(&mut th, atarget, b, 1)
-                    }
-                };
-
-                fsm_state_add_arc(
-                    &mut builder,
-                    current_state,
-                    ain,
-                    EPSILON,
-                    target_number,
-                    current_final,
-                    current_start,
-                );
-            }
-
-            ai += 1;
-        }
-        /* Treat epsilon inputs on machine b (may include flags) */
-        let mut bi = point_b[b as usize].transitions;
-        while fsm2[bi].state_no == b {
-            let bin = fsm2[bi].r#in as i32;
-            if bin != EPSILON && !g_flag_is_epsilon {
-                bi += 1;
-                continue;
-            }
-
-            let bout = fsm2[bi].out as i32;
-
-            if g_flag_is_epsilon && bin != -1 && is_flag[bin as usize] {
-                let btarget = fsm2[bi].target;
-                let target_number = match triplet_hash_find(&th, a, btarget, 1) {
-                    Some(n) => n,
-                    None => {
-                        /* STACK_3_PUSH(1, machine_b->target, a) */
-                        int_stack.push(1);
-                        int_stack.push(btarget);
-                        int_stack.push(a);
-                        triplet_hash_insert(&mut th, a, btarget, 1)
-                    }
-                };
-                fsm_state_add_arc(
-                    &mut builder,
-                    current_state,
-                    bin,
-                    bout,
-                    target_number,
-                    current_final,
-                    current_start,
-                );
-            }
-
-            if !g_compose_tristate {
-                /* Check 0:A arcs on lower side */
-                if bin == EPSILON {
-                    /* mode -> 1 */
-                    let btarget = fsm2[bi].target;
-                    let target_number = match triplet_hash_find(&th, a, btarget, 1) {
-                        Some(n) => n,
-                        None => {
-                            /* STACK_3_PUSH(1, machine_b->target, a) */
-                            int_stack.push(1);
-                            int_stack.push(btarget);
-                            int_stack.push(a);
-                            triplet_hash_insert(&mut th, a, btarget, 1)
-                        }
-                    };
-
-                    fsm_state_add_arc(
-                        &mut builder,
-                        current_state,
-                        EPSILON,
-                        bout,
-                        target_number,
-                        current_final,
-                        current_start,
-                    );
-                }
-            } else if g_compose_tristate {
-                /* Check 0:A arcs on lower side */
-                if bin == EPSILON && mode != 1 {
-                    /* mode -> 1 */
-                    let btarget = fsm2[bi].target;
-                    let target_number = match triplet_hash_find(&th, a, btarget, 2) {
-                        Some(n) => n,
-                        None => {
-                            /* STACK_3_PUSH(2, machine_b->target, a) */
-                            int_stack.push(2);
-                            int_stack.push(btarget);
-                            int_stack.push(a);
-                            triplet_hash_insert(&mut th, a, btarget, 2)
-                        }
-                    };
-
-                    fsm_state_add_arc(
-                        &mut builder,
-                        current_state,
-                        EPSILON,
-                        bout,
-                        target_number,
-                        current_final,
-                        current_start,
-                    );
-                }
-            }
-            bi += 1;
-        }
+        emit_left_epsilon_moves(
+            state,
+            &fsm1,
+            point_a[a as usize].transitions,
+            g_compose_tristate,
+            g_flag_is_epsilon,
+            &is_flag,
+            &mut th,
+            &mut int_stack,
+            &mut builder,
+        );
+        emit_right_epsilon_moves(
+            state,
+            &fsm2,
+            point_b[b as usize].transitions,
+            g_compose_tristate,
+            g_flag_is_epsilon,
+            &is_flag,
+            &mut th,
+            &mut int_stack,
+            &mut builder,
+        );
         fsm_state_end_state(&mut builder);
     }
     drop(fsm1);
@@ -632,7 +937,7 @@ pub fn fsm_compose(opts: &FomaOptions, net1: Fsm, net2: Fsm) -> Fsm {
     }
     triplet_hash_free(Some(th));
     let net1 = fsm_topsort(fsm_coaccessible(net1));
-    fsm_coaccessible(net1)
+    Ok(fsm_coaccessible(net1))
 }
 
 // [spec:foma:def:constructions.fsm-cross-product-fn]

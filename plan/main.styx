@@ -1899,6 +1899,14 @@ children (
                     target-impl ([spec:foma:req:constructions.compose-virtual-flags])
                 }
                 deps (compose-resource-contract)
+                log (
+                    {
+                        at 2026-08-18T08:13:57.14725Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
             }
 
             {

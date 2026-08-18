@@ -7,6 +7,8 @@ use crate::apply::{
 };
 use crate::regex::fsm_parse_regex;
 
+mod compose;
+
 /* ---- fixtures & helpers ------------------------------------------- */
 
 fn re(s: &str) -> Fsm {

@@ -124,3 +124,11 @@ assertions (
     {id fsm-substitute-pair, kind @complete, author "brendan@necessary.nu", at 2026-08-12T07:30:10.065812Z}
     {id compose-resource-contract, kind @complete, author "brendan@necessary.nu", at 2026-08-18T08:12:51.808188Z}
 )
+
+impl_evidence (
+    {id compose-virtual-overlay, covered_rules (
+        constructions.compose-virtual-flags
+    ), covered_claims (
+        {impl_name target-impl, rule constructions.compose-virtual-flags}
+    )}
+)
