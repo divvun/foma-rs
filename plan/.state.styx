@@ -147,8 +147,6 @@ impl_evidence (
         constructions.compose-virtual-flags
     ), covered_claims (
         {impl_name target-impl, rule constructions.compose-virtual-flags}
-    ), rule_versions_seen (
-        {id constructions.compose-virtual-flags, version 0}
     )}
     {id intersect-virtual-overlay, covered_rules (
         constructions.intersect-virtual-flags

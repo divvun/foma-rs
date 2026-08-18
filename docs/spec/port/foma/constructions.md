@@ -317,7 +317,13 @@
 > right-origin flag events, but not the reverse until a real non-epsilon,
 > non-flag left-output symbol resets the ordering state; epsilon events do not
 > reset it. Empty overlays preserve ordinary composition behavior and state/arcs
-> discovery order.
+> discovery order. In the overlay's flag-as-epsilon mode, real left-output and
+> right-input flag arcs participate as epsilon moves without losing the
+> one-sided result labels, and missing left/right loops are exposed as
+> `flag:EPSILON` / `EPSILON:flag` moves. The ordinary epsilon filter and the
+> left-path ordering restriction apply exactly as if identity loops had first
+> been inserted eagerly and their composition-facing flag sides rewritten to
+> epsilon; neither operand transition table may be expanded.
 
 > [spec:foma:req:constructions.intersect-virtual-flags]
 > A configured intersection may expose selected alphabet symbols as virtual

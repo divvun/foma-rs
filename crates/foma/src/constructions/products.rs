@@ -11,6 +11,7 @@ pub struct ComposeFlagOverlay {
     left_self_loops: Vec<SmolStr>,
     right_self_loops: Vec<SmolStr>,
     enforce_left_before_right: bool,
+    flags_as_epsilon: bool,
 }
 
 impl ComposeFlagOverlay {
@@ -39,7 +40,16 @@ impl ComposeFlagOverlay {
             left_self_loops,
             right_self_loops,
             enforce_left_before_right,
+            flags_as_epsilon: false,
         })
+    }
+
+    /// Treat real flag events and virtual loops as HFST's one-sided epsilon
+    /// moves while retaining their labels for result restoration.
+    // [spec:foma:req:constructions.compose-virtual-flags]
+    pub fn with_flags_as_epsilon(mut self) -> Self {
+        self.flags_as_epsilon = true;
+        self
     }
 
     pub fn left_self_loops(&self) -> &[SmolStr] {
@@ -52,6 +62,10 @@ impl ComposeFlagOverlay {
 
     pub fn enforces_left_before_right(&self) -> bool {
         self.enforce_left_before_right
+    }
+
+    pub fn flags_are_epsilon(&self) -> bool {
+        self.flags_as_epsilon
     }
 
     fn is_empty(&self) -> bool {
@@ -92,7 +106,10 @@ struct ComposeIndex {
 struct NumericFlagOverlay {
     left_self_loops: Vec<bool>,
     right_self_loops: Vec<bool>,
+    left_labels: Vec<i32>,
+    right_labels: Vec<i32>,
     enforce_left_before_right: bool,
+    flags_as_epsilon: bool,
 }
 
 impl NumericFlagOverlay {
@@ -254,7 +271,8 @@ fn emit_compose_symbol_matches(
             entry += 1;
         }
 
-        if overlay.right_self_loops[original_output as usize]
+        if !overlay.flags_as_epsilon
+            && overlay.right_self_loops[original_output as usize]
             && !(overlay.enforce_left_before_right && state.saw_right_flag)
         {
             let next_mode = compose_product_mode(0, state.saw_right_flag);
@@ -285,7 +303,7 @@ fn emit_virtual_left_matches(
     let mut position = first_transition;
     while transitions[position].state_no == state.right {
         let input = transitions[position].r#in as i32;
-        if input >= 0 && overlay.left_self_loops[input as usize] {
+        if !overlay.flags_as_epsilon && input >= 0 && overlay.left_self_loops[input as usize] {
             let target = runtime.intern_state(
                 state.left,
                 transitions[position].target,
@@ -305,6 +323,26 @@ fn emit_virtual_left_matches(
     Ok(())
 }
 
+fn next_left_epsilon_mode(tristate: bool, epsilon_mode: i32) -> Option<i32> {
+    if !tristate && epsilon_mode == 0 {
+        Some(0)
+    } else if tristate && epsilon_mode != 2 {
+        Some(1)
+    } else {
+        None
+    }
+}
+
+fn next_right_epsilon_mode(tristate: bool, epsilon_mode: i32) -> Option<i32> {
+    if !tristate {
+        Some(1)
+    } else if epsilon_mode != 1 {
+        Some(2)
+    } else {
+        None
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn emit_left_epsilon_moves(
     state: ComposeStateInfo,
@@ -313,16 +351,36 @@ fn emit_left_epsilon_moves(
     tristate: bool,
     flag_is_epsilon: bool,
     is_flag: &[bool],
+    overlay: &NumericFlagOverlay,
     runtime: &mut ComposeRuntime,
 ) -> Result<(), FomaError> {
     let mut position = first_transition;
     while transitions[position].state_no == state.left {
         let output = transitions[position].out as i32;
-        if output != EPSILON && !flag_is_epsilon {
+        let overlay_flag = overlay.flags_as_epsilon && overlay.is_flag(output);
+        if output != EPSILON && !flag_is_epsilon && !overlay_flag {
             position += 1;
             continue;
         }
         let input = transitions[position].r#in as i32;
+        if overlay_flag
+            && let Some(epsilon_mode) = next_left_epsilon_mode(tristate, state.epsilon_mode)
+            && let Some(saw_right) = overlay.next_intersection_order(output, state.saw_right_flag)
+        {
+            let target = runtime.intern_state(
+                transitions[position].target,
+                state.right,
+                compose_product_mode(epsilon_mode, saw_right),
+            )?;
+            runtime.add_arc(
+                state.output_state,
+                input,
+                EPSILON,
+                target,
+                state.final_state,
+                state.start_state,
+            )?;
+        }
         if flag_is_epsilon && output >= 0 && state.epsilon_mode == 0 && is_flag[output as usize] {
             let target = runtime.intern_state(
                 transitions[position].target,
@@ -339,13 +397,7 @@ fn emit_left_epsilon_moves(
             )?;
         }
 
-        let next_epsilon_mode = if !tristate && state.epsilon_mode == 0 {
-            Some(0)
-        } else if tristate && state.epsilon_mode != 2 {
-            Some(1)
-        } else {
-            None
-        };
+        let next_epsilon_mode = next_left_epsilon_mode(tristate, state.epsilon_mode);
         if output == EPSILON
             && let Some(epsilon_mode) = next_epsilon_mode
         {
@@ -376,16 +428,35 @@ fn emit_right_epsilon_moves(
     tristate: bool,
     flag_is_epsilon: bool,
     is_flag: &[bool],
+    overlay: &NumericFlagOverlay,
     runtime: &mut ComposeRuntime,
 ) -> Result<(), FomaError> {
     let mut position = first_transition;
     while transitions[position].state_no == state.right {
         let input = transitions[position].r#in as i32;
-        if input != EPSILON && !flag_is_epsilon {
+        let overlay_flag = overlay.flags_as_epsilon && overlay.is_flag(input);
+        if input != EPSILON && !flag_is_epsilon && !overlay_flag {
             position += 1;
             continue;
         }
         let output = transitions[position].out as i32;
+        if overlay_flag
+            && let Some(epsilon_mode) = next_right_epsilon_mode(tristate, state.epsilon_mode)
+        {
+            let target = runtime.intern_state(
+                state.left,
+                transitions[position].target,
+                compose_product_mode(epsilon_mode, state.saw_right_flag),
+            )?;
+            runtime.add_arc(
+                state.output_state,
+                EPSILON,
+                output,
+                target,
+                state.final_state,
+                state.start_state,
+            )?;
+        }
         if flag_is_epsilon && input >= 0 && is_flag[input as usize] {
             let target = runtime.intern_state(
                 state.left,
@@ -402,13 +473,7 @@ fn emit_right_epsilon_moves(
             )?;
         }
 
-        let next_epsilon_mode = if !tristate {
-            Some(1)
-        } else if state.epsilon_mode != 1 {
-            Some(2)
-        } else {
-            None
-        };
+        let next_epsilon_mode = next_right_epsilon_mode(tristate, state.epsilon_mode);
         if input == EPSILON
             && let Some(epsilon_mode) = next_epsilon_mode
         {
@@ -427,6 +492,163 @@ fn emit_right_epsilon_moves(
             )?;
         }
         position += 1;
+    }
+    Ok(())
+}
+
+fn emit_virtual_epsilon_moves(
+    state: ComposeStateInfo,
+    tristate: bool,
+    overlay: &NumericFlagOverlay,
+    runtime: &mut ComposeRuntime,
+) -> Result<(), FomaError> {
+    if !overlay.flags_as_epsilon {
+        return Ok(());
+    }
+    if let Some(epsilon_mode) = next_left_epsilon_mode(tristate, state.epsilon_mode) {
+        for label in &overlay.left_labels {
+            if let Some(saw_right) = overlay.next_intersection_order(*label, state.saw_right_flag) {
+                let target = runtime.intern_state(
+                    state.left,
+                    state.right,
+                    compose_product_mode(epsilon_mode, saw_right),
+                )?;
+                runtime.add_arc(
+                    state.output_state,
+                    *label,
+                    EPSILON,
+                    target,
+                    state.final_state,
+                    state.start_state,
+                )?;
+            }
+        }
+    }
+    if let Some(epsilon_mode) = next_right_epsilon_mode(tristate, state.epsilon_mode) {
+        for label in &overlay.right_labels {
+            let target = runtime.intern_state(
+                state.left,
+                state.right,
+                compose_product_mode(epsilon_mode, state.saw_right_flag),
+            )?;
+            runtime.add_arc(
+                state.output_state,
+                EPSILON,
+                *label,
+                target,
+                state.final_state,
+                state.start_state,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_epsilon_pairs(
+    state: ComposeStateInfo,
+    left_transitions: &[FsmState],
+    left_first: usize,
+    right_transitions: &[FsmState],
+    right_first: usize,
+    overlay: &NumericFlagOverlay,
+    runtime: &mut ComposeRuntime,
+) -> Result<(), FomaError> {
+    if !overlay.flags_as_epsilon || state.epsilon_mode != 0 {
+        return Ok(());
+    }
+
+    let mut left_position = left_first;
+    while left_transitions[left_position].state_no == state.left {
+        let left_output = left_transitions[left_position].out as i32;
+        if left_output == EPSILON || overlay.is_flag(left_output) {
+            let saw_right = if left_output == EPSILON {
+                Some(state.saw_right_flag)
+            } else {
+                overlay.next_intersection_order(left_output, state.saw_right_flag)
+            };
+            if let Some(saw_right) = saw_right {
+                let mut right_position = right_first;
+                while right_transitions[right_position].state_no == state.right {
+                    let right_input = right_transitions[right_position].r#in as i32;
+                    if (right_input == EPSILON || overlay.is_flag(right_input))
+                        && !(left_output == EPSILON && right_input == EPSILON)
+                    {
+                        let target = runtime.intern_state(
+                            left_transitions[left_position].target,
+                            right_transitions[right_position].target,
+                            compose_product_mode(0, saw_right),
+                        )?;
+                        runtime.add_arc(
+                            state.output_state,
+                            left_transitions[left_position].r#in as i32,
+                            right_transitions[right_position].out as i32,
+                            target,
+                            state.final_state,
+                            state.start_state,
+                        )?;
+                    }
+                    right_position += 1;
+                }
+                for right_label in &overlay.right_labels {
+                    let target = runtime.intern_state(
+                        left_transitions[left_position].target,
+                        state.right,
+                        compose_product_mode(0, saw_right),
+                    )?;
+                    runtime.add_arc(
+                        state.output_state,
+                        left_transitions[left_position].r#in as i32,
+                        *right_label,
+                        target,
+                        state.final_state,
+                        state.start_state,
+                    )?;
+                }
+            }
+        }
+        left_position += 1;
+    }
+
+    for left_label in &overlay.left_labels {
+        if let Some(saw_right) = overlay.next_intersection_order(*left_label, state.saw_right_flag)
+        {
+            let mut right_position = right_first;
+            while right_transitions[right_position].state_no == state.right {
+                let right_input = right_transitions[right_position].r#in as i32;
+                if right_input == EPSILON || overlay.is_flag(right_input) {
+                    let target = runtime.intern_state(
+                        state.left,
+                        right_transitions[right_position].target,
+                        compose_product_mode(0, saw_right),
+                    )?;
+                    runtime.add_arc(
+                        state.output_state,
+                        *left_label,
+                        right_transitions[right_position].out as i32,
+                        target,
+                        state.final_state,
+                        state.start_state,
+                    )?;
+                }
+                right_position += 1;
+            }
+            for right_label in &overlay.right_labels {
+                let target = runtime.intern_state(
+                    state.left,
+                    state.right,
+                    compose_product_mode(0, saw_right),
+                )?;
+                runtime.add_arc(
+                    state.output_state,
+                    *left_label,
+                    *right_label,
+                    target,
+                    state.final_state,
+                    state.start_state,
+                )?;
+            }
+        }
     }
     Ok(())
 }
@@ -492,7 +714,10 @@ pub fn fsm_intersect_with_flag_overlay(
     let mut numeric_overlay = NumericFlagOverlay {
         left_self_loops: vec![false; merged_sigma_size],
         right_self_loops: vec![false; merged_sigma_size],
+        left_labels: Vec::with_capacity(overlay.left_self_loops().len()),
+        right_labels: Vec::with_capacity(overlay.right_self_loops().len()),
         enforce_left_before_right: overlay.enforces_left_before_right(),
+        flags_as_epsilon: overlay.flags_are_epsilon(),
     };
     for label in overlay.left_self_loops() {
         let number = sigma_find(label, &net1.sigma).ok_or_else(|| {
@@ -506,6 +731,7 @@ pub fn fsm_intersect_with_flag_overlay(
             )));
         }
         numeric_overlay.left_self_loops[number as usize] = true;
+        numeric_overlay.left_labels.push(number);
     }
     for label in overlay.right_self_loops() {
         let number = sigma_find(label, &net1.sigma).ok_or_else(|| {
@@ -519,6 +745,7 @@ pub fn fsm_intersect_with_flag_overlay(
             )));
         }
         numeric_overlay.right_self_loops[number as usize] = true;
+        numeric_overlay.right_labels.push(number);
     }
 
     fsm_update_flags(&mut net1, YES, NO, UNK, YES, UNK, UNK);
@@ -870,7 +1097,10 @@ fn compose_with_flag_overlay(
     let mut numeric_overlay = NumericFlagOverlay {
         left_self_loops: vec![false; merged_sigma_size],
         right_self_loops: vec![false; merged_sigma_size],
+        left_labels: Vec::with_capacity(overlay.left_self_loops().len()),
+        right_labels: Vec::with_capacity(overlay.right_self_loops().len()),
         enforce_left_before_right: overlay.enforces_left_before_right(),
+        flags_as_epsilon: overlay.flags_are_epsilon(),
     };
     for label in overlay.left_self_loops() {
         let number = sigma_find(label, &net1.sigma).ok_or_else(|| {
@@ -884,6 +1114,7 @@ fn compose_with_flag_overlay(
             )));
         }
         numeric_overlay.left_self_loops[number as usize] = true;
+        numeric_overlay.left_labels.push(number);
     }
     for label in overlay.right_self_loops() {
         let number = sigma_find(label, &net1.sigma).ok_or_else(|| {
@@ -897,6 +1128,7 @@ fn compose_with_flag_overlay(
             )));
         }
         numeric_overlay.right_self_loops[number as usize] = true;
+        numeric_overlay.right_labels.push(number);
     }
 
     let mut is_flag: Vec<bool> = Vec::new();
@@ -1013,6 +1245,15 @@ fn compose_with_flag_overlay(
             &numeric_overlay,
             &mut runtime,
         )?;
+        emit_epsilon_pairs(
+            state,
+            &fsm1,
+            point_a[a as usize].transitions,
+            &fsm2,
+            point_b[b as usize].transitions,
+            &numeric_overlay,
+            &mut runtime,
+        )?;
 
         emit_left_epsilon_moves(
             state,
@@ -1021,6 +1262,7 @@ fn compose_with_flag_overlay(
             g_compose_tristate,
             g_flag_is_epsilon,
             &is_flag,
+            &numeric_overlay,
             &mut runtime,
         )?;
         emit_right_epsilon_moves(
@@ -1030,8 +1272,10 @@ fn compose_with_flag_overlay(
             g_compose_tristate,
             g_flag_is_epsilon,
             &is_flag,
+            &numeric_overlay,
             &mut runtime,
         )?;
+        emit_virtual_epsilon_moves(state, g_compose_tristate, &numeric_overlay, &mut runtime)?;
         runtime.end_state()?;
     }
     let product = runtime.finish()?;

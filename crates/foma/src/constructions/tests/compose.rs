@@ -107,6 +107,27 @@ fn flag_overlay_validation_rejects_ambiguous_modes() {
 
 // [spec:foma:req:constructions.compose-virtual-flags/test]
 #[test]
+fn virtual_flag_epsilon_matches_eager() {
+    let opts = &FomaOptions::default();
+    let flag = "@P.FEATURE.LEFT@";
+    let overlay = ComposeFlagOverlay::new(Vec::new(), vec![flag.into()], false)
+        .expect("one-sided overlay is valid")
+        .with_flags_as_epsilon();
+
+    let actual =
+        fsm_compose_with_flag_overlay(opts, re(r#"a:"@P.FEATURE.LEFT@" b:c"#), re("c:d"), &overlay)
+            .expect("virtual flag-as-epsilon composition succeeds");
+
+    let eager_right = fsm_add_loop(re("c:d"), &re(r#"0:"@P.FEATURE.LEFT@""#), 2);
+    let eager = fsm_compose(opts, re("a:0 b:c"), eager_right);
+    let actual_lines = lines(&actual);
+    let eager_lines = lines(&eager);
+    assert!(fsm_equivalent(opts, eager.clone(), actual.clone()));
+    assert_eq!(actual_lines, eager_lines);
+}
+
+// [spec:foma:req:constructions.compose-virtual-flags/test]
+#[test]
 fn empty_overlay_and_wildcard_parity() {
     let opts = &FomaOptions::default();
     let left = re("a:b | c:d");
