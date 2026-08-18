@@ -305,6 +305,37 @@
 > returned is fsm_coaccessible(net1) (coaccessibility applied twice — literal
 > behavior). No minimization is performed.
 
+> [spec:foma:req:constructions.compose-virtual-flags]
+> A configured composition may expose selected alphabet symbols as virtual
+> unit identity self-loops on the operand that lacks them. Virtual loops are
+> generated only for the queried state and symbol: they must not be inserted
+> into either operand's transition table, matched against another virtual loop,
+> or expanded through UNKNOWN/IDENTITY wildcard behavior. The result must be
+> equivalent to inserting the same identity loop at every operand state before
+> ordinary composition. When both operands contribute renamed flag-diacritic
+> sets, a product path may contain left-origin flag events followed by
+> right-origin flag events, but not the reverse until a real non-epsilon,
+> non-flag left-output symbol resets the ordering state; epsilon events do not
+> reset it. Empty overlays preserve ordinary composition behavior and state/arcs
+> discovery order.
+
+> [spec:foma:req:constructions.compose-memory-budget]
+> The fallible owned composition API accepts an optional exact working-memory
+> allowance. `None` preserves the legacy unbounded in-memory algorithm. For a
+> bounded allowance, the implementation reserves ten percent for allocator and
+> fixed working overhead and partitions the remainder once among its product
+> state interner, work stack, and output materializer. When a budget-aware
+> structure cannot grow within its share, it migrates transactionally to an
+> operation-owned scratch directory instead of exceeding the share or falling
+> back to unbounded memory. Scratch I/O failures are returned with context and
+> scratch is removed on success, error, and drop. Product state IDs remain dense
+> first-discovery IDs, the LIFO expansion and per-state arc order remain stable,
+> and spill/no-spill results are exactly equivalent after coaccessibility
+> pruning. Loaded operands, fixed alphabet-index buffers, allocator/page-cache
+> effects, and the final returned `Fsm` are outside the allowance and must be
+> documented as such; a zero allowance forces every nonempty budget-aware
+> structure to scratch but may use a small fixed I/O envelope.
+
 > [spec:foma:def:constructions.fsm-concat-fn]
 > struct fsm *fsm_concat(struct fsm *net1, struct fsm *net2)
 
@@ -1527,4 +1558,3 @@
 >   int c;
 >   int key;
 > }
-

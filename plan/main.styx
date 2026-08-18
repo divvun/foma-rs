@@ -9,6 +9,7 @@ children (
     {
         id wave-1-markup
         title "Wave 1: markup — author sem rules for all 947 C functions"
+        kind @docs
         children (
             {
                 id w1-fomalib-api
@@ -150,6 +151,7 @@ children (
     {
         id wave-2-translate
         title "Wave 2: translate — 1:1 bug-for-bug Rust port of all 1020 symbols"
+        kind @feat
         children (
             {
                 id w2-scaffold
@@ -319,6 +321,7 @@ children (
     {
         id wave-3-tests
         title "Wave 3: tests — /test facets for all 947 functions + upstream suite port"
+        kind @test
         children (
             {
                 id w3-base-utils
@@ -460,6 +463,7 @@ children (
     {
         id wave-4-idiomatize
         title "Wave 4: idiomatize — native API, documented-bug fixes (+N bumps), publishing prep"
+        kind @refactor
         children (
             {
                 id w4-conventions
@@ -644,6 +648,7 @@ children (
     {
         id foma-mono-io
         title "Monomorphise foma io writers (kill dyn Write): static-dispatch Output enum + generic W/R params; add generic fsm_read_binary/fsm_write_binary stream APIs"
+        kind @refactor
         sealed true
         log (
             {
@@ -665,6 +670,7 @@ children (
     {
         id wave-5-debug
         title "Wave 5: eliminate remaining kept C bugs (bug-for-bug quirks → +N divergences)"
+        kind @fix
         children (
             {
                 id w5-correctness
@@ -867,6 +873,7 @@ children (
     {
         id wave-6-harden
         title "Wave 6: harden latent panics → graceful failures (C-faithfulness dropped; +N divergences). fsm_coaccessible re-prune crash, print dot/cmatrix + read prolog + io_net_read + mystrncpy panics on unwritable/malformed input."
+        kind @fix
         sealed true
         log (
             {
@@ -902,6 +909,7 @@ children (
     {
         id wave-7-idiomatize
         title "Wave 7: idiomatize string handling — replace C-string byte-buffer idioms with &str/String/char/iterators (bug-for-bug faithfulness dropped)"
+        kind @refactor
         children (
             {
                 id w7-lexcread
@@ -1018,6 +1026,7 @@ children (
     {
         id wave-8-session
         title "Wave 8: kill CLI global state — introduce a Session struct threaded &mut through dispatch → iface, replacing the network-stack / G_* options / define-registry thread_locals (re-entrant, embeddable). int_stack + regex parse-state scratch handled separately."
+        kind @refactor
         children (
             {
                 id w8-stack
@@ -1155,6 +1164,7 @@ children (
     {
         id wave-9-idiomatize
         title "Wave 9: finish idiomatization — remaining hidden state → owned/Session, i32 predicates → bool, library Result + tracing (no prints), apply/read ergonomics. Observable CLI behaviour stays byte-exact throughout."
+        kind @refactor
         children (
             {
                 id w9-state
@@ -1463,6 +1473,7 @@ children (
     {
         id wave-10-hardening
         title "Wave 10: post-port hardening — kill file-reachable panics, guard-then-unwrap smells, and magic i32s (bool/enum/bitflags/Tern), preserving byte-identical wire format"
+        kind @refactor
         children (
             {
                 id w10-io-panics
@@ -1812,6 +1823,7 @@ children (
     {
         id w11-build-perf
         title "Build-path performance: profile FST construction and cut the hot spots (merge_sigma identical-alphabet fast-path, Copy line-table/determinize structs). Behaviour-preserving; gated by the full test suite + the build_bench harness."
+        kind @perf
         sealed true
         log (
             {
@@ -1848,6 +1860,55 @@ children (
                 author "brendan@necessary.nu"
                 kind @status
                 text "Todo → Done (nplan complete)"
+            }
+        )
+    }
+
+    {
+        id compose-resource-control
+        title "Bounded Foma composition with virtual flag overlays"
+        kind @perf
+        children (
+            {
+                id compose-resource-contract
+                title "Specify virtual flag composition and bounded resource behavior"
+                kind @docs
+                sealed true
+                log (
+                    {
+                        at 2026-08-18T08:11:57.917903Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T08:12:51.808188Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
+                    }
+                )
+            }
+
+            {
+                id compose-virtual-overlay
+                title "Compose flag diacritics through virtual loops without graph expansion"
+                kind @perf
+                implements {
+                    target-impl ([spec:foma:req:constructions.compose-virtual-flags])
+                }
+                deps (compose-resource-contract)
+            }
+
+            {
+                id compose-memory-budget
+                title "Bound Foma product state and spill excess composition work to scratch"
+                kind @perf
+                implements {
+                    target-impl ([spec:foma:req:constructions.compose-memory-budget])
+                }
+                deps (compose-virtual-overlay)
             }
         )
     }

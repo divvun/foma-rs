@@ -122,4 +122,5 @@ assertions (
     {id w10-i32-option-sentinels, kind @complete, author "brendan@necessary.nu", at 2026-07-13T14:44:28.166591Z}
     {id w11-build-perf, kind @complete, author "brendan@necessary.nu", at 2026-07-15T20:52:23.589799Z}
     {id fsm-substitute-pair, kind @complete, author "brendan@necessary.nu", at 2026-08-12T07:30:10.065812Z}
+    {id compose-resource-contract, kind @complete, author "brendan@necessary.nu", at 2026-08-18T08:12:51.808188Z}
 )
