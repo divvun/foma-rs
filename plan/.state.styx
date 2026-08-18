@@ -1,10 +1,11 @@
 schema_version 7
 
-last_sync_at 2026-08-18T11:59:49.155422Z
+last_sync_at 2026-08-18T12:50:26.318824Z
 
 rule_versions (
     {id constructions.compose-memory-budget, version 0}
     {id constructions.compose-virtual-flags, version 0}
+    {id constructions.intersect-virtual-flags, version 0}
 )
 
 derived_priorities (
@@ -13,6 +14,7 @@ derived_priorities (
     {id compose-virtual-overlay, priority 1, derived_at 2026-08-18T11:59:49.155422Z}
     {id foma-mono-io, priority 0, derived_at 2026-07-07T19:37:15.797696Z}
     {id fsm-substitute-pair, priority 0, derived_at 2026-08-18T11:59:49.155422Z}
+    {id intersect-virtual-overlay, priority 2, derived_at 2026-08-18T12:50:26.318824Z}
     {id w1-algorithms, priority 0, derived_at 2026-07-07T19:37:15.797696Z}
     {id w1-apply-spelling, priority 0, derived_at 2026-07-07T19:37:15.797696Z}
     {id w1-constructions, priority 0, derived_at 2026-07-07T19:37:15.797696Z}
@@ -147,10 +149,14 @@ impl_evidence (
         constructions.compose-virtual-flags
     ), covered_claims (
         {impl_name target-impl, rule constructions.compose-virtual-flags}
+    ), rule_versions_seen (
+        {id constructions.compose-virtual-flags, version 0}
     )}
     {id intersect-virtual-overlay, covered_rules (
         constructions.intersect-virtual-flags
     ), covered_claims (
         {impl_name target-impl, rule constructions.intersect-virtual-flags}
+    ), rule_versions_seen (
+        {id constructions.intersect-virtual-flags, version 0}
     )}
 )
