@@ -15,6 +15,8 @@
 //! their C names and take `&mut LexcCompiler` (the caller-owned-context
 //! pattern), so the whole compile threads one borrow.
 
+use std::borrow::Cow;
+
 use crate::constructions::{add_fsm_arc, fsm_update_flags};
 use crate::define::add_defined;
 use crate::determinize::fsm_determinize;
@@ -889,32 +891,62 @@ fn lexc_pad(lx: &mut LexcCompiler) {
     }
 }
 
-// [spec:foma:def:lexcread.lexc-string-to-tokens-fn+1]
-// [spec:foma:sem:lexcread.lexc-string-to-tokens-fn+1]
+// [spec:foma:def:lexcread.lexc-string-to-tokens-fn+2]
+// [spec:foma:sem:lexcread.lexc-string-to-tokens-fn+2]
 fn lexc_string_to_tokens(lx: &mut LexcCompiler, string: &str, intarr: &mut Vec<i32>) {
+    /* C de-escaped the whole word in one pass (lexc_deescape_string) before
+    tokenizing, so the multichar match always ran against fully decoded text.
+    Do the same here, in two steps. A bare '0' is the alignment EPSILON; it was
+    C's 0xff sentinel, a byte no multichar symbol can contain, so it splits the
+    word into runs no match may span. Inside a run, @ZERO@ (nfst-lexc's marker
+    for the escaped literal zero %0) is decoded back to a literal '0' before
+    the multichar scan — which is what lets a declared symbol whose name holds
+    a zero (%<TAG%:%0%>, registered as "<TAG:0>") match as one token. */
     let mut pos = 0usize;
     let mut rest = string;
+    loop {
+        let (run, tail) = split_at_bare_zero(rest);
+        /* @ZERO@ spells its zero with the letter O, so a run holds no marker
+        digits and decoding it cannot introduce a new bare zero. */
+        let decoded: Cow<'_, str> = if run.contains("@ZERO@") {
+            Cow::Owned(run.replace("@ZERO@", "0"))
+        } else {
+            Cow::Borrowed(run)
+        };
+        tokenize_run(lx, &decoded, intarr, &mut pos);
+        match tail {
+            Some(t) => {
+                vset(intarr, pos, EPSILON);
+                pos += 1;
+                rest = t;
+            }
+            None => break,
+        }
+    }
+    vset(intarr, pos, -1);
+}
+
+/// Split off the run before the first alignment EPSILON (a bare '0'), plus the
+/// text after it when there was one. Every digit '0' left in the string is a
+/// bare one: nfst-lexc has already turned each escaped `%0` into `@ZERO@`,
+/// whose zero is the letter O.
+fn split_at_bare_zero(s: &str) -> (&str, Option<&str>) {
+    match s.find('0') {
+        Some(i) => (&s[..i], Some(&s[i + 1..])),
+        None => (s, None),
+    }
+}
+
+/// Tokenize one decoded, zero-free run into `intarr` at `pos`, extending
+/// lexsigma with unseen symbols.
+fn tokenize_run(lx: &mut LexcCompiler, run: &str, intarr: &mut Vec<i32>, pos: &mut usize) {
+    let mut rest = run;
     while let Some(c) = rest.chars().next() {
-        // nfst-lexc encodes an escaped literal zero (%0) as the marker @ZERO@,
-        // which denotes the literal "0" symbol.
-        if let Some(r) = rest.strip_prefix("@ZERO@") {
-            vset(intarr, pos, intern_symbol(lx, "0"));
-            pos += 1;
-            rest = r;
-            continue;
-        }
-        // A bare '0' is the alignment EPSILON.
-        if c == '0' {
-            vset(intarr, pos, EPSILON);
-            pos += 1;
-            rest = &rest[c.len_utf8()..];
-            continue;
-        }
         // The longest matching multichar symbol (the chain is kept longest-first,
         // so the first prefix hit is the longest).
         if let Some(m) = first_mc_prefix(lx, rest) {
-            vset(intarr, pos, lx.mc_arena[m].sigma_number as i32);
-            pos += 1;
+            vset(intarr, *pos, lx.mc_arena[m].sigma_number as i32);
+            *pos += 1;
             let mclen = lx.mc_arena[m]
                 .symbol
                 .as_deref()
@@ -926,11 +958,10 @@ fn lexc_string_to_tokens(lx: &mut LexcCompiler, string: &str, intarr: &mut Vec<i
         // A single character.
         let sym = &rest[..c.len_utf8()];
         let n = intern_symbol(lx, sym);
-        vset(intarr, pos, n);
-        pos += 1;
+        vset(intarr, *pos, n);
+        *pos += 1;
         rest = &rest[c.len_utf8()..];
     }
-    vset(intarr, pos, -1);
 }
 
 /// Look `sym` up in the lex sigma hash, adding it (and registering the number)
@@ -1906,6 +1937,22 @@ mod tests {
         assert_eq!(upper_all(&net), vec!["x+Pl", "y+PlPoss"]);
     }
 
+    // A declared multichar symbol whose name contains an escaped zero survives
+    // into the compiled net's sigma as one atomic symbol, rather than being
+    // decomposed into its individual characters. Regression for divvun/foma-rs#2.
+    // [spec:foma:sem:lexcread.lexc-string-to-tokens-fn+2/test]
+    // [spec:foma:sem:lexcread.lexc-add-mc-fn/test]
+    #[test]
+    fn e2e_multichar_with_escaped_zero_reaches_sigma() {
+        let net = compile("Multichar_Symbols\n%<TAG%:%0%>\n\nLEXICON Root\n%<TAG%:%0%>:a # ;\n");
+        let mut sigma: Vec<&str> = net.sigma.iter().map(|s| s.symbol.as_str()).collect();
+        sigma.sort();
+        assert_eq!(sigma, vec!["<TAG:0>", "a"]);
+        assert_eq!(upper_all(&net), vec!["<TAG:0>"]);
+        assert_eq!(lower_all(&net), vec!["a"]);
+        assert_eq!(down_one(&net, "<TAG:0>").as_deref(), Some("a"));
+    }
+
     // `%`-escape: `a%:b` is the literal three-symbol string a : b (identity),
     // not a pair split at the colon.
     // [spec:foma:sem:lexcread.lexc-find-delim-fn/test]
@@ -1918,7 +1965,7 @@ mod tests {
     }
 
     // `0` as epsilon: `a:0` = a:eps, `0:b` = eps:b — projections drop epsilon.
-    // [spec:foma:sem:lexcread.lexc-string-to-tokens-fn+1/test]
+    // [spec:foma:sem:lexcread.lexc-string-to-tokens-fn+2/test]
     #[test]
     fn e2e_zero_is_epsilon() {
         let net = compile("LEXICON Root\na:0 # ;\n0:b # ;\n");
@@ -2085,7 +2132,7 @@ mod tests {
 
     // Multichar longest-first, a bare '0' -> alignment EPSILON, and fresh-sigma
     // numbering (first regular symbol = 3).
-    // [spec:foma:sem:lexcread.lexc-string-to-tokens-fn+1/test]
+    // [spec:foma:sem:lexcread.lexc-string-to-tokens-fn+2/test]
     // [spec:foma:sem:lexcread.lexc-find-mc-fn+1/test]
     // [spec:foma:sem:lexc.lexc-find-mc-fn+1/test]
     #[test]
@@ -2113,6 +2160,54 @@ mod tests {
         let mut arr3: Vec<i32> = Vec::new();
         lexc_string_to_tokens(&mut lx, "a0a", &mut arr3);
         assert_eq!(arr3[1], EPSILON);
+    }
+
+    // A multichar symbol whose declared name contains an escaped zero (%0, which
+    // nfst-lexc hands over as the @ZERO@ marker) must still match as one token in
+    // entry text: the marker is decoded before the multichar scan, exactly as C's
+    // single de-escape pass did. Regression for divvun/foma-rs#2.
+    // [spec:foma:sem:lexcread.lexc-string-to-tokens-fn+2/test]
+    // [spec:foma:sem:lexcread.lexc-add-mc-fn/test]
+    #[test]
+    fn string_to_tokens_multichar_containing_escaped_zero() {
+        let mut lx = LexcCompiler::new_empty();
+        lexc_init(&mut lx);
+        lexc_add_mc(&mut lx, "<TAG:@ZERO@>"); // registered as "<TAG:0>"
+        assert!(lexc_find_mc(&lx, "<TAG:0>"));
+        let mc = lx.mc.unwrap();
+        let num = lx.mc_arena[mc].sigma_number as i32;
+
+        // The same text in an entry is one token, not seven single characters.
+        let mut arr: Vec<i32> = Vec::new();
+        lexc_string_to_tokens(&mut lx, "<TAG:@ZERO@>", &mut arr);
+        assert_eq!(&arr[..2], &[num, -1]);
+
+        // A bare '0' still splits the word and can never fall inside a match:
+        // "<TAG:" + EPSILON + ">" are separate tokens.
+        let mut arr2: Vec<i32> = Vec::new();
+        lexc_string_to_tokens(&mut lx, "<TAG:0>", &mut arr2);
+        assert!(arr2[..arr2.iter().position(|&v| v == -1).unwrap()].contains(&EPSILON));
+        assert!(!arr2.contains(&num));
+
+        // An escaped zero standing alone is the literal "0" symbol, and two of
+        // them can themselves form a declared multichar symbol.
+        lexc_add_mc(&mut lx, "@ZERO@@ZERO@"); // registered as "00"
+        let mc00 = lx.mc.unwrap();
+        assert_eq!(lx.mc_arena[mc00].symbol.as_deref(), Some("<TAG:0>"));
+        let num00 = {
+            let mut m = lx.mc;
+            let mut found = None;
+            while let Some(i) = m {
+                if lx.mc_arena[i].symbol.as_deref() == Some("00") {
+                    found = Some(lx.mc_arena[i].sigma_number as i32);
+                }
+                m = lx.mc_arena[i].next;
+            }
+            found.expect("00 registered")
+        };
+        let mut arr3: Vec<i32> = Vec::new();
+        lexc_string_to_tokens(&mut lx, "@ZERO@@ZERO@", &mut arr3);
+        assert_eq!(&arr3[..2], &[num00, -1]);
     }
 
     /* ---- direct API: alignment ------------------------------------------ */
