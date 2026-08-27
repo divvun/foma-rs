@@ -23,12 +23,13 @@ use nfst_xre::{
 };
 
 use crate::constructions::{
-    fsm_complement, fsm_compose, fsm_concat, fsm_concat_m_n, fsm_concat_n, fsm_contains,
-    fsm_contains_one, fsm_contains_opt_one, fsm_context_restrict, fsm_cross_product, fsm_follows,
-    fsm_ignore, fsm_intersect, fsm_invert, fsm_kleene_plus, fsm_kleene_star, fsm_lenient_compose,
-    fsm_minus, fsm_optionality, fsm_precedes, fsm_priority_union_lower, fsm_priority_union_upper,
-    fsm_quotient_left, fsm_shuffle, fsm_substitute_symbol, fsm_symbol, fsm_term_negation,
-    fsm_union,
+    fsm_add_loop, fsm_add_sink, fsm_close_sigma, fsm_complement, fsm_compose, fsm_concat,
+    fsm_concat_m_n, fsm_concat_n, fsm_contains, fsm_contains_one, fsm_contains_opt_one,
+    fsm_context_restrict, fsm_cross_product, fsm_equal_substrings, fsm_flatten, fsm_follows,
+    fsm_ignore, fsm_intersect, fsm_invert, fsm_kleene_plus, fsm_kleene_star, fsm_left_rewr,
+    fsm_lenient_compose, fsm_letter_machine, fsm_mark_fsm_tail, fsm_minus, fsm_optionality,
+    fsm_precedes, fsm_priority_union_lower, fsm_priority_union_upper, fsm_quotient_left,
+    fsm_shuffle, fsm_substitute_symbol, fsm_symbol, fsm_term_negation, fsm_union,
 };
 use crate::define::{add_defined, find_defined, find_defined_function, remove_defined};
 use crate::determinize::fsm_determinize;
@@ -37,7 +38,12 @@ use crate::io::{file_to_mem, fsm_read_binary_file, fsm_read_spaced_text_file, fs
 use crate::minimize::fsm_minimize;
 use crate::reverse::fsm_reverse;
 use crate::rewrite::fsm_rewrite;
-use crate::structures::{fsm_copy, fsm_destroy, fsm_empty_string, fsm_identity, fsm_isempty};
+use crate::structures::{
+    fsm_boolean, fsm_copy, fsm_destroy, fsm_empty_string, fsm_extract_ambiguous,
+    fsm_extract_ambiguous_domain, fsm_extract_nonidentity, fsm_extract_unambiguous, fsm_identity,
+    fsm_isempty, fsm_isfunctional, fsm_isidentity, fsm_isunambiguous, fsm_lowerdet,
+    fsm_lowerdeteps, fsm_markallfinal,
+};
 use crate::trie::{
     THASH_TABLESIZE, fsm_trie_done, fsm_trie_end_word, fsm_trie_init_sized, fsm_trie_symbol,
 };
@@ -209,7 +215,12 @@ fn build_net(
 
         XreExpr::ReadFile { kind, path } => build_read_file(opts, ps, *kind, path, nets, funcs),
 
-        XreExpr::FunctionCall { name, args } => function_apply(opts, ps, name, args, nets, funcs),
+        XreExpr::FunctionCall { name, args } => match name.strip_prefix('_') {
+            /* `_` is not a NAME_CH, so a user-defined function can never carry
+            this prefix: every `_xxx(` is one of regex.l's builtin keywords. */
+            Some(builtin) => build_builtin(opts, ps, builtin, args, nets, funcs),
+            None => function_apply(opts, ps, name, args, nets, funcs),
+        },
 
         // ──────────────── grouping ────────────────
         XreExpr::Group(inner) => build_net(opts, ps, &inner.value, nets, funcs),
@@ -278,7 +289,7 @@ fn build_net(
         }
 
         // ──────────────── replace / restriction / substitute ────────────────
-        XreExpr::Replace { arrow, rules } => build_replace(opts, ps, *arrow, rules, nets, funcs),
+        XreExpr::Replace { rules, .. } => build_replace(opts, ps, rules, nets, funcs),
         XreExpr::Restriction { body, contexts } => {
             build_restriction(opts, ps, &body.value, contexts, nets, funcs)
         }
@@ -494,6 +505,108 @@ fn build_read_file(
 /// substitute each `@ARGUMENTNN@` with a unique temporary symbol, temporarily
 /// define each argument net under that symbol, reparse the substituted regex,
 /// then remove the temporaries.
+/// The `_xxx(...)` builtin family (regex.l's hardcoded function keywords, each
+/// a fixed-arity production in regex.y). Arity is checked here rather than in
+/// the grammar, since nfst-xre lexes them as ordinary function names.
+fn build_builtin(
+    opts: &FomaOptions,
+    ps: &mut ParseState,
+    name: &str,
+    args: &[SpannedXre],
+    mut nets: Option<&mut DefinedNetworks>,
+    mut funcs: Option<&mut DefinedFunctions>,
+) -> Option<Fsm> {
+    let arity = match name {
+        "isunambiguous" | "isidentity" | "isfunctional" | "notid" | "lm" | "loweruniq"
+        | "loweruniqeps" | "allfinal" | "unambpart" | "ambpart" | "ambdom" | "addsink"
+        | "close" | "closeu" => 1,
+        "marktail" | "addfinalloop" | "addnonfinalloop" | "addloop" | "leftrewr" | "flatten" => 2,
+        "eq" => 3,
+        _ => {
+            tracing::error!("Syntax error: unknown builtin function _{}(", name);
+            return None;
+        }
+    };
+    if args.len() != arity {
+        tracing::error!(
+            "Syntax error: _{}( takes {} argument(s), got {}",
+            name,
+            arity,
+            args.len()
+        );
+        return None;
+    }
+
+    let mut nets_built: Vec<Fsm> = Vec::new();
+    for a in args {
+        match build_net(
+            opts,
+            ps,
+            &a.value,
+            nets.as_deref_mut(),
+            funcs.as_deref_mut(),
+        ) {
+            Some(n) => nets_built.push(n),
+            None => {
+                for n in nets_built {
+                    fsm_destroy(n);
+                }
+                return None;
+            }
+        }
+    }
+    let mut it = nets_built.into_iter();
+    let mut first = it.next().expect("arity >= 1");
+
+    Some(match name {
+        /* Predicates: regex.y wraps the boolean in fsm_boolean (empty string
+        for true, empty set for false). */
+        "isunambiguous" => {
+            let r = fsm_boolean(fsm_isunambiguous(opts, &mut first) as i32);
+            fsm_destroy(first);
+            r
+        }
+        "isidentity" => {
+            let r = fsm_boolean(fsm_isidentity(opts, &mut first) as i32);
+            fsm_destroy(first);
+            r
+        }
+        "isfunctional" => {
+            let r = fsm_boolean(fsm_isfunctional(opts, &mut first) as i32);
+            fsm_destroy(first);
+            r
+        }
+        "notid" => fsm_extract_nonidentity(opts, first),
+        "lm" => fsm_letter_machine(opts, first),
+        "loweruniq" => fsm_lowerdet(opts, first),
+        "loweruniqeps" => fsm_lowerdeteps(opts, first),
+        "allfinal" => fsm_markallfinal(first),
+        "unambpart" => fsm_extract_unambiguous(opts, first),
+        "ambpart" => fsm_extract_ambiguous(opts, first),
+        "ambdom" => fsm_extract_ambiguous_domain(opts, first),
+        "addsink" => fsm_add_sink(first, 1),
+        "close" => fsm_close_sigma(opts, first, 0),
+        "closeu" => fsm_close_sigma(opts, first, 1),
+        "marktail" => fsm_mark_fsm_tail(first, &it.next().expect("arity 2")),
+        /* fsm_add_loop's `finals` selector: 1 = final states only,
+        0 = non-final only, 2 = every state. */
+        "addfinalloop" => fsm_add_loop(first, &it.next().expect("arity 2"), 1),
+        "addnonfinalloop" => fsm_add_loop(first, &it.next().expect("arity 2"), 0),
+        "addloop" => fsm_add_loop(first, &it.next().expect("arity 2"), 2),
+        "leftrewr" => fsm_left_rewr(opts, first, it.next().expect("arity 2")),
+        "flatten" => fsm_flatten(opts, first, it.next().expect("arity 2"))?,
+        "eq" => {
+            let mut left = it.next().expect("arity 3");
+            let mut right = it.next().expect("arity 3");
+            let r = fsm_equal_substrings(opts, first, &mut left, &mut right);
+            fsm_destroy(left);
+            fsm_destroy(right);
+            r
+        }
+        _ => unreachable!("arity table and dispatch cover the same names"),
+    })
+}
+
 fn function_apply(
     opts: &FomaOptions,
     ps: &mut ParseState,
@@ -614,13 +727,10 @@ fn mark_to_dir(mark: ContextMark) -> ReplaceDir {
 fn build_replace(
     opts: &FomaOptions,
     ps: &mut ParseState,
-    arrow: ReplaceArrow,
     rules: &[ReplaceRule],
     mut nets: Option<&mut DefinedNetworks>,
     mut funcs: Option<&mut DefinedFunctions>,
 ) -> Option<Fsm> {
-    let arrow_type = arrow_to_type(arrow);
-
     /* Each ReplaceRule (a `,,`-separated block) becomes one rewrite_set node;
     each MappingPair inside becomes one (or two, for dotted) Fsmrules node.
     Rule/set ordering is observably irrelevant (the sets are unioned /
@@ -630,11 +740,14 @@ fn build_replace(
     for rule in rules {
         let mut rule_nodes: Vec<Fsmrules> = Vec::new();
         for mapping in &rule.mappings {
+            /* regex.y stores an arrow per Fsmrules node, so a parallel list
+            may mix them: `a -> b, c (->) d` keeps `c` optional while `a` stays
+            obligatory, both under the shared context. */
             build_mapping(
                 opts,
                 ps,
                 mapping,
-                arrow_type,
+                arrow_to_type(mapping.arrow),
                 &mut rule_nodes,
                 nets.as_deref_mut(),
                 funcs.as_deref_mut(),
@@ -1033,6 +1146,117 @@ mod tests {
             let net = super::fsm_parse_regex(opts, src, None, None);
             assert!(net.is_some(), "failed to compile regex: {:?}", src);
         }
+    }
+
+    /// Enumerate the lower-side outputs of `word` through `src`, sorted.
+    fn down_all(opts: &FomaOptions, src: &str, word: &str) -> Vec<String> {
+        use crate::apply::{apply_down, apply_init};
+        let net = super::fsm_parse_regex(opts, src, None, None).expect("regex compiles");
+        let mut h = apply_init(&net);
+        let mut v = Vec::new();
+        let mut r = apply_down(&mut h, Some(word));
+        while let Some(w) = r {
+            v.push(w);
+            r = apply_down(&mut h, None);
+        }
+        v.sort();
+        v.dedup();
+        v
+    }
+
+    // A parallel rule list may mix obligatory and optional arrows: regex.y
+    // stores an arrow per rule, so `c` alternates optionally while `a` is
+    // replaced obligatorily, both under the one shared context.
+    // Regression for divvun/foma-rs#4.
+    // [spec:foma:sem:foma.my-yyparse-fn/test]
+    // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
+    #[test]
+    fn parallel_rule_list_mixes_obligatory_and_optional_arrows() {
+        let opts = &FomaOptions::default();
+        let src = "[ a -> b, c (->) d || _ e ]";
+        assert_eq!(down_all(opts, src, "ae"), vec!["be"]);
+        assert_eq!(down_all(opts, src, "ace"), vec!["ace", "ade"]);
+    }
+
+    // The `_xxx(` builtin family (regex.l's hardcoded function keywords).
+    // `_eq` is the reduplication operator from foma's own docs: it keeps only
+    // the paths whose `%<`-delimited substrings are all equal.
+    // Regression for divvun/foma-rs#3.
+    // [spec:foma:sem:foma.my-yyparse-fn/test]
+    // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
+    #[test]
+    fn builtin_eq_filters_to_equal_substrings() {
+        use crate::apply::{apply_init, apply_up};
+        let opts = &FomaOptions::default();
+        let src = "_eq([%< [{cat}|{dog}] %> (%- %< [?-%<-%>]+ %>)], %<, %>) .o. %<|%> -> 0";
+        let net = super::fsm_parse_regex(opts, src, None, None).expect("_eq compiles");
+        let mut h = apply_init(&net);
+        assert_eq!(
+            apply_up(&mut h, Some("cat-cat")).as_deref(),
+            Some("<cat>-<cat>")
+        );
+        let mut h = apply_init(&net);
+        assert_eq!(
+            apply_up(&mut h, Some("dog-dog")).as_deref(),
+            Some("<dog>-<dog>")
+        );
+        /* Unequal halves are not reduplication, so no path survives. */
+        let mut h = apply_init(&net);
+        assert_eq!(apply_up(&mut h, Some("cat-dog")), None);
+    }
+
+    // Predicates return fsm_boolean: the empty-string net for true, the empty
+    // set for false. The rest of the family compiles and dispatches.
+    // [spec:foma:sem:foma.my-yyparse-fn/test]
+    // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
+    #[test]
+    fn builtin_family_compiles() {
+        let opts = &FomaOptions::default();
+        let t = super::fsm_parse_regex(opts, "_isfunctional(a:b)", None, None).unwrap();
+        assert_eq!(counted(t).2, 1, "_isfunctional(a:b) is true (empty string)");
+        let f = super::fsm_parse_regex(opts, "_isfunctional(a:b | a:c)", None, None).unwrap();
+        assert_eq!(
+            counted(f).2,
+            0,
+            "_isfunctional(a:b|a:c) is false (empty set)"
+        );
+
+        for src in [
+            "_isidentity(a)",
+            "_isunambiguous(a:b)",
+            "_notid(a:a | a:b)",
+            "_lm({abc})",
+            "_loweruniq(a:b)",
+            "_loweruniqeps(a:b)",
+            "_allfinal(a b)",
+            "_unambpart(a:b)",
+            "_ambpart(a:b | a:c)",
+            "_ambdom(a:b | a:c)",
+            "_addsink(a)",
+            "_close(a ?)",
+            "_closeu(a ?)",
+            "_marktail(a, b)",
+            "_addfinalloop(a, b)",
+            "_addnonfinalloop(a, b)",
+            "_addloop(a, b)",
+            "_leftrewr(a, b:c)",
+            "_flatten(a:b, x)",
+        ] {
+            assert!(
+                super::fsm_parse_regex(opts, src, None, None).is_some(),
+                "failed to compile builtin: {src}"
+            );
+        }
+    }
+
+    // Wrong arity is rejected rather than silently mis-dispatched.
+    // [spec:foma:sem:foma.my-yyparse-fn/test]
+    // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
+    #[test]
+    fn builtin_arity_is_checked() {
+        let opts = &FomaOptions::default();
+        assert!(super::fsm_parse_regex(opts, "_lm(a, b)", None, None).is_none());
+        assert!(super::fsm_parse_regex(opts, "_eq(a, b)", None, None).is_none());
     }
 
     #[test]

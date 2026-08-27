@@ -8,8 +8,8 @@ edition = "2024"
 license = "Apache-2.0"
 
 [workspace.dependencies]
-nfst-xre = "0.3.0"
-nfst-lexc = "0.3.0"
+nfst-xre = "0.4.0"
+nfst-lexc = "0.4.0"
 bitflags = "2"
 flate2 = "1"
 smol_str = "0.3"
