@@ -1946,4 +1946,26 @@ children (
             }
         )
     }
+
+    {
+        id xre-first-order-logic
+        title "first-order-logic sublanguage: (∀x)/(∃x) binders, x ∈ N, the =/≠/≺/≻ variable relations, and _S( — resolved in foma against a ParseState quantifier table, since nfst-xre is context-free and C did this classification in the lexer"
+        kind @feat
+        sealed true
+        log (
+            {
+                at 2026-08-27T21:31:05.511057658Z
+                author "brendan@necessary.nu"
+                kind @decision
+                text "Filed retrospectively: the work shipped in 0.5.0 (eb376dc) before it was tracked. Requested directly, not bug-driven — #3 covered only the parse failure of the `_` builtin family and was satisfied before this. Rationale recorded in divvun/foma-rs#5.\n\nImplemented in foma alone; nfst-xre needed no change. Every form already survives into the AST: `∀x` lexes as one Symbol (both chars are NAME_CH), the binder's parens arrive as Optional, and `∈ ≠ ≺ ≻` arrive as Symbols in a concat spine. C resolved VAR-vs-NET in the LEXER against a live quantifier table (regex.l:363-366), and `=` → EQUALS only while count_quantifiers() > 0 (regex.l:334); nfst-xre is context-free, so the table lives on ParseState and classification happens during the tree walk. Two C rules are already context-dependent the same way and port directly: `( F )` is grouping while a quantifier is live, else optionality (regex.y LPAREN).\n\nVALIDATION: upstream C foma does not meet its own documented semantics here — foma's help (iface.c:217-218) gives $.A == (∃x)(x ∈ A ∧ ¬(∃y)(y ∈ A ∧ ¬(x = y))), but built from mhulden/foma HEAD it compiles those to a 2-state and a 372-state network and fsm_equivalent says NO (its lexer folds the formula body into one symbol). So the documented identities are the spec, not C's behaviour. Seven identities now hold by fsm_equivalent and are pinned as tests, including $[a b] == (∃x)(∃y)(x ∈ a & y ∈ b & _S(x, y)), which is what validates _S(.\n\nTwo AST shapes forced adjustments: `~(∃y)…` parses as Complement over the binder alone (unary ops are lifted over the quantification), and xre binds `<`/`>` looser than `&` where regex.y binds the VAR relation tighter, so `A & x < y` arrives as `[A & x] < y` and is re-associated — only ever when both operands are bound variables.\n\nLayer is inert without a binder in scope; a test pins that ordinary regexes are unaffected. `(A)` means grouping rather than optionality inside a formula, hence the minor bump.\n\nRemaining, tracked upstream as necessary-nu/nfst#1: the Unicode operator aliases ∧ ∨ ¬ (and ×, Σ, ε, ∘, ∥, ∩, ∪) still lex as ordinary symbols in nfst-xre; use the ASCII & | ~ spellings."
+            }
+
+            {
+                at 2026-08-27T21:31:11.075479002Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Done (nplan complete)"
+            }
+        )
+    }
 )
