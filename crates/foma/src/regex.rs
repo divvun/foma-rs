@@ -27,9 +27,10 @@ use crate::constructions::{
     fsm_concat_m_n, fsm_concat_n, fsm_contains, fsm_contains_one, fsm_contains_opt_one,
     fsm_context_restrict, fsm_cross_product, fsm_equal_substrings, fsm_flatten, fsm_follows,
     fsm_ignore, fsm_intersect, fsm_invert, fsm_kleene_plus, fsm_kleene_star, fsm_left_rewr,
-    fsm_lenient_compose, fsm_letter_machine, fsm_mark_fsm_tail, fsm_minus, fsm_optionality,
-    fsm_precedes, fsm_priority_union_lower, fsm_priority_union_upper, fsm_quotient_left,
-    fsm_shuffle, fsm_substitute_symbol, fsm_symbol, fsm_term_negation, fsm_union,
+    fsm_lenient_compose, fsm_letter_machine, fsm_mark_fsm_tail, fsm_minus, fsm_network_to_char,
+    fsm_optionality, fsm_precedes, fsm_priority_union_lower, fsm_priority_union_upper,
+    fsm_quotient_left, fsm_shuffle, fsm_substitute_label, fsm_substitute_symbol, fsm_symbol,
+    fsm_term_negation, fsm_union,
 };
 use crate::define::{add_defined, find_defined, find_defined_function, remove_defined};
 use crate::determinize::fsm_determinize;
@@ -521,7 +522,22 @@ fn build_builtin(
         | "loweruniqeps" | "allfinal" | "unambpart" | "ambpart" | "ambdom" | "addsink"
         | "close" | "closeu" => 1,
         "marktail" | "addfinalloop" | "addnonfinalloop" | "addloop" | "leftrewr" | "flatten" => 2,
-        "eq" => 3,
+        "eq" | "sublabel" => 3,
+        /* _S( is not a plain builtin. All three regex.y productions (~378-380)
+        take a quantifier-bound VAR on at least one side, and VAR exists only
+        inside foma's first-order-logic sublanguage — regex.l classifies an
+        identifier as VAR iff a preceding (∀x)/(∃x) binder registered it in a
+        live table. That sublanguage is not implemented here, and upstream C
+        foma does not currently reproduce its own documented semantics for it
+        (foma's help gives $.A == (∃x)(x ∈ A ∧ ¬(∃y)(y ∈ A ∧ ¬(x = y))); C
+        compiles the two to non-equivalent networks), so there is no working
+        reference to port against. Report rather than guess. */
+        "S" => {
+            tracing::error!(
+                "Syntax error: _S( needs a variable bound by an enclosing (∀x)/(∃x) quantifier; foma's first-order-logic sublanguage is not supported"
+            );
+            return None;
+        }
         _ => {
             tracing::error!("Syntax error: unknown builtin function _{}(", name);
             return None;
@@ -601,6 +617,24 @@ fn build_builtin(
             let r = fsm_equal_substrings(opts, first, &mut left, &mut right);
             fsm_destroy(left);
             fsm_destroy(right);
+            r
+        }
+        /* regex.y: fsm_substitute_label($2, fsm_network_to_char($4), $6) — the
+        label to replace is named by a network, of whose alphabet C takes the
+        last (highest-numbered) symbol. An empty alphabet has no such symbol,
+        so there is nothing to substitute and the net comes back unchanged. */
+        "sublabel" => {
+            let label_net = it.next().expect("arity 3");
+            let mut replacement = it.next().expect("arity 3");
+            let label = fsm_network_to_char(&label_net);
+            fsm_destroy(label_net);
+            let mut first = first;
+            let r = match label.as_deref() {
+                Some(l) => fsm_substitute_label(opts, &mut first, l, &mut replacement),
+                None => fsm_copy(&mut first),
+            };
+            fsm_destroy(first);
+            fsm_destroy(replacement);
             r
         }
         _ => unreachable!("arity table and dispatch cover the same names"),
@@ -1148,6 +1182,20 @@ mod tests {
         }
     }
 
+    /// Enumerate the words of the net `src` compiles to, sorted.
+    fn words_of(opts: &FomaOptions, src: &str) -> Vec<String> {
+        use crate::apply::{apply_init, apply_words};
+        let net = super::fsm_parse_regex(opts, src, None, None).expect("regex compiles");
+        let mut h = apply_init(&net);
+        let mut v = Vec::new();
+        while let Some(w) = apply_words(&mut h) {
+            v.push(w);
+        }
+        v.sort();
+        v.dedup();
+        v
+    }
+
     /// Enumerate the lower-side outputs of `word` through `src`, sorted.
     fn down_all(opts: &FomaOptions, src: &str, word: &str) -> Vec<String> {
         use crate::apply::{apply_down, apply_init};
@@ -1241,6 +1289,7 @@ mod tests {
             "_addloop(a, b)",
             "_leftrewr(a, b:c)",
             "_flatten(a:b, x)",
+            "_sublabel(a b c, b, x)",
         ] {
             assert!(
                 super::fsm_parse_regex(opts, src, None, None).is_some(),
@@ -1257,6 +1306,35 @@ mod tests {
         let opts = &FomaOptions::default();
         assert!(super::fsm_parse_regex(opts, "_lm(a, b)", None, None).is_none());
         assert!(super::fsm_parse_regex(opts, "_eq(a, b)", None, None).is_none());
+        assert!(super::fsm_parse_regex(opts, "_sublabel(a, b)", None, None).is_none());
+    }
+
+    // regex.y: fsm_substitute_label($2, fsm_network_to_char($4), $6) — splice a
+    // network in for every arc carrying one label. The label is named by a
+    // network, of whose alphabet C takes the LAST (highest-numbered) symbol, so
+    // `[a|b|c]` names `c`, not `a`. Verified against C foma built from source.
+    // [spec:foma:sem:foma.my-yyparse-fn/test]
+    // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
+    #[test]
+    fn builtin_sublabel_splices_a_network_for_one_label() {
+        let opts = &FomaOptions::default();
+        assert_eq!(
+            words_of(opts, "_sublabel(a b c, b, [x|y])"),
+            vec!["axc", "ayc"]
+        );
+        /* sigma of [a|b|c] is {a,b,c}; the last entry names the label. */
+        assert_eq!(words_of(opts, "_sublabel(a b c, [a|b|c], x)"), vec!["abx"]);
+        /* a label absent from the net leaves it unchanged */
+        assert_eq!(words_of(opts, "_sublabel(a b c, z, x)"), vec!["abc"]);
+    }
+
+    // _S( needs a quantifier-bound variable, which requires foma's
+    // first-order-logic sublanguage; it reports that instead of mis-dispatching.
+    // [spec:foma:sem:foma.my-yyparse-fn/test]
+    #[test]
+    fn builtin_successor_of_is_reported_unsupported() {
+        let opts = &FomaOptions::default();
+        assert!(super::fsm_parse_regex(opts, "_S(a, b)", None, None).is_none());
     }
 
     #[test]
