@@ -30,7 +30,7 @@ use crate::constructions::{
     fsm_lenient_compose, fsm_letter_machine, fsm_mark_fsm_tail, fsm_minus, fsm_network_to_char,
     fsm_optionality, fsm_precedes, fsm_priority_union_lower, fsm_priority_union_upper,
     fsm_quotient_left, fsm_shuffle, fsm_substitute_label, fsm_substitute_symbol, fsm_symbol,
-    fsm_term_negation, fsm_union,
+    fsm_term_negation, fsm_union, fsm_universal,
 };
 use crate::define::{add_defined, find_defined, find_defined_function, remove_defined};
 use crate::determinize::fsm_determinize;
@@ -40,10 +40,11 @@ use crate::minimize::fsm_minimize;
 use crate::reverse::fsm_reverse;
 use crate::rewrite::fsm_rewrite;
 use crate::structures::{
-    fsm_boolean, fsm_copy, fsm_destroy, fsm_empty_string, fsm_extract_ambiguous,
-    fsm_extract_ambiguous_domain, fsm_extract_nonidentity, fsm_extract_unambiguous, fsm_identity,
-    fsm_isempty, fsm_isfunctional, fsm_isidentity, fsm_isunambiguous, fsm_lowerdet,
-    fsm_lowerdeteps, fsm_markallfinal,
+    Quantifiers, add_quantifier, count_quantifiers, find_quantifier, fsm_boolean, fsm_copy,
+    fsm_destroy, fsm_empty_string, fsm_extract_ambiguous, fsm_extract_ambiguous_domain,
+    fsm_extract_nonidentity, fsm_extract_unambiguous, fsm_identity, fsm_isempty, fsm_isfunctional,
+    fsm_isidentity, fsm_isunambiguous, fsm_logical_eq, fsm_logical_precedence, fsm_lowerdet,
+    fsm_lowerdeteps, fsm_markallfinal, fsm_quantifier, purge_quantifier, union_quantifiers,
 };
 use crate::trie::{
     THASH_TABLESIZE, fsm_trie_done, fsm_trie_end_word, fsm_trie_init_sized, fsm_trie_symbol,
@@ -69,11 +70,20 @@ struct ParseState {
     depth: i32,
     /* C: `unsigned int g_internal_sym = 23482342;` */
     internal_sym: u32,
+    /* C kept the bound first-order variables in a file-static list that the
+    LEXER consulted: an identifier returned VAR (not NET) iff find_quantifier
+    matched, and `=` returned EQUALS only while count_quantifiers() > 0.
+    nfst-xre is a context-free lexer and cannot make that call, so the table
+    lives here and the classification happens during the tree walk — a binder
+    is registered before its body is built, which reproduces the scope the C
+    lexer produced for well-formed input. */
+    quantifiers: Quantifiers,
 }
 
 impl ParseState {
     fn new() -> ParseState {
         ParseState {
+            quantifiers: Quantifiers::default(),
             depth: 0,
             internal_sym: 23482342,
         }
@@ -226,10 +236,15 @@ fn build_net(
         // ──────────────── grouping ────────────────
         XreExpr::Group(inner) => build_net(opts, ps, &inner.value, nets, funcs),
         XreExpr::Optional(inner) => {
-            /* regex.y LPAREN network RPAREN: fsm_optionality (no quantifier can
-            reach us, so count_quantifiers() is always 0 here). */
+            /* regex.y LPAREN network RPAREN:
+                 if (count_quantifiers()) $$ = $2; else $$ = fsm_optionality($2);
+            inside a quantified formula the parens are plain grouping. */
             let n = build_net(opts, ps, &inner.value, nets, funcs)?;
-            Some(fsm_optionality(opts, n))
+            if count_quantifiers(&ps.quantifiers) > 0 {
+                Some(n)
+            } else {
+                Some(fsm_optionality(opts, n))
+            }
         }
         XreExpr::BracketedDotted(_) => {
             /* `[. E .]` outside a replacement mapping is a syntax error in the C
@@ -242,6 +257,14 @@ fn build_net(
         XreExpr::Unary(op, inner) => build_unary(opts, ps, *op, &inner.value, nets, funcs),
 
         // ──────────────── binary ────────────────
+        /* A concatenation spine may be a first-order formula rather than a
+        plain concatenation (regex.y network5/network7). Try that reading
+        first; nothing in it fires without a binder in scope. */
+        XreExpr::Binary(BinaryOp::Concatenate, _, _) => {
+            let mut items = Vec::new();
+            concat_spine(expr, &mut items);
+            build_items(opts, ps, &items, nets, funcs)
+        }
         XreExpr::Binary(op, l, r) => {
             /* Fast path: a union of literal strings compiles straight to a
             trie/DAWG, skipping the O(n^2) pairwise-union fold and the
@@ -300,16 +323,188 @@ fn build_net(
     }
 }
 
-fn build_unary(
+/// Flatten a left-nested concatenation spine into its operands, left to right.
+fn concat_spine<'a>(expr: &'a XreExpr, out: &mut Vec<&'a XreExpr>) {
+    if let XreExpr::Binary(BinaryOp::Concatenate, l, r) = expr {
+        concat_spine(&l.value, out);
+        concat_spine(&r.value, out);
+    } else {
+        out.push(expr);
+    }
+}
+
+/// Strip any unary operators off `expr`, returning them outermost-first along
+/// with the operand. `~(\u{2203}y)` parses as Complement applied to the binder alone,
+/// so the operators have to be lifted over the quantification they really
+/// scope over.
+fn peel_unary(expr: &XreExpr) -> (Vec<UnaryOp>, &XreExpr) {
+    let mut ops = Vec::new();
+    let mut cur = expr;
+    while let XreExpr::Unary(op, inner) = cur {
+        ops.push(*op);
+        cur = &inner.value;
+    }
+    (ops, cur)
+}
+
+/// A `(\u{2200}x)` / `(\u{2203}x)` binder. nfst-xre lexes `\u{2200}x` as a single Symbol
+/// (both are NAME_CH) and the parens as `Optional`, so a binder arrives as
+/// `Optional(Symbol("\u{2200}x"))`. Returns (is_universal, variable name).
+fn binder_of(expr: &XreExpr) -> Option<(bool, &str)> {
+    let XreExpr::Optional(inner) = expr else {
+        return None;
+    };
+    let XreExpr::Symbol(s) = &inner.value else {
+        return None;
+    };
+    let mut cs = s.chars();
+    let universal = match cs.next() {
+        Some('\u{2200}') => true,
+        Some('\u{2203}') => false,
+        _ => return None,
+    };
+    let name = cs.as_str();
+    (!name.is_empty()).then_some((universal, name))
+}
+
+/// The name of a currently-bound first-order variable, if `expr` is one. This
+/// is the tree-walk equivalent of the C lexer returning VAR rather than NET
+/// when `find_quantifier` matched.
+fn bound_var<'a>(ps: &ParseState, expr: &'a XreExpr) -> Option<&'a str> {
+    let XreExpr::Symbol(s) = expr else {
+        return None;
+    };
+    find_quantifier(&ps.quantifiers, s).map(|_| s.as_str())
+}
+
+/// Build a concatenation spine: as a first-order formula when it is one,
+/// otherwise as a plain concatenation.
+fn build_items(
     opts: &FomaOptions,
     ps: &mut ParseState,
-    op: UnaryOp,
-    inner: &XreExpr,
+    items: &[&XreExpr],
+    mut nets: Option<&mut DefinedNetworks>,
+    mut funcs: Option<&mut DefinedFunctions>,
+) -> Option<Fsm> {
+    if let Some(r) = build_logic_spine(opts, ps, items, nets.as_deref_mut(), funcs.as_deref_mut()) {
+        return r;
+    }
+    let mut acc: Option<Fsm> = None;
+    for item in items {
+        match build_net(opts, ps, item, nets.as_deref_mut(), funcs.as_deref_mut()) {
+            Some(n) => {
+                acc = Some(match acc {
+                    Some(a) => fsm_concat(opts, a, n),
+                    None => n,
+                })
+            }
+            None => {
+                if let Some(a) = acc {
+                    fsm_destroy(a);
+                }
+                return None;
+            }
+        }
+    }
+    Some(acc.unwrap_or_else(fsm_empty_string))
+}
+
+/// foma's first-order-logic sublanguage, which C resolved in the lexer through
+/// the live quantifier table. `None` means "not a formula" and the caller falls
+/// back to plain concatenation; nothing here fires without a binder in scope.
+fn build_logic_spine(
+    opts: &FomaOptions,
+    ps: &mut ParseState,
+    items: &[&XreExpr],
     nets: Option<&mut DefinedNetworks>,
     funcs: Option<&mut DefinedFunctions>,
-) -> Option<Fsm> {
-    let net = build_net(opts, ps, inner, nets, funcs)?;
-    Some(match op {
+) -> Option<Option<Fsm>> {
+    if items.is_empty() {
+        return None;
+    }
+
+    /* A leading binder scopes over the whole rest of the spine. regex.y:
+      UQUANT LPAREN network RPAREN
+        -> ~[[Q(x) & ~F] with x -> 0]
+      EQUANT network
+        -> [Q(x) & F] with x -> 0
+    then purge_quantifier(x). Q(x) = \x* x \x* x \x* pins the variable's
+    two position markers; substituting them away projects the formula back
+    onto the object alphabet. Unary operators written before the binder
+    (`~(∃y)…`) actually scope over the quantification, so lift them. */
+    let (ops, head) = peel_unary(items[0]);
+    if let Some((universal, name)) = binder_of(head) {
+        let name = name.to_string();
+        add_quantifier(&mut ps.quantifiers, &name);
+        let body = build_items(opts, ps, &items[1..], nets, funcs);
+        let q = fsm_quantifier(opts, &name);
+        purge_quantifier(&mut ps.quantifiers, &name);
+        let Some(body) = body else {
+            fsm_destroy(q);
+            return Some(None);
+        };
+        let inner = if universal {
+            fsm_intersect(opts, q, fsm_complement(opts, body))
+        } else {
+            fsm_intersect(opts, q, body)
+        };
+        let projected = fsm_substitute_symbol(inner, &name, "@_EPSILON_SYMBOL_@");
+        let mut out = if universal {
+            fsm_complement(opts, projected)
+        } else {
+            projected
+        };
+        for op in ops.into_iter().rev() {
+            out = apply_unary(opts, op, out);
+        }
+        return Some(Some(out));
+    }
+
+    /* The infix relations exist only while a variable is bound. */
+    if count_quantifiers(&ps.quantifiers) == 0 || items.len() < 3 {
+        return None;
+    }
+
+    /* regex.y `VAR IN network5`: [$[x N x]] / union_quantifiers. */
+    if let (Some(v), XreExpr::Symbol(op)) = (bound_var(ps, items[0]), items[1])
+        && op == "\u{2208}"
+    {
+        let v = v.to_string();
+        let rest = build_items(opts, ps, &items[2..], nets, funcs)?;
+        let bracketed = fsm_concat(opts, fsm_symbol(&v), fsm_concat(opts, rest, fsm_symbol(&v)));
+        return Some(Some(fsm_ignore(
+            opts,
+            fsm_contains(opts, bracketed),
+            union_quantifiers(&ps.quantifiers),
+            OP_IGNORE_ALL,
+        )));
+    }
+
+    /* The variable-to-variable relations are exactly three operands wide. */
+    if items.len() != 3 {
+        return None;
+    }
+    let (Some(v1), Some(v2)) = (bound_var(ps, items[0]), bound_var(ps, items[2])) else {
+        return None;
+    };
+    let XreExpr::Symbol(op) = items[1] else {
+        return None;
+    };
+    let (v1, v2) = (v1.to_string(), v2.to_string());
+    Some(Some(match op.as_str() {
+        "=" => fsm_logical_eq(opts, &ps.quantifiers, &v1, &v2),
+        "\u{2260}" => fsm_complement(opts, fsm_logical_eq(opts, &ps.quantifiers, &v1, &v2)),
+        "\u{227A}" => fsm_logical_precedence(opts, &ps.quantifiers, &v1, &v2),
+        /* x \u{227B} y is precedence with the operands swapped */
+        "\u{227B}" => fsm_logical_precedence(opts, &ps.quantifiers, &v2, &v1),
+        _ => return None,
+    }))
+}
+
+/// The unary operators, split out of `build_unary` so the logic layer can
+/// re-apply operators it had to lift over a quantifier.
+fn apply_unary(opts: &FomaOptions, op: UnaryOp, net: Fsm) -> Fsm {
+    match op {
         /* network9 KLEENE_STAR: fsm_kleene_star(fsm_minimize(net)) */
         UnaryOp::Star => fsm_kleene_star(opts, fsm_minimize(opts, net)),
         UnaryOp::Plus => fsm_kleene_plus(opts, net),
@@ -323,7 +518,19 @@ fn build_unary(
         UnaryOp::Containment => fsm_contains(opts, net),
         UnaryOp::ContainmentOnce => fsm_contains_one(opts, net),
         UnaryOp::ContainmentOpt => fsm_contains_opt_one(opts, net),
-    })
+    }
+}
+
+fn build_unary(
+    opts: &FomaOptions,
+    ps: &mut ParseState,
+    op: UnaryOp,
+    inner: &XreExpr,
+    nets: Option<&mut DefinedNetworks>,
+    funcs: Option<&mut DefinedFunctions>,
+) -> Option<Fsm> {
+    let net = build_net(opts, ps, inner, nets, funcs)?;
+    Some(apply_unary(opts, op, net))
 }
 
 /// Collect the branch words of a union-of-strings AST. Returns true with the
@@ -396,6 +603,52 @@ fn build_binary(
     mut nets: Option<&mut DefinedNetworks>,
     mut funcs: Option<&mut DefinedFunctions>,
 ) -> Option<Fsm> {
+    /* regex.y `VAR PRECEDES VAR` / `VAR FOLLOWS VAR`. The ASCII spellings `<`
+    and `>` reach us as Before/After; between two bound variables they are the
+    logical relations instead. (The Unicode spellings ≺/≻ arrive as symbols in
+    a concatenation spine and are handled there.) */
+    if matches!(op, BinaryOp::Before | BinaryOp::After)
+        && count_quantifiers(&ps.quantifiers) > 0
+        && let Some(v2) = bound_var(ps, right).map(str::to_string)
+    {
+        let rel = |ps: &ParseState, v1: &str, v2: &str| {
+            let (lo, hi) = if matches!(op, BinaryOp::Before) {
+                (v1, v2)
+            } else {
+                (v2, v1)
+            };
+            fsm_logical_precedence(opts, &ps.quantifiers, lo, hi)
+        };
+        if let Some(v1) = bound_var(ps, left).map(str::to_string) {
+            return Some(rel(ps, &v1, &v2));
+        }
+        /* xre binds `<`/`>` looser than `&`, where regex.y puts the VAR
+        relation at network5 — tighter. So `A & x < y` reaches us as
+        `[A & x] < y`; re-associate it to `A & [x < y]`. This can only fire
+        when both operands are bound variables, so ordinary network `<` is
+        untouched. */
+        if let XreExpr::Binary(op2, ll, lr) = left
+            && matches!(
+                op2,
+                BinaryOp::Intersect | BinaryOp::Union | BinaryOp::Concatenate
+            )
+            && let Some(v1) = bound_var(ps, &lr.value).map(str::to_string)
+        {
+            let rest = build_net(
+                opts,
+                ps,
+                &ll.value,
+                nets.as_deref_mut(),
+                funcs.as_deref_mut(),
+            )?;
+            let r = rel(ps, &v1, &v2);
+            return Some(match op2 {
+                BinaryOp::Intersect => fsm_intersect(opts, rest, r),
+                BinaryOp::Union => fsm_union(opts, rest, r),
+                _ => fsm_concat(opts, rest, r),
+            });
+        }
+    }
     let l = build_net(opts, ps, left, nets.as_deref_mut(), funcs.as_deref_mut())?;
     let r = build_net(opts, ps, right, nets, funcs)?;
     match op {
@@ -523,21 +776,7 @@ fn build_builtin(
         | "close" | "closeu" => 1,
         "marktail" | "addfinalloop" | "addnonfinalloop" | "addloop" | "leftrewr" | "flatten" => 2,
         "eq" | "sublabel" => 3,
-        /* _S( is not a plain builtin. All three regex.y productions (~378-380)
-        take a quantifier-bound VAR on at least one side, and VAR exists only
-        inside foma's first-order-logic sublanguage — regex.l classifies an
-        identifier as VAR iff a preceding (∀x)/(∃x) binder registered it in a
-        live table. That sublanguage is not implemented here, and upstream C
-        foma does not currently reproduce its own documented semantics for it
-        (foma's help gives $.A == (∃x)(x ∈ A ∧ ¬(∃y)(y ∈ A ∧ ¬(x = y))); C
-        compiles the two to non-equivalent networks), so there is no working
-        reference to port against. Report rather than guess. */
-        "S" => {
-            tracing::error!(
-                "Syntax error: _S( needs a variable bound by an enclosing (∀x)/(∃x) quantifier; foma's first-order-logic sublanguage is not supported"
-            );
-            return None;
-        }
+        "S" => 2,
         _ => {
             tracing::error!("Syntax error: unknown builtin function _{}(", name);
             return None;
@@ -551,6 +790,79 @@ fn build_builtin(
             args.len()
         );
         return None;
+    }
+
+    /* _S( classifies each argument as a bound variable or a network before
+    building anything, so it cannot use the generic argument loop below.
+    regex.y ~378-380, one production per (VAR|network) combination:
+        _S(v1, v2) = ?* v1 ?* v1 UQ v2 ?* v2 ?*
+        _S(v1, N)  = ?* v1 ?* v1 [N / UQ] ?*
+        _S(N, v2)  = ?* [N / UQ] v2 ?* v2 ?*
+    with UQ = union_quantifiers(). There is no network/network form: at least
+    one side must be a variable bound by an enclosing quantifier. */
+    if name == "S" {
+        let a = bound_var(ps, &args[0].value).map(str::to_string);
+        let b = bound_var(ps, &args[1].value).map(str::to_string);
+        if a.is_none() && b.is_none() {
+            tracing::error!(
+                "Syntax error: _S( needs a variable bound by an enclosing quantifier on at least one side"
+            );
+            return None;
+        }
+        let left = match &a {
+            /* ?* v ?* v — the variable's two position markers */
+            Some(v) => fsm_concat(
+                opts,
+                fsm_universal(),
+                fsm_concat(
+                    opts,
+                    fsm_symbol(v),
+                    fsm_concat(opts, fsm_universal(), fsm_symbol(v)),
+                ),
+            ),
+            None => {
+                let n = build_net(
+                    opts,
+                    ps,
+                    &args[0].value,
+                    nets.as_deref_mut(),
+                    funcs.as_deref_mut(),
+                )?;
+                fsm_concat(
+                    opts,
+                    fsm_universal(),
+                    fsm_ignore(opts, n, union_quantifiers(&ps.quantifiers), OP_IGNORE_ALL),
+                )
+            }
+        };
+        let right = match &b {
+            Some(v) => {
+                let tail = fsm_concat(
+                    opts,
+                    fsm_symbol(v),
+                    fsm_concat(
+                        opts,
+                        fsm_universal(),
+                        fsm_concat(opts, fsm_symbol(v), fsm_universal()),
+                    ),
+                );
+                /* with variables on both sides the halves are joined by UQ */
+                if a.is_some() {
+                    fsm_concat(opts, union_quantifiers(&ps.quantifiers), tail)
+                } else {
+                    tail
+                }
+            }
+            None => {
+                let n = build_net(opts, ps, &args[1].value, nets, funcs)?;
+                fsm_concat(
+                    opts,
+                    fsm_ignore(opts, n, union_quantifiers(&ps.quantifiers), OP_IGNORE_ALL),
+                    fsm_universal(),
+                )
+            }
+        };
+        return Some(fsm_concat(opts, left, right));
     }
 
     let mut nets_built: Vec<Fsm> = Vec::new();
@@ -1301,6 +1613,116 @@ mod tests {
     // Wrong arity is rejected rather than silently mis-dispatched.
     // [spec:foma:sem:foma.my-yyparse-fn/test]
     // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
+    /// Assert two regexes compile to the same language.
+    fn assert_equiv(opts: &FomaOptions, lhs: &str, rhs: &str) {
+        let a = super::fsm_parse_regex(opts, lhs, None, None)
+            .unwrap_or_else(|| panic!("lhs failed to compile: {lhs}"));
+        let b = super::fsm_parse_regex(opts, rhs, None, None)
+            .unwrap_or_else(|| panic!("rhs failed to compile: {rhs}"));
+        assert!(
+            fsm_equivalent(opts, a, b),
+            "not equivalent:\n  {lhs}\n  {rhs}"
+        );
+    }
+
+    // foma's first-order-logic sublanguage: a variable denotes a substring,
+    // marked by the two occurrences of its symbol that fsm_quantifier pins
+    // (\x* x \x* x \x*); the binder intersects the body with that constraint
+    // and then substitutes the markers away.
+    //
+    // The reference is foma's own help text (iface.c:217-218), which gives
+    //   $.A == (∃x)(x ∈ A ∧ ¬(∃y)(y ∈ A ∧ ¬(x = y)))
+    // in both the ∃ and ∀ phrasings. NOTE: upstream C foma does not currently
+    // satisfy this — its lexer folds the formula body into a single symbol, so
+    // it compiles the two sides to a 2-state and a 372-state network and
+    // fsm_equivalent reports them unequal. These identities are the spec the C
+    // implementation documents but does not meet.
+    // [spec:foma:sem:foma.my-yyparse-fn/test]
+    // [spec:foma:sem:fomalib.fsm-parse-regex-fn/test]
+    #[test]
+    fn logic_quantifiers_match_documented_identities() {
+        let opts = &FomaOptions::default();
+        /* $.A — contains exactly one A — in both documented phrasings. */
+        assert_equiv(
+            opts,
+            "$.[a|b]",
+            "(\u{2203}x)(x \u{2208} [a|b] & ~(\u{2203}y)(y \u{2208} [a|b] & ~(x = y)))",
+        );
+        assert_equiv(
+            opts,
+            "$.[a|b]",
+            "(\u{2203}x)(x \u{2208} [a|b] & (\u{2200}y)(~(y \u{2208} [a|b] & ~(x = y))))",
+        );
+        /* plain containment, and its negation */
+        assert_equiv(opts, "$[a b]", "(\u{2203}x)(x \u{2208} [a b])");
+        assert_equiv(opts, "~$[a]", "~(\u{2203}x)(x \u{2208} a)");
+    }
+
+    // The variable-to-variable relations. `<`/`>` and the Unicode `\u{227A}`/`\u{227B}`
+    // are the same relation; `\u{2260}` is the negation of `=`.
+    // [spec:foma:sem:foma.my-yyparse-fn/test]
+    // [spec:foma:sem:structures.fsm-logical-precedence-fn/test]
+    // [spec:foma:sem:structures.fsm-logical-eq-fn/test]
+    #[test]
+    fn logic_relations_match_documented_identities() {
+        let opts = &FomaOptions::default();
+        let contains_a_then_b = "$[a ?* b]";
+        /* xre binds `<` looser than `&`, where regex.y binds the VAR relation
+        tighter, so the unparenthesized ASCII form exercises the
+        re-association path; the Unicode spellings bind tightly already. */
+        assert_equiv(
+            opts,
+            contains_a_then_b,
+            "(\u{2203}x)(\u{2203}y)(x \u{2208} a & y \u{2208} b & x < y)",
+        );
+        assert_equiv(
+            opts,
+            contains_a_then_b,
+            "(\u{2203}x)(\u{2203}y)(x \u{2208} a & y \u{2208} b & x \u{227A} y)",
+        );
+        assert_equiv(
+            opts,
+            contains_a_then_b,
+            "(\u{2203}x)(\u{2203}y)(x \u{2208} a & y \u{2208} b & y \u{227B} x)",
+        );
+        /* \u{2260}: "an a, and no other a distinct from it" is again exactly-one-a */
+        assert_equiv(
+            opts,
+            "$.[a] & $[a]",
+            "(\u{2203}x)(x \u{2208} a & ~(\u{2203}y)(y \u{2208} a & x \u{2260} y))",
+        );
+    }
+
+    // _S(x, y): y immediately succeeds x, so requiring an `a` and a `b` in
+    // that relation is exactly "contains the substring a b".
+    // [spec:foma:sem:foma.my-yyparse-fn/test]
+    #[test]
+    fn builtin_successor_of_relates_adjacent_variables() {
+        let opts = &FomaOptions::default();
+        assert_equiv(
+            opts,
+            "$[a b]",
+            "(\u{2203}x)(\u{2203}y)(x \u{2208} a & y \u{2208} b & _S(x, y))",
+        );
+    }
+
+    // Outside a formula nothing above may fire: `(A)` stays optionality and
+    // `<`/`>` stay the before/after network operators.
+    // [spec:foma:sem:foma.my-yyparse-fn/test]
+    #[test]
+    fn logic_layer_is_inert_without_a_binder() {
+        let opts = &FomaOptions::default();
+        assert_equiv(opts, "(a) b", "[a b] | b");
+        assert_eq!(
+            counted(super::fsm_parse_regex(opts, "a < b", None, None).unwrap()).0,
+            2
+        );
+        assert_eq!(
+            counted(super::fsm_parse_regex(opts, "$.[a|b]", None, None).unwrap()).0,
+            2
+        );
+    }
+
     #[test]
     fn builtin_arity_is_checked() {
         let opts = &FomaOptions::default();
