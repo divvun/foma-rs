@@ -17,6 +17,11 @@
 //!   builds — pinned by a test but benign, so it stays C-compatible.
 //! - when the write index has caught up with the read index the post-write
 //!   re-reads of line i observe the remapped values, as in C.
+//!
+//! The C's malloc'd `struct invtable` chains are an index-based pool here (see
+//! `Invtable`), the same discipline minimize.c's inverse-arc index is ported
+//! with, because these chains are one node per transition and an owning `Box`
+//! chain's drop glue recurses once per node.
 
 use crate::constructions::add_fsm_arc;
 use crate::int_stack::IntStack;
@@ -27,9 +32,27 @@ use crate::structures::{fsm_empty, fsm_sigma_destroy};
 use crate::types::{Fsm, Tern};
 
 // [spec:foma:def:coaccessible.invtable]
+/// One inverse-adjacency record: a predecessor state plus the link to the next
+/// record for the same target. The C's `struct invtable *next` is a malloc'd
+/// pointer; here it is an index into the flat pool that holds every record
+/// (`None` ↔ NULL), the same index-based pool discipline minimize.c's
+/// inverse-arc index is ported with. The link order is unchanged.
+///
+/// The pool is not a stylistic choice. An owning `Option<Box<Invtable>>` chain
+/// makes the derived drop glue recurse once per record — dropping the head
+/// drops its `next`, and so on — so teardown costs one stack frame per
+/// transition on the longest chain. A completed machine (fsm_completes, the
+/// complement path) routes every missing (state, symbol) pair to a single sink
+/// state, so that one chain holds Θ(statecount × |sigma|) records: tens of
+/// millions for a real word list, far past any thread stack. Indices make the
+/// teardown a single `Vec` deallocation and drop the per-record malloc too.
+///
+/// `u32` rather than `usize` keeps a record at 12 bytes instead of 24, which
+/// matters at that scale. The pool holds at most statecount + linecount
+/// entries and both are `i32` in the line table, so the index always fits.
 pub struct Invtable {
     pub state: i32,
-    pub next: Option<Box<Invtable>>,
+    pub next: Option<u32>,
 }
 
 // [spec:foma:def:coaccessible.fsm-coaccessible-fn+2]
@@ -42,13 +65,26 @@ pub fn fsm_coaccessible(net: Fsm) -> Fsm {
 
     /* C: fsm = net->states — reads/writes below index net.states directly */
     let mut new_arccount = 0;
-    /* one inverse-adjacency head per state (zeroed) */
-    let mut inverses: Vec<Invtable> = (0..net.statecount)
-        .map(|_| Invtable {
-            state: 0,
-            next: None,
-        })
-        .collect();
+    /* One inverse-adjacency head per state (zeroed), followed by the pool the
+    C malloc'd chain nodes into. Reserving the exact upper bound up front —
+    one pool node per non-self-loop arc — keeps the pool from reallocating,
+    which at tens of millions of records would otherwise double peak memory. */
+    let mut chain_bound = 0usize;
+    {
+        let fsm = net.states.rows();
+        let mut i: i32 = 0;
+        while fsm[i as usize].state_no != -1 {
+            if fsm[i as usize].target != -1 && fsm[i as usize].state_no != fsm[i as usize].target {
+                chain_bound += 1;
+            }
+            i += 1;
+        }
+    }
+    let mut inverses: Vec<Invtable> = Vec::with_capacity(net.statecount as usize + chain_bound);
+    inverses.extend((0..net.statecount).map(|_| Invtable {
+        state: 0,
+        next: None,
+    }));
     let mut coacc: Vec<i32> = vec![0; net.statecount as usize];
     /* only entries of coaccessible states (and slot 0) are ever read back */
     let mut mapping: Vec<i32> = vec![0; net.statecount as usize];
@@ -70,11 +106,10 @@ pub fn fsm_coaccessible(net: Fsm) -> Fsm {
                 if inverses[t as usize].state == -1 {
                     inverses[t as usize].state = s;
                 } else {
-                    /* malloc'd chain node spliced directly after the head */
-                    let temp_i = Box::new(Invtable {
-                        state: s,
-                        next: inverses[t as usize].next.take(),
-                    });
+                    /* pool node spliced directly after the head */
+                    let temp_i = inverses.len() as u32;
+                    let next = inverses[t as usize].next;
+                    inverses.push(Invtable { state: s, next });
                     inverses[t as usize].next = Some(temp_i);
                 }
             }
@@ -102,18 +137,19 @@ pub fn fsm_coaccessible(net: Fsm) -> Fsm {
     while !int_stack.is_empty() {
         let current_state = int_stack.pop();
         /* current_ptr = inverses+current_state; the array-resident head,
-        then its malloc'd chain */
-        let mut current_ptr: Option<&Invtable> = Some(&inverses[current_state as usize]);
+        then its pool-resident chain */
+        let mut current_ptr: Option<usize> = Some(current_state as usize);
         while let Some(p) = current_ptr {
-            if p.state == -1 {
+            let state = inverses[p].state;
+            if state == -1 {
                 break;
             }
-            if coacc[p.state as usize] == 0 {
-                coacc[p.state as usize] = 1;
-                int_stack.push(p.state);
+            if coacc[state as usize] == 0 {
+                coacc[state as usize] = 1;
+                int_stack.push(state);
                 markcount += 1;
             }
-            current_ptr = p.next.as_deref();
+            current_ptr = inverses[p].next.map(|n| n as usize);
         }
         if markcount >= net.statecount {
             /* printf("Already coacc\n");  */
@@ -394,6 +430,58 @@ mod tests {
         assert_eq!(net.statecount, sc);
         assert_eq!(net.linecount, lc);
         assert_eq!(net.arccount, ac);
+        assert_eq!(net.is_pruned, Tern::Yes);
+    }
+
+    // [spec:foma:sem:coaccessible.fsm-coaccessible-fn+2/test]
+    // [spec:foma:sem:fomalib.fsm-coaccessible-fn+2/test]
+    #[test]
+    fn coaccessible_walks_one_chain_node_per_arc() {
+        /* One state with a very large in-degree: the shape fsm_completes
+        gives the sink state of a complemented machine, where every missing
+        (state, symbol) pair lands. Its inverse-adjacency list holds one
+        record per incoming transition, so with an owning Box chain the
+        derived drop glue recursed once per record and aborted the process.
+        K is chosen so that old representation needed ~13 MB of stack, past
+        both the 2 MiB test thread and the 8 MiB main thread. */
+        const K: i32 = 400_000;
+        let mut net = fsm_create("");
+        let mut v = vec![
+            FsmState {
+                state_no: 0,
+                r#in: 0,
+                out: 0,
+                target: 0,
+                final_state: 0,
+                start_state: 0,
+            };
+            (2 * K + 2) as usize
+        ];
+        let mut offset = 0;
+        /* state 0 fans out to states 1..=K */
+        for t in 1..=K {
+            add_fsm_arc(&mut v, offset, 0, 3, 3, t, 0, 1);
+            offset += 1;
+        }
+        /* all of which feed the single final state K+1 */
+        for s in 1..=K {
+            add_fsm_arc(&mut v, offset, s, 3, 3, K + 1, 0, 0);
+            offset += 1;
+        }
+        add_fsm_arc(&mut v, offset, K + 1, -1, -1, -1, 1, 0);
+        offset += 1;
+        add_fsm_arc(&mut v, offset, -1, -1, -1, -1, -1, -1);
+        net.states = v.into();
+        net.statecount = K + 2;
+        net.linecount = 2 * K + 1;
+        net.arccount = 2 * K;
+        let net = fsm_coaccessible(net);
+        /* every state is coaccessible: the early-terminate path, counts
+        unchanged and the line array untouched */
+        assert_eq!(net.statecount, K + 2);
+        assert_eq!(net.linecount, 2 * K + 1);
+        assert_eq!(net.arccount, 2 * K);
+        assert_eq!(net.states.rows()[(2 * K + 1) as usize].state_no, -1);
         assert_eq!(net.is_pruned, Tern::Yes);
     }
 

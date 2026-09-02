@@ -50,6 +50,16 @@ sign-extension (`sh_hashf`, `trie_hashf`, `lexc_symbol_hash`,
   index, mirroring pointer walks.
 - Owned singly/doubly linked lists → `Option<Box<Node>>` chains with the
   same insert/delete order. Where the C keeps a dummy head, keep it.
+  Exception: a chain whose length grows with the size of the machine —
+  with `statecount`, `linecount` or `arccount`, rather than with the
+  alphabet, a single state's degree, a hash bucket or the user's
+  declarations — must instead be an index-based pool (`Vec<Node>` whose
+  `next` is an index, `None` ↔ NULL), keeping the identical link
+  discipline and order. An owning `Box` chain gets derived drop glue that
+  recurses once per node, so teardown costs one stack frame per node and
+  aborts the process on a long chain; the C's `free` loop was iterative
+  and had no such limit. `minimize.c`'s pools and `coaccessible.c`'s
+  inverse table are ported this way.
 - Handles (`apply_handle`, `fsm_construct_handle`, …) → owned structs
   passed `&mut`.
 - C functions that *consume* (free) their `struct fsm *` arguments take

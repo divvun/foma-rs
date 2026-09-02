@@ -135,6 +135,7 @@ assertions (
     {id w11-build-perf, kind @complete, author "brendan@necessary.nu", at 2026-07-15T20:52:23.589799Z}
     {id fsm-substitute-pair, kind @complete, author "brendan@necessary.nu", at 2026-08-12T07:30:10.065812Z}
     {id compose-resource-contract, kind @complete, author "brendan@necessary.nu", at 2026-08-18T08:12:51.808188Z}
+    {id coaccessible-inverse-pool, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:16:14.119846Z}
 )
 
 impl_evidence (

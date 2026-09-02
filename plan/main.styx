@@ -1946,4 +1946,26 @@ children (
             }
         )
     }
+
+    {
+        id coaccessible-inverse-pool
+        title "fsm_coaccessible: index-based inverse-adjacency pool — the owning Box chain's drop glue recursed once per transition, aborting the complement of a large word list"
+        kind @fix
+        sealed true
+        log (
+            {
+                at 2026-09-02T12:16:09.698Z
+                author "brendan@necessary.nu"
+                kind @decision
+                text "Field bug from the lang-smj speller build: `hfst-xfst --format=foma` compiling `~[ @\"corpus.hfst\".u ]` over a 106,824-word corpus aborted with \"has overflowed its stack\". lldb put every frame in core::ptr::drop_glue::<Box<foma::coaccessible::Invtable>> calling itself — not a traversal, the compiler-derived destructor. Invtable was a `next: Option<Box<Invtable>>` chain, so dropping the head of an inverse-adjacency list recursed once per record, and the list holds one record per non-self-loop transition into a state. fsm_completes (the complement path) sends every missing (state, symbol) pair to one sink state, so that sink's list is Theta(statecount * |sigma|): 29,707,239 records for the 106k corpus, ~950 MB of stack against hfst's 512 MiB worker thread. Instrumented chain lengths put the cliff exactly where the arithmetic says it is — 12,378,538 records (396 MiB) passed, 17,476,235 (559 MiB) aborted.\n\nFix: the chain becomes an index-based pool — Invtable.next is an index into the flat Vec that holds every record (None <-> NULL), the same discipline minimize.c's inverse-arc index is already ported with. Identical link order and identical results (outputs byte-identical for every size that worked before); teardown is one Vec deallocation and the per-record malloc is gone, so peak RSS drops ~25%. The capacity is reserved up front from an exact bound so the pool never reallocates. Conventions doc gained the general rule: a chain whose length grows with statecount/linecount/arccount must be an index pool, because C's iterative free loop had no stack cost and Box's drop glue does. Regression test pins a 400,000-record chain; it aborts on the old representation and passes on the new."
+            }
+
+            {
+                at 2026-09-02T12:16:14.119846Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Done (nplan complete)"
+            }
+        )
+    }
 )
