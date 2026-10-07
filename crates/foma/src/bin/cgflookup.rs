@@ -10,11 +10,12 @@
 use std::cell::{Cell, RefCell};
 use std::io::{self, BufRead, BufReader, BufWriter, Stdin, Stdout, Write};
 
+use foma::VERSION_LINE;
 use foma::apply::{apply_clear, apply_down, apply_index, apply_init, apply_up};
 use foma::io::{
     fsm_read_binary_file_multiple, fsm_read_binary_file_multiple_init, parse_leading_i32,
 };
-use foma::structures::{fsm_destroy, fsm_get_library_version_string, fsm_sort_arcs};
+use foma::structures::{fsm_destroy, fsm_sort_arcs};
 use foma::types::{APPLY_INDEX_INPUT, APPLY_INDEX_OUTPUT, ApplyHandle, Fsm};
 
 const DIR_DOWN: i32 = 0;
@@ -201,8 +202,8 @@ fn app_print(result: Option<&str>) {
     }
 }
 
-// [spec:foma:def:cgflookup.main-fn+1]
-// [spec:foma:sem:cgflookup.main-fn+1]
+// [spec:foma:def:cgflookup.main-fn+2]
+// [spec:foma:sem:cgflookup.main-fn+2]
 fn main() {
     // Route library diagnostics (tracing events) to stderr in a compact,
     // CLI-friendly form (LEVEL message, no timestamp/target).
@@ -284,11 +285,9 @@ fn main() {
                 let optarg = go.optarg.clone().unwrap_or_default();
                 WORDSEPARATOR.with_borrow_mut(|s| *s = optarg);
             }
+            // C printed "cgflookup 1.03 (foma library version 0.10.0alpha)".
             b'v' => {
-                out_str(&format!(
-                    "cgflookup 1.03 (foma library version {})\n",
-                    fsm_get_library_version_string()
-                ));
+                out_str(&format!("{}\n", VERSION_LINE));
                 finish(0);
             }
             // -x (advertised in the usage text) disables echoing of the input

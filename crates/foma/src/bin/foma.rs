@@ -19,6 +19,7 @@ use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
 use std::process;
 
+use foma::VERSION_LINE;
 use foma::define::{Defined, add_defined, add_defined_function, find_defined, remove_defined};
 use foma::iface::*;
 use foma::io::file_to_mem;
@@ -26,9 +27,7 @@ use foma::regex::fsm_parse_regex;
 use foma::session::Session;
 use foma::structures::fsm_copy;
 use foma::topsort::fsm_topsort;
-use foma::types::{
-    ApplyDir, BUILD_VERSION, MAJOR_VERSION, MINOR_VERSION, PROMPT_A, PROMPT_MAIN, STATUS_VERSION,
-};
+use foma::types::{ApplyDir, PROMPT_A, PROMPT_MAIN};
 
 /* interface.l: #define RE 0 (regex) / #define DE 1 (define) */
 const RE: i32 = 0;
@@ -39,8 +38,10 @@ option. */
 const USAGESTRING: &str =
     "Usage: foma [-e \"command\"] [-f run-once-script] [-l startupscript] [-p] [-q] [-s] [-v]\n";
 
-/* C: `char disclaimer[] = ...` (foma.c) — the startup banner. */
-const DISCLAIMER: &str = "Foma, version 0.10.0\nCopyright © 2008-2021 Mans Hulden\nThis is free software; see the source code for copying conditions.\nThere is ABSOLUTELY NO WARRANTY; for details, type \"help license\"\n\nType \"help\" to list all commands available.\nType \"help <topic>\" or help \"<operator>\" for further help.\n\n";
+/* C: `char disclaimer[] = ...` (foma.c) — the startup banner, printed after
+VERSION_LINE. C opened it with "Foma, version 0.10.0" and the copyright line;
+here the Divvun foma version line leads and the upstream attribution follows. */
+const DISCLAIMER: &str = "Based on Foma 0.10.0, Copyright © 2008-2021 Mans Hulden\nThis is free software; see the source code for copying conditions.\nThere is ABSOLUTELY NO WARRANTY; for details, type \"help license\"\n\nType \"help\" to list all commands available.\nType \"help <topic>\" or help \"<operator>\" for further help.\n\n";
 
 /* Front-end behavior variables. C: `int pipe_mode`, `static int use_readline`,
 `int promptmode`, `int apply_direction`, plus interface.l's `int input_is_file`.
@@ -134,8 +135,8 @@ fn print_help() {
     println!("-v\t\tprint version number");
 }
 
-// [spec:foma:def:foma.main-fn]
-// [spec:foma:sem:foma.main-fn]
+// [spec:foma:def:foma.main-fn+1]
+// [spec:foma:sem:foma.main-fn+1]
 fn main() {
     // Route library diagnostics (tracing events) to stderr in a compact,
     // CLI-friendly form. Library INFO events are already gated behind the
@@ -149,7 +150,6 @@ fn main() {
         .try_init();
 
     let args: Vec<String> = std::env::args().collect();
-    let argv0 = args.first().cloned().unwrap_or_else(|| "foma".to_string());
 
     let mut session = Session::new();
     // DEVIATION from C: `srand((unsigned int)time(NULL))` seeds dynarray's
@@ -214,10 +214,9 @@ fn main() {
                     process::exit(0);
                 }
                 'v' => {
-                    println!(
-                        "{} {}.{}.{}{}",
-                        argv0, MAJOR_VERSION, MINOR_VERSION, BUILD_VERSION, STATUS_VERSION
-                    );
+                    // C printed "argv[0] 0.10.0alpha": the invoking path and the
+                    // upstream library version.
+                    println!("{}", VERSION_LINE);
                     process::exit(0);
                 }
                 _ => usage_err(),
@@ -227,6 +226,7 @@ fn main() {
     }
 
     if PIPE_MODE.with(|p| p.get()) == 0 && session.opts.verbose {
+        println!("{}", VERSION_LINE);
         print!("{}", DISCLAIMER);
     }
     loop {

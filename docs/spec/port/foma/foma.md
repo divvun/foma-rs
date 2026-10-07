@@ -1157,7 +1157,7 @@
 > [spec:foma:def:foma.main-fn]
 > int main(int argc, char *argv[])
 
-> [spec:foma:sem:foma.main-fn]
+> [spec:foma:sem:foma.main-fn+1]
 > Implemented in foma/foma.c. Startup: stack_init(); srand(time(NULL)); g_defines =
 > defined_networks_init(); g_defines_f = defined_functions_init(). Then a getopt loop with
 > option string "e:f:hl:pqrsv", options acted on in command-line order: -e ARG runs
@@ -1166,9 +1166,17 @@
 > then exit(0) (it also exits 0 when the file could not be read); -h calls print_help() and
 > exit(0); -l FILE is like -f but frees the buffer and continues instead of exiting; -p sets
 > pipe_mode = 1; -q sets g_verbose = 0; -r sets use_readline = 0; -s exit(0) immediately; -v
-> prints "argv[0] MAJOR.MINOR.BUILD STATUS\n" (e.g. "foma 0.10.0alpha") and exit(0); any
-> unknown option prints the usage string to stderr and exit(EXIT_FAILURE). After options:
-> unless pipe_mode or !g_verbose, prints the multi-line version/copyright disclaimer banner.
+> prints the Divvun foma version line and exit(0); any unknown option prints the usage string
+> to stderr and exit(EXIT_FAILURE). The version line is exactly one line, "Divvun foma
+> v<version> (<date>, <rev>)\n": <version> is the Cargo package version, <date> the UTC build
+> date as YYYY-MM-DD (taken from SOURCE_DATE_EPOCH when set), and <rev> the short git
+> revision of the build, suffixed "-dirty" when the tree had uncommitted changes and
+> "unknown" when built outside a git checkout. It never names argv[0]. The C source printed
+> "argv[0] MAJOR.MINOR.BUILD STATUS\n" (e.g. "foma 0.10.0alpha"): the invoking path and the
+> upstream library version. After options: unless pipe_mode or !g_verbose, prints the
+> multi-line banner: the version line, then "Based on Foma 0.10.0, Copyright © 2008-2021
+> Mans Hulden", the free-software and no-warranty lines, a blank line and the two help hints.
+> The C banner opened with "Foma, version 0.10.0" and "Copyright © 2008-2021 Mans Hulden".
 > Readline is configured with rl_basic_word_break_characters = " >" and
 > rl_attempted_completion_function = my_completion. The REPL then loops forever: the prompt is
 > "foma[N]: " (N = stack_size()) when promptmode == PROMPT_MAIN, or "apply down> " /

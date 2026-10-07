@@ -1990,4 +1990,34 @@ children (
             }
         )
     }
+
+    {
+        id divvun-version-line
+        title "Version output identifies Divvun foma: foma/flookup/cgflookup -v and the foma banner print \"Divvun foma v<version> (<date>, <rev>)\", stamped at build time; Mans Hulden attribution kept"
+        kind @fix
+        sealed true
+        log (
+            {
+                at 2026-10-07T14:10:20.495226Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Doing (nplan start)"
+            }
+
+            {
+                at 2026-10-07T14:14:23.578977Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Doing → Done (nplan complete)"
+            }
+
+            {
+                at 2026-10-07T14:14:30.97628Z
+                author "brendan@necessary.nu"
+                kind @decision
+                text "foma-rs is the Divvun product, like hfst: the upstream version text in the CLI was a porting artefact pinned by spec rules. foma -v, flookup -v and cgflookup -v now print one line, foma::VERSION_LINE = \"Divvun foma v<CARGO_PKG_VERSION> (<YYYY-MM-DD>, <short rev>)\". crates/foma/build.rs stamps FOMA_BUILD_DATE (UTC, SOURCE_DATE_EPOCH honoured) and FOMA_BUILD_REV (-dirty for a modified tree, unknown without git); zero build-dependencies, copied from hfst-cli/build.rs, with a scoped allow for clippy::disallowed_methods because the clock ban protects the library on wasm, not the host build script. argv[0] is no longer printed. The interactive banner opens with the same line, then \"Based on Foma 0.10.0, Copyright © 2008-2021 Mans Hulden\" (Apache-2.0 attribution kept), then the rest of the C disclaimer. fsm_get_library_version_string() and the MAJOR/MINOR/BUILD/STATUS constants are untouched: they are the C library's public API, no longer shown in any version line, and the old Rust foma API in divvun/foma also calls the function. Rules bumped: foma.main-fn +1, flookup.main-fn +2, cgflookup.main-fn +2; impl and test annotations re-pinned."
+                after_done true
+            }
+        )
+    }
 )

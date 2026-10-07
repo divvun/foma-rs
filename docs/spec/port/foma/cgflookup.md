@@ -61,7 +61,7 @@
 > [spec:foma:def:cgflookup.main-fn]
 > int main(int argc, char *argv[])
 
-> [spec:foma:sem:cgflookup.main-fn+1]
+> [spec:foma:sem:cgflookup.main-fn+2]
 > Like `[spec:foma:sem:flookup.main-fn]` but stdin-only (no UDP server mode, no Windows
 > socket setup) and with CG cohort output. stdout is set to full buffering over a static
 > 2048-byte buffer (setvbuf _IOFBF).
@@ -73,8 +73,10 @@
 > branch); -s <sep> sets separator (default "\t"; note it is never used — there is no echo
 > mode); -u sets mark_uppercase and calls setlocale(LC_CTYPE, "") (on failure prints "Check
 > uppercase flag is on, but can't set locale!" to stderr and continues); -w <sep> word
-> separator (default "" — empty, unlike flookup's "\n"); -v print "cgflookup 1.03 (foma
-> library version <v>)" and exit 0; -x (advertised in the usage text; disables echo, a no-op
+> separator (default "" — empty, unlike flookup's "\n"); -v print the one Divvun foma
+> version line, "Divvun foma v<version> (<date>, <rev>)", exactly as
+> `[spec:foma:sem:foma.main-fn]` defines it, and exit 0 (the C source printed "cgflookup
+> 1.03 (foma library version <v>)"); -x (advertised in the usage text; disables echo, a no-op
 > since cgflookup does not echo) is accepted and ignored. The C source had no case for -x, so
 > it printed the usage string to stderr and exit(EXIT_FAILURE). 'H' is in the optstring but
 > has no switch case, so it (like any unknown option, or a missing file operand optind == argc)

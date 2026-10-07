@@ -80,26 +80,63 @@ fn s(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+/// Asserts `line` is the Divvun foma version line,
+/// "Divvun foma v<CARGO_PKG_VERSION> (<YYYY-MM-DD>, <rev>)", where <rev> is a
+/// short git hash (optionally "-dirty") or "unknown" outside a git checkout.
+/// The date and hash change with every build, so only their shape is pinned.
+fn assert_version_line(line: &str) {
+    let prefix = format!("Divvun foma v{} (", env!("CARGO_PKG_VERSION"));
+    let stamp = line
+        .strip_prefix(prefix.as_str())
+        .and_then(|rest| rest.strip_suffix(')'))
+        .unwrap_or_else(|| panic!("not a Divvun foma version line: {line:?}"));
+    let (date, rev) = stamp
+        .split_once(", ")
+        .unwrap_or_else(|| panic!("no date and revision in {line:?}"));
+    let date_ok = date.len() == 10
+        && date.char_indices().all(|(i, c)| match i {
+            4 | 7 => c == '-',
+            _ => c.is_ascii_digit(),
+        });
+    assert!(date_ok, "build date {date:?} is not YYYY-MM-DD");
+    let hash = rev.strip_suffix("-dirty").unwrap_or(rev);
+    let rev_ok =
+        rev == "unknown" || (hash.len() >= 7 && hash.chars().all(|c| c.is_ascii_hexdigit()));
+    assert!(
+        rev_ok,
+        "build revision {rev:?} is neither a short hash nor unknown"
+    );
+}
+
+/// Asserts a `-v` run printed exactly one line: the Divvun foma version line.
+fn assert_version_output(out: &[u8]) {
+    let text = s(out);
+    let line = text
+        .strip_suffix('\n')
+        .unwrap_or_else(|| panic!("version output has no trailing newline: {text:?}"));
+    assert!(
+        !line.contains('\n'),
+        "version output is not one line: {text:?}"
+    );
+    assert_version_line(line);
+}
+
 // ─────────────────────────────── foma binary ───────────────────────────────
 
-// main-fn: `-v` prints "argv[0] MAJOR.MINOR.BUILD STATUS\n" and exit(0). argv[0]
-// is the spawned path, so we assert the version suffix.
-// [spec:foma:sem:foma.main-fn/test]
+// main-fn: `-v` prints the one Divvun foma version line and exit(0). It names
+// neither argv[0] nor the upstream library version.
+// [spec:foma:sem:foma.main-fn+1/test]
 #[test]
 fn foma_v_prints_version_and_exits() {
     let (out, _err, st) = run(foma().arg("-v"), b"");
     assert!(st.success());
-    assert!(
-        s(&out).ends_with(" 0.10.0alpha\n"),
-        "version line was {:?}",
-        s(&out)
-    );
+    assert_version_output(&out);
 }
 
 // main-fn: `-h` calls print_help() and exit(0).
 // print-help-fn: usage string + "Options:\n" + one tab-aligned line per option
 // (-e/-f/-l/-p/-q/-r/-s/-v) — the CLI option "command list".
-// [spec:foma:sem:foma.main-fn/test]
+// [spec:foma:sem:foma.main-fn+1/test]
 // [spec:foma:sem:foma.print-help-fn/test]
 #[test]
 fn foma_h_prints_help() {
@@ -125,7 +162,7 @@ fn foma_h_prints_help() {
 // main-fn: `-q` sets g_verbose = 0, suppressing the startup banner; `-e` runs a
 // command immediately at startup. With no other input the REPL then hits EOF and
 // exits 0. The banner-suppressed run of `quit` produces no output at all.
-// [spec:foma:sem:foma.main-fn/test]
+// [spec:foma:sem:foma.main-fn+1/test]
 #[test]
 fn foma_q_suppresses_banner_and_e_executes() {
     // -q + quit: banner suppressed, quit exits before the EOF newline → empty.
@@ -137,13 +174,22 @@ fn foma_q_suppresses_banner_and_e_executes() {
         s(&out)
     );
 
-    // Default (no -q) prints the multi-line disclaimer banner first.
+    // Default (no -q) prints the multi-line banner first: the version line, then
+    // the upstream attribution, then the rest of the C disclaimer.
     let (out2, _e2, st2) = run(&mut foma(), b"quit\n");
     assert!(st2.success());
-    assert!(
-        s(&out2).starts_with("Foma, version 0.10.0"),
-        "expected banner, got {:?}",
-        s(&out2)
+    let banner = s(&out2);
+    let mut lines = banner.lines();
+    assert_version_line(lines.next().unwrap_or_default());
+    assert_eq!(
+        lines.next(),
+        Some("Based on Foma 0.10.0, Copyright © 2008-2021 Mans Hulden"),
+        "banner was {banner:?}"
+    );
+    assert_eq!(
+        lines.next(),
+        Some("This is free software; see the source code for copying conditions."),
+        "banner was {banner:?}"
     );
 
     // -e executes the given command at startup (regex a b c; leaves it on the
@@ -157,7 +203,7 @@ fn foma_q_suppresses_banner_and_e_executes() {
 // entering the REPL, so there is no trailing EOF newline. This also pins the
 // fix that flex-style scanning stops at the file_to_mem NUL terminator (no
 // spurious "***Unknown command" for the trailing '\0').
-// [spec:foma:sem:foma.main-fn/test]
+// [spec:foma:sem:foma.main-fn+1/test]
 #[test]
 fn foma_f_runs_script_and_quits() {
     let script = temp_path("script");
@@ -172,7 +218,7 @@ fn foma_f_runs_script_and_quits() {
 // main-fn then prints "\n" and exit(0) at the main prompt. Byte-exact `print
 // words` output ("abc") is followed by that EOF newline.
 // [spec:foma:sem:foma.rl-gets-fn/test]
-// [spec:foma:sem:foma.main-fn/test]
+// [spec:foma:sem:foma.main-fn+1/test]
 #[test]
 fn foma_reads_piped_stdin_until_eof() {
     let (out, _err, st) = run(foma().arg("-q"), b"regex a b c;\nprint words\n");
@@ -184,7 +230,7 @@ fn foma_reads_piped_stdin_until_eof() {
 // main-fn: piped multi-command session exercising the interface.l dispatch:
 // apply down/up, define + push, undefine, stack ops (print size, clear stack),
 // echo, and multi-line `regex …;` continuation. Each output is byte-exact.
-// [spec:foma:sem:foma.main-fn/test]
+// [spec:foma:sem:foma.main-fn+1/test]
 #[test]
 fn foma_piped_commands_byte_exact() {
     // apply down: a:b lower-applied to "a" yields "b".
@@ -245,7 +291,7 @@ fn foma_piped_commands_byte_exact() {
 
 // main-fn: the `source` command reads and runs another script, announcing
 // "Opening file '<f>'." first.
-// [spec:foma:sem:foma.main-fn/test]
+// [spec:foma:sem:foma.main-fn+1/test]
 #[test]
 fn foma_source_command() {
     let script = temp_path("source");
@@ -270,7 +316,7 @@ fn foma_source_command() {
 // Each stdin line is read by get_next_line; handle_line walks the one-node chain
 // applying `applyer` (apply_up by default); app_print echoes "line<TAB>result"
 // and "+?" for a miss; main prints the wordseparator ("\n") after each word.
-// [spec:foma:sem:flookup.main-fn+1/test]
+// [spec:foma:sem:flookup.main-fn+2/test]
 // [spec:foma:sem:flookup.get-next-line-fn/test]
 // [spec:foma:sem:flookup.handle-line-fn/test]
 // [spec:foma:sem:flookup.app-print-fn+1/test]
@@ -289,7 +335,7 @@ fn flookup_single_net_up() {
 // applyer-fn: `-i` repoints the applyer to apply_down (direction DIR_DOWN), so
 // the same a:b net now maps "a" (upper) → "b" (lower).
 // [spec:foma:sem:flookup.applyer-fn/test]
-// [spec:foma:sem:flookup.main-fn+1/test]
+// [spec:foma:sem:flookup.main-fn+2/test]
 #[test]
 fn flookup_inverse_down() {
     let net = build_stack("fl_i", &["a:b"]);
@@ -307,7 +353,7 @@ fn flookup_inverse_down() {
 // chain construction (append vs prepend).
 // [spec:foma:sem:flookup.handle-line-fn/test]
 // [spec:foma:def:flookup.lookup-chain/test]
-// [spec:foma:sem:flookup.main-fn+1/test]
+// [spec:foma:sem:flookup.main-fn+2/test]
 #[test]
 fn flookup_cascade_vs_alternates() {
     let net = build_stack("fl_two", &["a:b", "c:d"]);
@@ -325,14 +371,15 @@ fn flookup_cascade_vs_alternates() {
     let _ = std::fs::remove_file(&net);
 }
 
-// main-fn: `-v` prints the version banner and exit 0; a missing file operand and
-// unknown options print the usage string to stderr and exit(EXIT_FAILURE).
-// [spec:foma:sem:flookup.main-fn+1/test]
+// main-fn: `-v` prints the one Divvun foma version line and exit 0; a missing
+// file operand and unknown options print the usage string to stderr and
+// exit(EXIT_FAILURE).
+// [spec:foma:sem:flookup.main-fn+2/test]
 #[test]
 fn flookup_version_and_usage_errors() {
     let (out, _err, st) = run(flookup().arg("-v"), b"");
     assert!(st.success());
-    assert_eq!(out, b"flookup 1.03 (foma library version 0.10.0alpha)\n");
+    assert_version_output(&out);
 
     // Missing file operand → usage on stderr, exit failure.
     let (_o, err, st) = run(&mut flookup(), b"");
@@ -356,7 +403,7 @@ fn flookup_version_and_usage_errors() {
 // `"<word>"` immediately before the first reading; each reading is TAB-indented;
 // a word with no analyses prints only the bare header (main's fallback). The
 // word separator defaults to empty (unlike flookup).
-// [spec:foma:sem:cgflookup.main-fn+1/test]
+// [spec:foma:sem:cgflookup.main-fn+2/test]
 // [spec:foma:sem:cgflookup.get-next-line-fn/test]
 // [spec:foma:sem:cgflookup.handle-line-fn/test]
 // [spec:foma:sem:cgflookup.app-print-fn/test]
@@ -377,7 +424,7 @@ fn cgflookup_cohort_output() {
 // accepting net for the literal string "Abc" (an identity path) reproduces the
 // input on apply_up so the reading equals the (uppercase) input.
 // [spec:foma:sem:cgflookup.app-print-fn/test]
-// [spec:foma:sem:cgflookup.main-fn+1/test]
+// [spec:foma:sem:cgflookup.main-fn+2/test]
 #[test]
 fn cgflookup_uppercase_marking() {
     let up = build_stack("cg_up", &["{Abc}"]);
@@ -400,14 +447,14 @@ fn cgflookup_uppercase_marking() {
     let _ = std::fs::remove_file(&low);
 }
 
-// main-fn: `-v` prints the version and exits 0; missing file operand → usage to
-// stderr and exit(EXIT_FAILURE).
-// [spec:foma:sem:cgflookup.main-fn+1/test]
+// main-fn: `-v` prints the one Divvun foma version line and exits 0; missing
+// file operand → usage to stderr and exit(EXIT_FAILURE).
+// [spec:foma:sem:cgflookup.main-fn+2/test]
 #[test]
 fn cgflookup_version_and_usage_error() {
     let (out, _err, st) = run(cgflookup().arg("-v"), b"");
     assert!(st.success());
-    assert_eq!(out, b"cgflookup 1.03 (foma library version 0.10.0alpha)\n");
+    assert_version_output(&out);
 
     let (_o, err, st) = run(&mut cgflookup(), b"");
     assert!(!st.success());
@@ -420,7 +467,7 @@ fn cgflookup_version_and_usage_error() {
 
 // -x (advertised in the usage text; disables echo, a no-op here since cgflookup
 // never echoes) is accepted rather than erroring out to usage as C did.
-// [spec:foma:sem:cgflookup.main-fn+1/test]
+// [spec:foma:sem:cgflookup.main-fn+2/test]
 #[test]
 fn cgflookup_dash_x_is_accepted() {
     let net = build_stack("cg_x", &["a:b"]);

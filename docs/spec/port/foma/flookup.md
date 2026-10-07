@@ -73,7 +73,7 @@
 > [spec:foma:def:flookup.main-fn]
 > int main(int argc, char *argv[])
 
-> [spec:foma:sem:flookup.main-fn+1]
+> [spec:foma:sem:flookup.main-fn+2]
 > flookup applies words from stdin (or from UDP datagrams in server mode) to one or more
 > nets read from a foma binary file and writes results to stdout. On Windows, Winsock is
 > initialized first (WSAStartup 2.2; failure → "WSAStartup failed" to stderr, return 1),
@@ -85,8 +85,9 @@
 > of up (direction = DIR_DOWN, applyer = apply_down); -q don't sort arcs; -s <sep>
 > input/output separator (default "\t"); -S UDP server mode; -A <addr> server bind
 > address; -P <port> server port (default FLOOKUP_PORT = 6062); -w <sep> word separator
-> (default "\n"); -v print "flookup 1.03 (foma library version <v>)" and exit 0; -x don't
-> echo the input string. -I <arg> arc indexing: arg "f" → index only flag-containing
+> (default "\n"); -v print the one Divvun foma version line, "Divvun foma v<version> (<date>,
+> <rev>)", exactly as `[spec:foma:sem:foma.main-fn]` defines it, and exit 0 (the C source
+> printed "flookup 1.03 (foma library version <v>)"); -x don't echo the input string. -I <arg> arc indexing: arg "f" → index only flag-containing
 > states; arg containing both 'k' and 'K' → memory limit 1024*atoi(arg); both 'm' and 'M'
 > → 1024*1024*atoi(arg); else if arg starts with a digit → index states with >=
 > atoi(arg) arcs. The k/m branches match when the arg contains 'k'/'K' (resp. 'm'/'M'), so

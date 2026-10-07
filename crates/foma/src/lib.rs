@@ -5,6 +5,22 @@
 //! mirror the C source files one-to-one and are added as each Wave-2
 //! concern lands.
 
+/// The one version line the foma, flookup and cgflookup binaries print:
+/// "Divvun foma v<version> (<YYYY-MM-DD>, <rev>)". The version is the
+/// package's; build.rs stamps the UTC build date and the short git revision,
+/// which carries a `-dirty` suffix for a modified tree and reads `unknown`
+/// outside a git checkout. The upstream C library's own version is
+/// `structures::fsm_get_library_version_string`.
+pub const VERSION_LINE: &str = concat!(
+    "Divvun foma v",
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("FOMA_BUILD_DATE"),
+    ", ",
+    env!("FOMA_BUILD_REV"),
+    ")"
+);
+
 pub mod apply;
 pub mod coaccessible;
 pub mod constructions;
