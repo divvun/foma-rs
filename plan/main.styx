@@ -2035,4 +2035,19 @@ children (
             }
         )
     }
+
+    {
+        id remove-github-ci
+        title "Remove the GitHub Actions workflow: Divvun builds and publishes foma-rs on Buildkite only (divvun-actions pipelines/foma-rs.ts)"
+        kind @ci
+        sealed true
+        log (
+            {
+                at 2026-10-07T14:18:36.322055Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Done (nplan complete)"
+            }
+        )
+    }
 )
