@@ -189,16 +189,15 @@ pub(crate) fn print_mem_size(net: &Fsm) {
     s = s.wrapping_add(SIZEOF_FSM);
     s = s.wrapping_add(SIZEOF_FSM_STATE.wrapping_mul(net.linecount as u32));
     let sf = s as f32;
-    let size: String;
-    if s < 1024 {
-        size = format!("{} bytes. ", s);
+    let size: String = if s < 1024 {
+        format!("{} bytes. ", s)
     } else if (1024..1048576).contains(&s) {
-        size = format!("{:.1} kB. ", (sf / 1024.0f32) as f64);
+        format!("{:.1} kB. ", (sf / 1024.0f32) as f64)
     } else if (1048576..1073741824).contains(&s) {
-        size = format!("{:.1} MB. ", (sf / 1048576.0f32) as f64);
+        format!("{:.1} MB. ", (sf / 1048576.0f32) as f64)
     } else {
-        size = format!("{:.1} GB. ", (sf / 1073741824.0f32) as f64);
-    }
+        format!("{:.1} GB. ", (sf / 1073741824.0f32) as f64)
+    };
     print!("{}", size);
     std::io::stdout().flush().expect("flush stdout");
 }

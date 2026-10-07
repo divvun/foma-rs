@@ -2020,4 +2020,19 @@ children (
             }
         )
     }
+
+    {
+        id clippy-needless-late-init
+        title "clippy 1.99's needless_late_init flags five late-initialised locals (apply.rs, iface/common.rs, iface/variables.rs, lexcread.rs, rewrite.rs), failing the lint gate on every commit; initialise each from its if/match expression"
+        kind @refactor
+        sealed true
+        log (
+            {
+                at 2026-10-07T14:16:32.897612Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Done (nplan complete)"
+            }
+        )
+    }
 )

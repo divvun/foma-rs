@@ -138,6 +138,7 @@ assertions (
     {id wave-6-harden, kind @complete, author "brendan@necessary.nu", at 2026-07-07T14:36:45.091671Z}
     {id xre-first-order-logic, kind @complete, author "brendan@necessary.nu", at 2026-08-27T21:31:11.075479002Z}
     {id divvun-version-line, kind @complete, author "brendan@necessary.nu", at 2026-10-07T14:14:23.578977Z}
+    {id clippy-needless-late-init, kind @complete, author "brendan@necessary.nu", at 2026-10-07T14:16:32.897612Z}
 )
 
 impl_evidence (

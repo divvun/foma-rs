@@ -1143,9 +1143,8 @@ fn lexc_add_word(lx: &mut LexcCompiler) {
         }
         follow = 0;
 
-        let target;
-        if lx.cwordin[i + 1] == -1 {
-            target = deststate;
+        let target = if lx.cwordin[i + 1] == -1 {
+            deststate
         } else {
             let newstate = lx.state_arena.len();
             lx.state_arena.push(States {
@@ -1164,8 +1163,8 @@ fn lexc_add_word(lx: &mut LexcCompiler) {
             lx.state_arena[newstate].hashval = lexc_suffix_hash(lx, (i + 1) as i32);
             lx.state_arena[newstate].distance = (len - i as i32 - 1) as u16;
             lx.state_arena[newstate].merge_with = newstate;
-            target = newstate;
-        }
+            newstate
+        };
         let newtrans = lx.trans_arena.len();
         lx.trans_arena.push(Trans {
             r#in: lx.cwordin[i] as i16,

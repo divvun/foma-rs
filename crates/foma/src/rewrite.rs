@@ -177,8 +177,7 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Fsm {
             let _ = dir; /* C: dir is assigned here but only read in the next loop */
             let mut rules = rs.rewrite_rules.as_deref_mut();
             while let Some(r) = rules {
-                let cp: Fsm;
-                if r.right.is_none() {
+                let cp: Fsm = if r.right.is_none() {
                     /* T(x)-type rule */
                     let left_copy = fsm_copy(r.left.as_mut().expect("rule left built for this op"));
                     let mut cp_new = rewrite_cp_transducer(opts, &mut rb, left_copy, rule_number);
@@ -190,7 +189,7 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Fsm {
                     r.left = Some(fsm_minimize(opts, fsm_upper(left_copy)));
                     rewrite_add_special_syms(&rb, r.right.as_mut());
                     rewrite_add_special_syms(&rb, r.left.as_mut());
-                    cp = cp_new;
+                    cp_new
                 } else if r.right2.is_none() {
                     /* Regular rewrite rule */
                     let left_copy = fsm_copy(r.left.as_mut().expect("rule left built for this op"));
@@ -200,7 +199,7 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Fsm {
                     let right_copy = fsm_copy(right);
                     let mut cp_new = rewrite_cp(opts, &mut rb, left_copy, right_copy, rule_number);
                     r.cross_product = Some(fsm_copy(&mut cp_new));
-                    cp = cp_new;
+                    cp_new
                 } else {
                     /* A -> B ... C -type rule */
                     let left_copy = fsm_copy(r.left.as_mut().expect("rule left built for this op"));
@@ -219,8 +218,8 @@ pub fn fsm_rewrite(opts: &FomaOptions, all_rules: &mut RewriteSet) -> Fsm {
                         rule_number,
                     );
                     r.cross_product = Some(fsm_copy(&mut cp_new));
-                    cp = cp_new;
-                }
+                    cp_new
+                };
                 rule_cp = fsm_minimize(opts, fsm_union(opts, rule_cp, cp));
                 rule_number += 1;
                 rules = r.next.as_deref_mut();

@@ -191,15 +191,14 @@ pub fn iface_set_variable(session: &mut Session, name: &str, value: &str) {
         if name == gv.name {
             match gv.field {
                 GvField::Bool(f) => {
-                    let j: bool;
-                    if value == "ON" || value == "1" {
-                        j = true;
+                    let j: bool = if value == "ON" || value == "1" {
+                        true
                     } else if value == "OFF" || value == "0" {
-                        j = false;
+                        false
                     } else {
                         println!("Invalid value '{}' for variable '{}'", value, gv.name);
                         return;
-                    }
+                    };
                     *f(&mut session.opts) = j;
                     println!(
                         "variable {} = {}",

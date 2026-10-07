@@ -414,16 +414,14 @@ pub fn apply_clear(mut h: Box<ApplyHandle>) {
 // [spec:foma:def:apply.apply-updown-fn]
 // [spec:foma:sem:apply.apply-updown-fn]
 pub fn apply_updown(h: &mut ApplyHandle, word: Option<&str>) -> Option<String> {
-    let result: Option<String>;
-
     if h.last_net.as_ref().is_none_or(|n| n.finalcount == 0) {
         return None;
     }
 
-    match word {
+    let result: Option<String> = match word {
         None => {
             h.iterate_old = true;
-            result = apply_net(h);
+            apply_net(h)
         }
         Some(w) => {
             h.iterate_old = false;
@@ -433,9 +431,9 @@ pub fn apply_updown(h: &mut ApplyHandle, word: Option<&str>) -> Option<String> {
 
             /* Remove old marks if necessary */
             apply_force_clear_stack(h);
-            result = apply_net(h);
+            apply_net(h)
         }
-    }
+    };
     result
 }
 
